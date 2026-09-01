@@ -33,6 +33,7 @@ pytest
 ghostdriver list-targets
 ghostdriver probe --pid 1234 --out profile.json
 ghostdriver describe --pid 1234 --depth 5
+ghostdriver describe --pid 1234 --depth 5 --collapse-threshold 1000
 ghostdriver find --pid 1234 --locator 'class=VendorButton text="Expand All"'
 ghostdriver read --pid 1234 --locator 'class=VendorEdit visible=true'
 ```
@@ -52,6 +53,9 @@ gate pass criteria and the shell form for ancestor-scoped locators.
   reading strategy is future work.
 - **Ancestor scoping (`within`) is Python-API-only.** `Locator.parse` has
   no shorthand for it; there is no command-line equivalent in Iteration 1.
+- **No role mapping.** `Locator` carries a `role` field for profiles to
+  populate later, but nothing resolves it yet, so `Locator.parse` rejects
+  `role=` outright rather than accepting a query that would match nothing.
 - **There is no MCP server yet.** Everything above is a CLI that calls the
   same functions an MCP server will call later. The protocol layer arrives
   in Iteration 2.

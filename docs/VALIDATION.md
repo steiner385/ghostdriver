@@ -17,7 +17,7 @@ pip install -e ".[dev]"
 pytest -v
 ```
 
-On Linux the current suite is 69 passed, 25 skipped: the skipped tests are
+On Linux the current suite is 78 passed, 25 skipped: the skipped tests are
 gated on `sys.platform == "win32"` and exercise the Windows backend against
 a native Win32 window, built through ctypes and run in a subprocess. On Windows, none of that platform gate
 applies — the whole suite should run, including every test that skips on
