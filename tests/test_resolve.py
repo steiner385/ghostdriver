@@ -92,56 +92,54 @@ def test_resolve_one_succeeds_when_unique():
 
 
 def nested_within_tree():
-    """Dialog containing Panel with Button; identical Button in Panel outside Dialog.
+    """Two identical Panel > Button subtrees; only one Panel is inside a Dialog.
 
-    Tests nested within constraints: a Button is only matched if its Panel
-    ancestor is inside the specified Dialog ancestor.
+    The panels are deliberately indistinguishable. That is what forces the
+    nested constraint to do the work: a resolver that honours only the first
+    level of `within` matches both buttons, because both sit under a Panel
+    whose own class and text match.
     """
     return node(1, "Root", children=[
-        node(10, "Dialog", "MainDialog", children=[
-            node(11, "Panel", "InnerPanel", children=[
-                node(111, "Button", "SubmitButton"),
+        node(10, "Dialog", "Confirm", children=[
+            node(11, "Panel", "Body", children=[
+                node(12, "Button", "OK"),
             ]),
         ]),
-        node(20, "Panel", "OuterPanel", children=[
-            node(21, "Button", "SubmitButton"),
+        node(20, "Panel", "Body", children=[
+            node(21, "Button", "OK"),
         ]),
     ])
 
 
-def test_nested_within_matches_only_button_inside_dialog():
-    """Nested within constraints must be checked recursively at each level.
+def test_nested_within_requires_every_level_to_match():
+    """Only the button whose Panel sits inside a Dialog may match.
 
-    Without recursive checking, the Button under OuterPanel would incorrectly
-    match because OuterPanel matches the panel constraint; it would only be
-    excluded if we also check that the Panel is inside a Dialog.
+    Against a resolver that checks just the first level of `within`, this
+    returns both buttons — the two Panels are identical, so the Dialog
+    constraint is the only thing that can tell them apart.
     """
-    tree = nested_within_tree()
-    got = resolve(tree, Locator(
-        class_name="Button", text="SubmitButton",
+    got = resolve(nested_within_tree(), Locator(
+        class_name="Button", text="OK",
         within=Locator(
-            class_name="Panel", text="InnerPanel",
-            within=Locator(class_name="Dialog", text="MainDialog", visible=None),
+            class_name="Panel", text="Body",
+            within=Locator(class_name="Dialog"),
         ),
     ))
-    assert [n.handle for n in got] == [111]
+    assert [n.handle for n in got] == [12]
 
 
-def test_nested_within_excludes_button_outside_dialog():
-    """Nested within excludes buttons whose ancestor chains don't satisfy the constraint.
+def test_nested_within_excludes_identical_subtree_outside_the_scope():
+    """The button under the Dialog-less Panel must never match.
 
-    The Button at handle 21 must not match even though it has a Panel ancestor
-    named SubmitButton, because that Panel is not inside a Dialog.
+    Stated separately from the positive case so a resolver that returns
+    both buttons fails on an explicit assertion rather than only on a
+    list-equality mismatch.
     """
-    tree = nested_within_tree()
-    got = resolve(tree, Locator(
-        class_name="Button", text="SubmitButton",
+    got = resolve(nested_within_tree(), Locator(
+        class_name="Button", text="OK",
         within=Locator(
-            class_name="Panel", text="InnerPanel", visible=None,
-            within=Locator(class_name="Dialog", text="MainDialog", visible=None),
+            class_name="Panel", text="Body",
+            within=Locator(class_name="Dialog"),
         ),
     ))
-    # Only the button inside the nested constraint should match
-    assert [n.handle for n in got] == [111]
-    # Verify the button outside the dialog is NOT in the result
     assert 21 not in [n.handle for n in got]
