@@ -44,6 +44,25 @@ def _walk_with_ancestors(
         yield from _walk_with_ancestors(child, ancestors + (node,))
 
 
+def _ancestor_matches(
+    ancestors: tuple[WindowNode, ...], loc: Locator
+) -> bool:
+    """True when some ancestor matches `loc`, including `loc`'s own nested within.
+
+    `ancestors` is ordered root-first, so the ancestors of the element at
+    index i are exactly ancestors[:i]. Scoping is therefore checked against
+    a strictly shorter chain at each level and always terminates.
+    """
+    for i, ancestor in enumerate(ancestors):
+        if not _node_matches(ancestor, loc):
+            continue
+        if loc.within is None:
+            return True
+        if _ancestor_matches(ancestors[:i], loc.within):
+            return True
+    return False
+
+
 def resolve(tree: WindowNode, locator: Locator) -> list[WindowNode]:
     """Return every node matching `locator`, in pre-order.
 
@@ -55,8 +74,8 @@ def resolve(tree: WindowNode, locator: Locator) -> list[WindowNode]:
     for node, ancestors in _walk_with_ancestors(tree):
         if not _node_matches(node, locator):
             continue
-        if locator.within is not None and not any(
-            _node_matches(a, locator.within) for a in ancestors
+        if locator.within is not None and not _ancestor_matches(
+            ancestors, locator.within
         ):
             continue
         matches.append(node)

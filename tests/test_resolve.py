@@ -89,3 +89,59 @@ def test_resolve_one_raises_ambiguous():
 def test_resolve_one_succeeds_when_unique():
     got = resolve_one(stacked_tabs(), Locator(class_name="VendorButton"))
     assert got.handle == 11
+
+
+def nested_within_tree():
+    """Dialog containing Panel with Button; identical Button in Panel outside Dialog.
+
+    Tests nested within constraints: a Button is only matched if its Panel
+    ancestor is inside the specified Dialog ancestor.
+    """
+    return node(1, "Root", children=[
+        node(10, "Dialog", "MainDialog", children=[
+            node(11, "Panel", "InnerPanel", children=[
+                node(111, "Button", "SubmitButton"),
+            ]),
+        ]),
+        node(20, "Panel", "OuterPanel", children=[
+            node(21, "Button", "SubmitButton"),
+        ]),
+    ])
+
+
+def test_nested_within_matches_only_button_inside_dialog():
+    """Nested within constraints must be checked recursively at each level.
+
+    Without recursive checking, the Button under OuterPanel would incorrectly
+    match because OuterPanel matches the panel constraint; it would only be
+    excluded if we also check that the Panel is inside a Dialog.
+    """
+    tree = nested_within_tree()
+    got = resolve(tree, Locator(
+        class_name="Button", text="SubmitButton",
+        within=Locator(
+            class_name="Panel", text="InnerPanel",
+            within=Locator(class_name="Dialog", text="MainDialog", visible=None),
+        ),
+    ))
+    assert [n.handle for n in got] == [111]
+
+
+def test_nested_within_excludes_button_outside_dialog():
+    """Nested within excludes buttons whose ancestor chains don't satisfy the constraint.
+
+    The Button at handle 21 must not match even though it has a Panel ancestor
+    named SubmitButton, because that Panel is not inside a Dialog.
+    """
+    tree = nested_within_tree()
+    got = resolve(tree, Locator(
+        class_name="Button", text="SubmitButton",
+        within=Locator(
+            class_name="Panel", text="InnerPanel", visible=None,
+            within=Locator(class_name="Dialog", text="MainDialog", visible=None),
+        ),
+    ))
+    # Only the button inside the nested constraint should match
+    assert [n.handle for n in got] == [111]
+    # Verify the button outside the dialog is NOT in the result
+    assert 21 not in [n.handle for n in got]
