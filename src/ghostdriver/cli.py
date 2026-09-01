@@ -29,6 +29,16 @@ def build_parser() -> argparse.ArgumentParser:
     describe.add_argument(
         "--all", action="store_true", help="Include hidden windows"
     )
+    describe.add_argument(
+        "--collapse-threshold",
+        type=int,
+        default=3,
+        help=(
+            "Collapse a run of this many same-class siblings into one line, "
+            "hiding their subtrees. Raise it (e.g. 1000) to defeat collapsing "
+            "when it is hiding the controls you need."
+        ),
+    )
 
     find = sub.add_parser("find", help="Resolve a locator")
     find.add_argument("--pid", type=int, required=True)
@@ -75,15 +85,28 @@ def cmd_list_targets() -> int:
     return 0
 
 
-def cmd_describe(pid: int, depth: int, max_nodes: int, show_all: bool) -> int:
+def cmd_describe(
+    pid: int,
+    depth: int,
+    max_nodes: int,
+    show_all: bool,
+    collapse_threshold: int = 3,
+) -> int:
     tree = _main_tree(pid)
     if tree is None:
         return 2
     summary = summarize(
-        tree, max_depth=depth, visible_only=not show_all, max_nodes=max_nodes
+        tree,
+        max_depth=depth,
+        visible_only=not show_all,
+        max_nodes=max_nodes,
+        collapse_threshold=collapse_threshold,
     )
     print(summary.text)
-    print(f"\n{summary.node_count} nodes shown, truncated={summary.truncated}")
+    print(
+        f"\n{summary.node_count} nodes shown, "
+        f"truncated={summary.truncated}, elided={summary.elided_nodes}"
+    )
     if summary.suggested_locators:
         print("\nSuggested locators:")
         for locator in summary.suggested_locators[:30]:
@@ -150,7 +173,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "list-targets":
         return cmd_list_targets()
     if args.command == "describe":
-        return cmd_describe(args.pid, args.depth, args.max_nodes, args.all)
+        return cmd_describe(
+            args.pid, args.depth, args.max_nodes, args.all,
+            args.collapse_threshold,
+        )
     if args.command == "find":
         return cmd_find(args.pid, args.locator)
     if args.command == "read":

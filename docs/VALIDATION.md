@@ -92,6 +92,17 @@ ghostdriver describe --pid <PID> --depth 5
 ghostdriver describe --pid <PID> --depth 5 --max-nodes 60
 ```
 
+**Expect this to take a while.** `describe` builds the tree by sending two
+timeout-capped cross-process reads (`WM_GETTEXTLENGTH` then `WM_GETTEXT`)
+per window. On a ~1,100-window target that is ~2,200 sends. Against a
+target that is pumping messages normally each returns in single-digit
+milliseconds and the whole command finishes in seconds. The ceiling only
+materialises against a target that has stopped pumping: each send then
+costs its full 200 ms timeout, so ~2,200 sends is on the order of several
+minutes. That is slow, not hung — every send carries `SMTO_ABORTIFHUNG`
+and an explicit timeout, so the command cannot block indefinitely. If it
+does appear to hang forever, that is a defect worth reporting.
+
 **Pass:**
 
 - Output is legible and bounded — hundreds of lines, not thousands.
@@ -99,6 +110,23 @@ ghostdriver describe --pid <PID> --depth 5 --max-nodes 60
 - Captions survive collapsing.
 - With `--max-nodes 60`, output ends with an explicit truncation line.
 - `Suggested locators:` lists usable `class=... text="..."` expressions.
+
+**Read the summary line.** It reports `truncated=` and `elided=`. `elided`
+counts descendants dropped because a run of same-class siblings was
+collapsed — their subtrees are not in the output at all, only their count
+and their captions. A `describe` that looks suspiciously short next to a
+large `window_count` from Gate 2 is the signature of this: the top level of
+the tree is a repeated container class and everything inside those
+containers was collapsed away. Re-run with collapsing effectively disabled
+to see them:
+
+```bash
+ghostdriver describe --pid <PID> --depth 5 --collapse-threshold 1000 --max-nodes 2000
+```
+
+If the controls you need for Gate 4 only appear in that second run, say so
+in your report: it means the default threshold is wrong for this shape of
+target.
 
 **This is the scalability gate.** If a real target's tree cannot be
 described within a sensible budget, the summarization thresholds in
