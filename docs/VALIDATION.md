@@ -19,7 +19,7 @@ pytest -v
 
 On Linux the current suite is 69 passed, 25 skipped: the skipped tests are
 gated on `sys.platform == "win32"` and exercise the Windows backend against
-a real Tk window in a subprocess. On Windows, none of that platform gate
+a native Win32 window, built through ctypes and run in a subprocess. On Windows, none of that platform gate
 applies — the whole suite should run, including every test that skips on
 Linux, and all of it must pass. A test that still SKIPS on Windows is not
 a target-specific quirk; it indicates a platform-detection problem

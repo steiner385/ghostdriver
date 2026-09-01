@@ -9,15 +9,15 @@ def _first_hwnd(pid):
 
 
 @on_windows
-def test_assessment_returns_a_populated_result(tk_target):
+def test_assessment_returns_a_populated_result(win32_target):
     from ghostdriver.backends.windows.uia import assess_uia
-    got = assess_uia(_first_hwnd(tk_target))
+    got = assess_uia(_first_hwnd(win32_target))
     assert got.available is True
     assert got.element_count >= 1
 
 
 @on_windows
-def test_richness_is_the_pattern_ratio_it_claims_to_be(tk_target):
+def test_richness_is_the_pattern_ratio_it_claims_to_be(win32_target):
     """Richness must equal with_patterns/element_count, not merely be in range.
 
     Bounds alone cannot fail: richness is in [0,1] by construction, and a
@@ -26,7 +26,7 @@ def test_richness_is_the_pattern_ratio_it_claims_to_be(tk_target):
     element, is what makes the assertion capable of failing.
     """
     from ghostdriver.backends.windows.uia import assess_uia
-    got = assess_uia(_first_hwnd(tk_target))
+    got = assess_uia(_first_hwnd(win32_target))
     assert got.element_count >= 1, "the walk found nothing to compute a ratio over"
     assert 0.0 <= got.richness <= 1.0
     assert got.with_patterns <= got.element_count
@@ -34,13 +34,13 @@ def test_richness_is_the_pattern_ratio_it_claims_to_be(tk_target):
 
 
 @on_windows
-def test_control_type_histogram_is_populated(tk_target):
+def test_control_type_histogram_is_populated(win32_target):
     from ghostdriver.backends.windows.uia import assess_uia
-    assert sum(assess_uia(_first_hwnd(tk_target)).control_type_histogram.values()) >= 1
+    assert sum(assess_uia(_first_hwnd(win32_target)).control_type_histogram.values()) >= 1
 
 
 @on_windows
-def test_raw_view_is_selectable(tk_target):
+def test_raw_view_is_selectable(win32_target):
     """Control view filters elements; raw view does not.
 
     Comparing the two is what distinguishes "the walker was too shallow"
@@ -57,8 +57,8 @@ def test_raw_view_is_selectable(tk_target):
     distinguishes them, which is the Windows validation session's job.
     """
     from ghostdriver.backends.windows.uia import assess_uia
-    control = assess_uia(_first_hwnd(tk_target), view="control")
-    raw = assess_uia(_first_hwnd(tk_target), view="raw")
+    control = assess_uia(_first_hwnd(win32_target), view="control")
+    raw = assess_uia(_first_hwnd(win32_target), view="raw")
     assert control is not raw, "each call must produce its own assessment"
     assert control.available is True, "the control-view walk did not run"
     assert raw.available is True, "the raw-view walk did not run"

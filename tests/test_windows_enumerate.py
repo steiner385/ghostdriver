@@ -5,31 +5,31 @@ from tests.conftest import on_windows
 pytestmark = on_windows
 
 
-@pytest.mark.usefixtures("tk_target")
-def test_finds_top_level_window_for_pid(tk_target):
+@pytest.mark.usefixtures("win32_target")
+def test_finds_top_level_window_for_pid(win32_target):
     from ghostdriver.backends.windows.enumerate import top_level_windows
-    assert len(top_level_windows(tk_target)) >= 1
+    assert len(top_level_windows(win32_target)) >= 1
 
 
-def test_builds_a_tree_with_children(tk_target):
+def test_builds_a_tree_with_children(win32_target):
     from ghostdriver.backends.windows.enumerate import (
         top_level_windows, build_tree,
     )
-    tree = build_tree(top_level_windows(tk_target)[0])
-    assert tree.children, "expected the Tk window to have child controls"
-    assert tree.pid == tk_target
+    tree = build_tree(top_level_windows(win32_target)[0])
+    assert tree.children, "expected the target window to have child controls"
+    assert tree.pid == win32_target
 
 
-def test_tree_nodes_carry_class_and_rect(tk_target):
+def test_tree_nodes_carry_class_and_rect(win32_target):
     from ghostdriver.backends.windows.enumerate import enumerate_process
-    nodes = list(enumerate_process(tk_target)[0].walk())
+    nodes = list(enumerate_process(win32_target)[0].walk())
     assert all(n.class_name for n in nodes)
     for n in nodes:
         left, top, right, bottom = n.rect
         assert right >= left and bottom >= top
 
 
-def test_children_are_direct_not_flattened(tk_target):
+def test_children_are_direct_not_flattened(win32_target):
     """A grandchild must hang off its parent, never off the root.
 
     EnumChildWindows returns every descendant flattened. Under that
@@ -38,7 +38,7 @@ def test_children_are_direct_not_flattened(tk_target):
     working. Depth alone cannot catch it; this checks placement.
     """
     from ghostdriver.backends.windows.enumerate import enumerate_process
-    tree = enumerate_process(tk_target)[0]
+    tree = enumerate_process(win32_target)[0]
     direct = {c.handle for c in tree.children}
     grandchildren = {
         g.handle for c in tree.children for g in c.children
@@ -51,10 +51,10 @@ def test_children_are_direct_not_flattened(tk_target):
     assert tree.depth() >= 3
 
 
-def test_enumeration_is_stable_across_two_calls(tk_target):
+def test_enumeration_is_stable_across_two_calls(win32_target):
     from ghostdriver.backends.windows.enumerate import enumerate_process
-    first = [n.class_name for n in enumerate_process(tk_target)[0].walk()]
-    second = [n.class_name for n in enumerate_process(tk_target)[0].walk()]
+    first = [n.class_name for n in enumerate_process(win32_target)[0].walk()]
+    second = [n.class_name for n in enumerate_process(win32_target)[0].walk()]
     assert first == second
 
 

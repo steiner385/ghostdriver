@@ -7,9 +7,9 @@ def _handles(pid, limit=20):
 
 
 @on_windows
-def test_probes_controls_and_reports_counts(tk_target):
+def test_probes_controls_and_reports_counts(win32_target):
     from ghostdriver.backends.windows.msaa import assess_msaa
-    got = assess_msaa(_handles(tk_target))
+    got = assess_msaa(_handles(win32_target))
     assert got.available is True
     assert got.probed >= 1
 
@@ -36,7 +36,7 @@ def test_verdict_is_unusable_when_nothing_is_named():
 
 
 @on_windows
-def test_counts_never_exceed_the_handles_supplied(tk_target):
+def test_counts_never_exceed_the_handles_supplied(win32_target):
     """Named and actionable counts must not exceed the handles we asked about.
 
     oleacc's default proxy fabricates a title bar, two menu bars and scroll
@@ -47,7 +47,7 @@ def test_counts_never_exceed_the_handles_supplied(tk_target):
     see it, because `probed` is assigned from len(handles) regardless.
     """
     from ghostdriver.backends.windows.msaa import assess_msaa
-    handles = _handles(tk_target, limit=5)
+    handles = _handles(win32_target, limit=5)
     got = assess_msaa(handles)
     assert got.probed == len(handles)
     assert got.named <= got.probed
