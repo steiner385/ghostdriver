@@ -26,6 +26,12 @@ class Locator:
 
         `within` is not expressible in this shorthand; build it in code or
         via from_dict(). Values may be quoted with shlex rules.
+
+        `role` is rejected rather than accepted. The field exists on the
+        dataclass for profiles to populate, but Iteration 1 has no role
+        mapping, so resolution matches nothing for a role predicate.
+        Accepting it here would turn a typo-free query into an unexplained
+        zero-match; refusing it says why.
         """
         fields: dict[str, object] = {}
         for token in shlex.split(expr):
@@ -34,6 +40,13 @@ class Locator:
             key, _, value = token.partition("=")
             if key not in cls._KEYS:
                 raise ValueError(f"unknown locator key: {key!r}")
+            if key == "role":
+                raise ValueError(
+                    "locator key 'role' is not usable yet: role mapping "
+                    "arrives in a later iteration, so a role predicate "
+                    "would match nothing rather than fail. Select on "
+                    "class= or text= instead."
+                )
             if key == "class":
                 fields["class_name"] = value
             elif key == "visible":

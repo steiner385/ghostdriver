@@ -15,9 +15,12 @@ def test_parser_exposes_every_subcommand():
     }
     parser = build_parser()
     for command in ("list-targets", "describe", "find", "read", "probe"):
-        assert parser.parse_args(
+        # argparse.Namespace is always truthy, so asserting on the return
+        # value itself proves nothing. Assert the subcommand was recognised.
+        args = parser.parse_args(
             [command] + extra_args.get(command, ["--pid", "1"])
         )
+        assert args.command == command
 
 
 def test_describe_accepts_depth_and_all_flags():
@@ -26,6 +29,20 @@ def test_describe_accepts_depth_and_all_flags():
     )
     assert args.depth == 7
     assert args.all is True
+
+
+def test_describe_collapse_threshold_defaults_to_three_and_is_settable():
+    """The escape hatch for collapsing must exist and carry a usable default.
+
+    Without it an operator whose target hides its controls behind repeated
+    containers has no way to see them from the command line.
+    """
+    parser = build_parser()
+    assert parser.parse_args(["describe", "--pid", "1"]).collapse_threshold == 3
+    args = parser.parse_args(
+        ["describe", "--pid", "1", "--collapse-threshold", "1000"]
+    )
+    assert args.collapse_threshold == 1000
 
 
 def test_find_requires_a_locator():

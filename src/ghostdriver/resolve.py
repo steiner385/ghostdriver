@@ -30,7 +30,9 @@ def _node_matches(node: WindowNode, loc: Locator) -> bool:
         return False
     # `role` is a normalized label supplied by a profile; Iteration 1 has no
     # role mapping, so a role predicate matches nothing rather than
-    # silently matching everything.
+    # silently matching everything. Locator.parse refuses `role=` outright
+    # for the same reason, so this branch is reachable only from a locator
+    # built in code or loaded from a profile.
     if loc.role is not None:
         return False
     return True

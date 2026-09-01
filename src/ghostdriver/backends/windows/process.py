@@ -86,17 +86,20 @@ def _is_wow64(handle) -> bool | None:
 def _dpi_awareness(handle) -> str:
     try:
         shcore = ctypes.WinDLL("shcore")
+        # AttributeError, not just OSError: a shcore.dll without this export
+        # raises when ctypes resolves the symbol on attribute access. That is
+        # an answer we do not have, not a crash to propagate.
         shcore.GetProcessDpiAwareness.argtypes = [
             wintypes.HANDLE, ctypes.POINTER(ctypes.c_int)
         ]
         shcore.GetProcessDpiAwareness.restype = ctypes.c_long
-    except OSError:
+    except (OSError, AttributeError):
         return "unknown"
     value = ctypes.c_int()
     try:
         if shcore.GetProcessDpiAwareness(handle, ctypes.byref(value)) != 0:
             return "unknown"
-    except OSError:
+    except (OSError, AttributeError):
         return "unknown"
     return DPI_AWARENESS.get(value.value, "unknown")
 

@@ -114,33 +114,66 @@ def cmd_describe(
     return 0
 
 
+#: Printed in place of a control's text when the control never answered.
+#: An empty line would be indistinguishable from a control that answered
+#: and genuinely has no text, which is the one distinction
+#: WindowNode.responsive exists to preserve.
+NO_ANSWER = "<no answer>"
+
+
+def _parse_locator(expr: str) -> Locator | None:
+    """Parse a locator expression, reporting a bad one cleanly.
+
+    Locator.parse raises ValueError naming the offending key. Letting that
+    escape prints a traceback, which in a one-shot remote session buries
+    the one line that says what to type instead.
+    """
+    try:
+        return Locator.parse(expr)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return None
+
+
 def cmd_find(pid: int, expr: str) -> int:
+    locator = _parse_locator(expr)
+    if locator is None:
+        return 2
     tree = _main_tree(pid)
     if tree is None:
         return 2
-    matches = resolve(tree, Locator.parse(expr))
+    matches = resolve(tree, locator)
     if not matches:
         print("no matches", file=sys.stderr)
         return 1
     for node in matches:
         print(
             f"0x{node.handle:08X}  {node.class_name:<32} "
-            f"visible={str(node.visible):<5} rect={node.rect}  {node.text!r}"
+            f"visible={str(node.visible):<5} "
+            f"responsive={str(node.responsive):<5} "
+            f"rect={node.rect}  {node.text!r}"
         )
     print(f"\n{len(matches)} match(es)")
     return 0
 
 
 def cmd_read(pid: int, expr: str) -> int:
+    locator = _parse_locator(expr)
+    if locator is None:
+        return 2
     tree = _main_tree(pid)
     if tree is None:
         return 2
-    matches = resolve(tree, Locator.parse(expr))
+    matches = resolve(tree, locator)
     if not matches:
         print("no matches", file=sys.stderr)
         return 1
     for node in matches:
-        print(node.text)
+        # A control that did not answer carries text="" exactly like a
+        # control that answered with nothing. Printing a blank line for
+        # both would erase the difference at the command this gate exists
+        # to exercise.
+        print(NO_ANSWER if not node.responsive else node.text)
     return 0
 
 
@@ -149,8 +182,12 @@ def cmd_probe(pid: int, out: str | None) -> int:
 
     try:
         document = run_phase1(pid)
-    except RuntimeError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    except (RuntimeError, OSError, AttributeError) as exc:
+        # OSError covers a Win32 call failing or a DLL that will not load;
+        # AttributeError covers a system library missing an export we
+        # declared. Both are environmental, and a one-shot remote session
+        # should get a line it can report rather than a stack dump.
+        print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
     payload = json.dumps(document.to_dict(), indent=2)
     if out:

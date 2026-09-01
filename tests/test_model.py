@@ -81,6 +81,29 @@ def test_locator_rejects_unknown_key():
         Locator.parse("colour=red")
 
 
+def test_locator_parse_rejects_role_with_an_explanation():
+    """`role=` must fail loudly rather than resolve to nothing.
+
+    resolve() returns False for any role predicate in Iteration 1, so a
+    parsed role= locator matches zero elements with no indication why. The
+    error has to say that role mapping is not here yet, not merely that
+    something went wrong.
+    """
+    with pytest.raises(ValueError, match="role") as exc:
+        Locator.parse("role=button")
+    assert "later iteration" in str(exc.value)
+
+
+def test_locator_role_field_survives_construction_in_code():
+    """Only the command-line shorthand rejects role; the field stays.
+
+    Profiles will populate it once role mapping exists, so removing the
+    field would be a different and larger change than closing the CLI hole.
+    """
+    assert Locator(role="button").role == "button"
+    assert Locator.from_dict(Locator(role="button").to_dict()).role == "button"
+
+
 def test_action_result_not_ok_when_postcondition_unverified():
     r = ActionResult(ok=True, tier_used=3, postcondition_verified=False)
     assert r.ok is False
