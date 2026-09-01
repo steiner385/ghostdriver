@@ -1,20 +1,18 @@
 import pytest
 
-from tests.conftest import on_windows
+from tests.conftest import main_tree, on_windows
 
 pytestmark = on_windows
 
 
 def test_reads_caption_of_a_cross_process_control(win32_target):
-    from ghostdriver.backends.windows.enumerate import enumerate_process
-    texts = {n.text for n in enumerate_process(win32_target)[0].walk()}
+    texts = {n.text for n in main_tree(win32_target).walk()}
     assert "Expand All" in texts
     assert "Collapse All" in texts
 
 
 def test_reads_top_level_window_title(win32_target):
-    from ghostdriver.backends.windows.enumerate import enumerate_process
-    assert enumerate_process(win32_target)[0].text == "GhostdriverTestWindow"
+    assert main_tree(win32_target).text == "GhostdriverTestWindow"
 
 
 def test_returns_none_for_a_dead_handle():
@@ -38,7 +36,6 @@ def test_answering_controls_are_marked_responsive(win32_target):
     fake. Its first real execution is against a target in the Windows
     validation session; see Gate 5 of docs/VALIDATION.md.
     """
-    from ghostdriver.backends.windows.enumerate import enumerate_process
-    nodes = list(enumerate_process(win32_target)[0].walk())
+    nodes = list(main_tree(win32_target).walk())
     assert nodes
     assert all(n.responsive for n in nodes)

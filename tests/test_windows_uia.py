@@ -1,17 +1,22 @@
 import pytest
 
-from tests.conftest import on_windows
+from tests.conftest import main_tree, on_windows
 
 
-def _first_hwnd(pid):
-    from ghostdriver.backends.windows.enumerate import top_level_windows
-    return top_level_windows(pid)[0]
+def _main_hwnd(pid):
+    """The main window's handle, selected the way the tool selects it.
+
+    top_level_windows(pid)[0] is Z-order-first, not the application's main
+    window; assessing a stray top-level window would produce a UIA verdict
+    about the wrong thing.
+    """
+    return main_tree(pid).handle
 
 
 @on_windows
 def test_assessment_returns_a_populated_result(win32_target):
     from ghostdriver.backends.windows.uia import assess_uia
-    got = assess_uia(_first_hwnd(win32_target))
+    got = assess_uia(_main_hwnd(win32_target))
     assert got.available is True
     assert got.element_count >= 1
 
@@ -26,7 +31,7 @@ def test_richness_is_the_pattern_ratio_it_claims_to_be(win32_target):
     element, is what makes the assertion capable of failing.
     """
     from ghostdriver.backends.windows.uia import assess_uia
-    got = assess_uia(_first_hwnd(win32_target))
+    got = assess_uia(_main_hwnd(win32_target))
     assert got.element_count >= 1, "the walk found nothing to compute a ratio over"
     assert 0.0 <= got.richness <= 1.0
     assert got.with_patterns <= got.element_count
@@ -36,7 +41,7 @@ def test_richness_is_the_pattern_ratio_it_claims_to_be(win32_target):
 @on_windows
 def test_control_type_histogram_is_populated(win32_target):
     from ghostdriver.backends.windows.uia import assess_uia
-    assert sum(assess_uia(_first_hwnd(win32_target)).control_type_histogram.values()) >= 1
+    assert sum(assess_uia(_main_hwnd(win32_target)).control_type_histogram.values()) >= 1
 
 
 @on_windows
@@ -57,8 +62,8 @@ def test_raw_view_is_selectable(win32_target):
     distinguishes them, which is the Windows validation session's job.
     """
     from ghostdriver.backends.windows.uia import assess_uia
-    control = assess_uia(_first_hwnd(win32_target), view="control")
-    raw = assess_uia(_first_hwnd(win32_target), view="raw")
+    control = assess_uia(_main_hwnd(win32_target), view="control")
+    raw = assess_uia(_main_hwnd(win32_target), view="raw")
     assert control is not raw, "each call must produce its own assessment"
     assert control.available is True, "the control-view walk did not run"
     assert raw.available is True, "the raw-view walk did not run"

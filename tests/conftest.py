@@ -192,6 +192,23 @@ while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
 '''
 
 
+def main_tree(pid: int):
+    """The target's largest window tree, matching how the tool selects it.
+
+    Indexing enumerate_process(pid)[0] takes the first window in Z-order,
+    which is not necessarily the application's main window -- a process can
+    own hidden top-level windows it never created deliberately. runner.py and
+    cli.py both select by node count, so the tests must too, or they verify a
+    different window than the tool reports on.
+    """
+    from ghostdriver.backends.windows.enumerate import enumerate_process
+
+    trees = enumerate_process(pid)
+    if not trees:
+        raise AssertionError(f"pid {pid} has no top-level windows on this desktop")
+    return max(trees, key=lambda t: sum(1 for _ in t.walk()))
+
+
 @pytest.fixture
 def win32_target():
     """Launch a native Win32 window in a subprocess and yield its pid.

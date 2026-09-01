@@ -1,6 +1,6 @@
 import pytest
 
-from tests.conftest import on_windows
+from tests.conftest import main_tree, on_windows
 
 pytestmark = on_windows
 
@@ -12,17 +12,17 @@ def test_finds_top_level_window_for_pid(win32_target):
 
 
 def test_builds_a_tree_with_children(win32_target):
-    from ghostdriver.backends.windows.enumerate import (
-        top_level_windows, build_tree,
-    )
-    tree = build_tree(top_level_windows(win32_target)[0])
+    # main_tree picks the window; build_tree is the thing under test.
+    # top_level_windows(pid)[0] would hand build_tree whichever window is
+    # first in Z-order, which need not be the one with the controls.
+    from ghostdriver.backends.windows.enumerate import build_tree
+    tree = build_tree(main_tree(win32_target).handle)
     assert tree.children, "expected the target window to have child controls"
     assert tree.pid == win32_target
 
 
 def test_tree_nodes_carry_class_and_rect(win32_target):
-    from ghostdriver.backends.windows.enumerate import enumerate_process
-    nodes = list(enumerate_process(win32_target)[0].walk())
+    nodes = list(main_tree(win32_target).walk())
     assert all(n.class_name for n in nodes)
     for n in nodes:
         left, top, right, bottom = n.rect
@@ -37,8 +37,7 @@ def test_children_are_direct_not_flattened(win32_target):
     window, ancestor chains collapse, and `within` scoping silently stops
     working. Depth alone cannot catch it; this checks placement.
     """
-    from ghostdriver.backends.windows.enumerate import enumerate_process
-    tree = enumerate_process(win32_target)[0]
+    tree = main_tree(win32_target)
     direct = {c.handle for c in tree.children}
     grandchildren = {
         g.handle for c in tree.children for g in c.children
@@ -52,9 +51,8 @@ def test_children_are_direct_not_flattened(win32_target):
 
 
 def test_enumeration_is_stable_across_two_calls(win32_target):
-    from ghostdriver.backends.windows.enumerate import enumerate_process
-    first = [n.class_name for n in enumerate_process(win32_target)[0].walk()]
-    second = [n.class_name for n in enumerate_process(win32_target)[0].walk()]
+    first = [n.class_name for n in main_tree(win32_target).walk()]
+    second = [n.class_name for n in main_tree(win32_target).walk()]
     assert first == second
 
 

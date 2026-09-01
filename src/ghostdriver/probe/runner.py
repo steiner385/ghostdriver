@@ -49,8 +49,11 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
     # Spread the sample across the tree rather than taking the first N in
     # pre-order: a contiguous head slice is the root plus one early branch,
     # which is not representative of a tree with a thousand controls.
-    step = max(1, len(nodes) // msaa_sample)
-    sampled = [n.handle for n in nodes[::step]][:msaa_sample]
+    # Floor the cap at 1: a caller passing 0 or a negative would divide by
+    # zero here, losing the whole profile to an argument mistake.
+    cap = max(1, msaa_sample)
+    step = max(1, len(nodes) // cap)
+    sampled = [n.handle for n in nodes[::step]][:cap]
     msaa = assess_msaa(sampled)
 
     try:

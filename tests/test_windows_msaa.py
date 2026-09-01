@@ -1,9 +1,8 @@
-from tests.conftest import on_windows
+from tests.conftest import main_tree, on_windows
 
 
 def _handles(pid, limit=20):
-    from ghostdriver.backends.windows.enumerate import enumerate_process
-    return [n.handle for n in enumerate_process(pid)[0].walk()][:limit]
+    return [n.handle for n in main_tree(pid).walk()][:limit]
 
 
 @on_windows
