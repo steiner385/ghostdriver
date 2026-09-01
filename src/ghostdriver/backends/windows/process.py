@@ -86,6 +86,10 @@ def _is_wow64(handle) -> bool | None:
 def _dpi_awareness(handle) -> str:
     try:
         shcore = ctypes.WinDLL("shcore")
+        shcore.GetProcessDpiAwareness.argtypes = [
+            wintypes.HANDLE, ctypes.POINTER(ctypes.c_int)
+        ]
+        shcore.GetProcessDpiAwareness.restype = ctypes.c_long
     except OSError:
         return "unknown"
     value = ctypes.c_int()
@@ -118,6 +122,12 @@ def _integrity_level(handle) -> str | None:
         # member is a PSID.
         sid = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p))[0]
         count = advapi32.GetSidSubAuthorityCount(sid)[0]
+        if count == 0:
+            # A well-formed mandatory-label SID always carries at least one
+            # sub-authority. Treat a degenerate one as unreadable rather than
+            # indexing past the end: count - 1 would wrap to 0xFFFFFFFF under
+            # the DWORD argtype and read out of bounds.
+            return None
         rid = advapi32.GetSidSubAuthority(sid, count - 1)[0]
         return INTEGRITY_RIDS.get(rid, f"0x{rid:04X}")
     except OSError:
