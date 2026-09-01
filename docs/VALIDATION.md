@@ -190,9 +190,22 @@ ghostdriver read --pid <PID> --locator "class=<EditClass> visible=true"
 **Pass:** real field values are returned, and they match what is on screen.
 No OCR is involved.
 
+`read` prints `<no answer>` for a control that did not answer within the
+timeout, and a genuinely empty line only for a control that answered with
+no text. The two are different facts and must never be read as the same one.
+
 If Gate 2 recorded a non-trivial `unresponsive_count`, treat any missing or
 suspiciously empty values here with that in mind — an unresponsive control
 reports empty text that is unknown, not confirmed blank.
+
+**The `responsive=False` path is unexercised by the test suite.** Every
+control in the test fixture answers, so the suite only ever proves the flag
+is wired the right way round; no test reaches the branch where a control
+fails to answer, and none can without faking the send path. If any control
+here reports `<no answer>` — or `find` shows `responsive=False` — record it
+explicitly in your report, with the control's class and the locator used.
+That is the first time that branch has run anywhere, and confirming it
+behaves is a result of this session, not a footnote to it.
 
 ## Gate 6 — Non-interference
 

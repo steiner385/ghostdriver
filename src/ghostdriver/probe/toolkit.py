@@ -6,9 +6,14 @@ supplies the list, so this is testable without a running process.
 
 When multiple frameworks' signatures are present, the one with the most
 independent signature files is selected. If a tie remains (e.g., both have
-2 files), SIGNATURES order (most-specific-first) breaks the tie. If multiple
-frameworks have the same number of files, confidence is "ambiguous" and the
-competing frameworks are named.
+2 files), SIGNATURES order (most-specific-first) breaks the tie.
+
+Confidence is "ambiguous" whenever a second framework matched at all, not
+only when the counts tie: the selected label is then a ranking, and the
+caller needs to know the answer is contested rather than clean. With a
+single match, confidence is "high" for two or more signature files and
+"medium" for one. With no match at all the toolkit is "unknown" and
+confidence is "low".
 """
 
 import fnmatch

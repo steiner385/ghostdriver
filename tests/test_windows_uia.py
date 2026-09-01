@@ -1,3 +1,5 @@
+import pytest
+
 from tests.conftest import on_windows
 
 
@@ -15,9 +17,20 @@ def test_assessment_returns_a_populated_result(tk_target):
 
 
 @on_windows
-def test_richness_is_a_ratio_between_zero_and_one(tk_target):
+def test_richness_is_the_pattern_ratio_it_claims_to_be(tk_target):
+    """Richness must equal with_patterns/element_count, not merely be in range.
+
+    Bounds alone cannot fail: richness is in [0,1] by construction, and a
+    completely broken UIA path returns 0.0 and passes. Recomputing the ratio
+    from the two counts, and requiring the walk to have found at least one
+    element, is what makes the assertion capable of failing.
+    """
     from ghostdriver.backends.windows.uia import assess_uia
-    assert 0.0 <= assess_uia(_first_hwnd(tk_target)).richness <= 1.0
+    got = assess_uia(_first_hwnd(tk_target))
+    assert got.element_count >= 1, "the walk found nothing to compute a ratio over"
+    assert 0.0 <= got.richness <= 1.0
+    assert got.with_patterns <= got.element_count
+    assert got.richness == pytest.approx(got.with_patterns / got.element_count)
 
 
 @on_windows
@@ -32,11 +45,23 @@ def test_raw_view_is_selectable(tk_target):
 
     Comparing the two is what distinguishes "the walker was too shallow"
     from "the provider genuinely exposes nothing", so both must be
-    reachable.
+    reachable and both must actually run.
+
+    What this can prove: the `view` argument is accepted, each call
+    produces its own assessment, both walks completed, and the raw view is
+    never smaller than the filtered one. What it cannot prove: that the
+    two walks used different tree walkers. On a target whose control view
+    filters nothing out the counts are legitimately equal, so an
+    implementation that ignored `view` entirely would still satisfy the
+    inequality here. Only a target with real filtered-out chrome
+    distinguishes them, which is the Windows validation session's job.
     """
     from ghostdriver.backends.windows.uia import assess_uia
     control = assess_uia(_first_hwnd(tk_target), view="control")
     raw = assess_uia(_first_hwnd(tk_target), view="raw")
+    assert control is not raw, "each call must produce its own assessment"
+    assert control.available is True, "the control-view walk did not run"
+    assert raw.available is True, "the raw-view walk did not run"
     assert raw.element_count >= control.element_count
 
 
