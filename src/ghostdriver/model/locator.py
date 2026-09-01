@@ -1,0 +1,71 @@
+"""Declarative element queries.
+
+A Locator is the only durable way to refer to an element. Handles are
+recycled by the OS and go void when a process exits, so resolution always
+happens against a freshly enumerated tree (spec section 4.2).
+"""
+
+import shlex
+from dataclasses import dataclass, asdict
+
+
+@dataclass(frozen=True, slots=True)
+class Locator:
+    class_name: str | None = None
+    text: str | None = None
+    role: str | None = None
+    within: "Locator | None" = None
+    visible: bool | None = True
+    index: int | None = None
+
+    _KEYS = ("class", "text", "role", "visible", "index")
+
+    @classmethod
+    def parse(cls, expr: str) -> "Locator":
+        """Parse `class=X text="y" visible=false index=0`.
+
+        `within` is not expressible in this shorthand; build it in code or
+        via from_dict(). Values may be quoted with shlex rules.
+        """
+        fields: dict[str, object] = {}
+        for token in shlex.split(expr):
+            if "=" not in token:
+                raise ValueError(f"malformed locator token: {token!r}")
+            key, _, value = token.partition("=")
+            if key not in cls._KEYS:
+                raise ValueError(f"unknown locator key: {key!r}")
+            if key == "class":
+                fields["class_name"] = value
+            elif key == "visible":
+                fields["visible"] = value.strip().lower() in ("1", "true", "yes")
+            elif key == "index":
+                fields["index"] = int(value)
+            else:
+                fields[key] = value
+        return cls(**fields)  # type: ignore[arg-type]
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Locator":
+        data = dict(data)
+        within = data.pop("within", None)
+        return cls(within=cls.from_dict(within) if within else None, **data)
+
+    def describe(self) -> str:
+        """Human-readable form, for error messages."""
+        parts = []
+        if self.class_name:
+            parts.append(f"class={self.class_name}")
+        if self.text:
+            parts.append(f'text="{self.text}"')
+        if self.role:
+            parts.append(f"role={self.role}")
+        if self.visible is not None:
+            parts.append(f"visible={str(self.visible).lower()}")
+        if self.index is not None:
+            parts.append(f"index={self.index}")
+        if self.within:
+            parts.append(f"within({self.within.describe()})")
+        return " ".join(parts) or "<empty locator>"
