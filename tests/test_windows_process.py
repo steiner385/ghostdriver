@@ -57,4 +57,7 @@ def test_reports_integrity_level(win32_target):
 
 def test_unknown_pid_returns_empty_module_list():
     from ghostdriver.backends.windows.process import list_modules
-    assert list_modules(999_999) == []
+    # None, not []: a pid that cannot be read is a different answer from a
+    # process that genuinely loaded nothing, and toolkit inference acts on
+    # the difference.
+    assert list_modules(999_999) is None

@@ -143,3 +143,47 @@ def test_nested_within_excludes_identical_subtree_outside_the_scope():
         ),
     ))
     assert 21 not in [n.handle for n in got]
+
+
+# --- a scope cannot carry an index --------------------------------------
+
+def test_index_inside_within_is_refused_not_ignored():
+    """It used to fail silently, and in the worst direction.
+
+    Ancestor matching asks "is any ancestor like this?" and has no ordered
+    list to index into, so `index` inside `within` had no effect at all --
+    an out-of-range index returned *every* match instead of none, and a
+    locator that read as precise resolved broadly with no warning.
+    """
+    import pytest
+
+    with pytest.raises(ValueError, match="index="):
+        Locator(text="Save", within=Locator(class_name="TabPage", index=2))
+
+
+def test_an_absurd_index_inside_within_is_refused_too():
+    import pytest
+
+    with pytest.raises(ValueError):
+        Locator(text="Save", within=Locator(class_name="TabPage", index=99))
+
+
+def test_refusal_reaches_nested_scopes():
+    import pytest
+
+    with pytest.raises(ValueError):
+        Locator(
+            text="Save",
+            within=Locator(
+                class_name="Outer",
+                within=Locator(class_name="Inner", index=1),
+            ),
+        )
+
+
+def test_index_on_the_outer_locator_is_still_allowed():
+    scoped = Locator(
+        text="Save", index=1, within=Locator(class_name="TabPage")
+    )
+    assert scoped.index == 1
+    assert scoped.within.index is None

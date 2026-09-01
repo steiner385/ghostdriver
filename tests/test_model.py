@@ -116,3 +116,74 @@ def test_error_kind_has_spec_members():
         "TIER_EXHAUSTED", "POSTCONDITION_FAILED", "TIMEOUT",
     ):
         assert hasattr(ErrorKind, name)
+
+
+# --- select_main_tree ---------------------------------------------------
+#
+# These reproduce a real target's shape. A toolkit that minimizes to a
+# taskbar proxy leaves a small always-visible proxy window owning every
+# pooled form in the process, so the proxy wins on total node count while
+# showing nothing. Choosing it made `find ... visible=true` answer "no
+# matches" against a fully visible application.
+
+def _n(handle, class_name, visible=True, children=()):
+    return WindowNode(
+        handle=handle, class_name=class_name, text="", rect=(0, 0, 1, 1),
+        visible=visible, enabled=True, pid=1, children=tuple(children),
+    )
+
+
+def _proxy(n_hidden=8):
+    """Visible frame, every descendant hidden. Large by total count."""
+    kids = [_n(200 + i, "TPooledForm", visible=False) for i in range(n_hidden)]
+    return _n(1, "TApplication", visible=True, children=kids)
+
+
+def _real_ui(n_visible=4, root_visible=True):
+    kids = [_n(300 + i, "TPanel", visible=True) for i in range(n_visible)]
+    return _n(2, "TShellWin", visible=root_visible, children=kids)
+
+
+def test_selects_the_window_showing_ui_not_the_largest():
+    from ghostdriver.model.window import select_main_tree
+
+    proxy = _proxy(n_hidden=20)          # 21 nodes, 1 visible
+    real = _real_ui(n_visible=4)         # 5 nodes, 5 visible
+    assert sum(1 for _ in proxy.walk()) > sum(1 for _ in real.walk())
+    assert select_main_tree([proxy, real]).class_name == "TShellWin"
+    assert select_main_tree([real, proxy]).class_name == "TShellWin"
+
+
+def test_a_visible_frame_alone_does_not_beat_a_hidden_real_window():
+    """The minimized case, and the bug's second form.
+
+    Minimized, the proxy still carries the visible style on its own frame
+    while the real window is hidden outright. Scoring "has any visible
+    node" gives the proxy 1 against the real window's 0 and picks exactly
+    the wrong one again.
+    """
+    from ghostdriver.model.window import select_main_tree
+
+    proxy = _proxy(n_hidden=3)                        # 4 nodes, 1 visible
+    hidden_real = _real_ui(n_visible=0, root_visible=False)
+    hidden_real = WindowNode(
+        handle=2, class_name="TShellWin", text="", rect=(0, 0, 1, 1),
+        visible=False, enabled=True, pid=1,
+        children=tuple(_n(400 + i, "TPanel", visible=False) for i in range(9)),
+    )                                                 # 10 nodes, 0 visible
+    assert select_main_tree([proxy, hidden_real]).class_name == "TShellWin"
+
+
+def test_falls_back_to_size_when_nothing_is_visible_anywhere():
+    from ghostdriver.model.window import select_main_tree
+
+    small = _n(1, "TSmall", visible=False, children=[_n(11, "A", visible=False)])
+    big = _n(2, "TBig", visible=False,
+             children=[_n(20 + i, "B", visible=False) for i in range(6)])
+    assert select_main_tree([small, big]).class_name == "TBig"
+
+
+def test_no_trees_is_none_not_an_error():
+    from ghostdriver.model.window import select_main_tree
+
+    assert select_main_tree([]) is None

@@ -10,6 +10,7 @@ import json
 import sys
 
 from .model.locator import Locator
+from .model.window import select_main_tree
 from .resolve import resolve
 from .summarize import summarize
 
@@ -52,6 +53,16 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--pid", type=int, required=True)
     probe.add_argument("--out", default=None)
 
+    restore = sub.add_parser(
+        "restore",
+        help=(
+            "Bring a minimized target back on screen without taking focus. "
+            "The only command that changes what is on screen; it is never "
+            "run as a side effect of describe, find, read or probe."
+        ),
+    )
+    restore.add_argument("--pid", type=int, required=True)
+
     return parser
 
 
@@ -59,10 +70,11 @@ def _main_tree(pid: int):
     from .backends.windows.enumerate import enumerate_process
 
     trees = enumerate_process(pid)
-    if not trees:
+    tree = select_main_tree(trees)
+    if tree is None:
         print(f"error: pid {pid} has no windows on this desktop", file=sys.stderr)
         return None
-    return max(trees, key=lambda t: sum(1 for _ in t.walk()))
+    return tree
 
 
 def cmd_list_targets() -> int:
@@ -105,8 +117,16 @@ def cmd_describe(
     print(summary.text)
     print(
         f"\n{summary.node_count} nodes shown, "
-        f"truncated={summary.truncated}, elided={summary.elided_nodes}"
+        f"truncated={summary.truncated}, elided={summary.elided_nodes}, "
+        f"below-depth={summary.depth_elided_nodes}"
     )
+    if summary.depth_elided_nodes:
+        # Named separately from `elided` because the remedy differs:
+        # this is --depth, not --collapse-threshold.
+        print(
+            f"  {summary.depth_elided_nodes} nodes lie below --depth "
+            f"{depth}; raise it to see them"
+        )
     if summary.suggested_locators:
         print("\nSuggested locators:")
         for locator in summary.suggested_locators[:30]:
@@ -202,7 +222,67 @@ def cmd_probe(pid: int, out: str | None) -> int:
     return 0
 
 
+def cmd_restore(pid: int) -> int:
+    # Imported here, like every other backend use in this module, so the CLI
+    # stays importable on a host with no Windows backend.
+    from .backends.windows import winapi
+    from .backends.windows.restore import restore_process
+
+    result = restore_process(pid)
+    if not result.restored:
+        print(f"nothing to restore: pid {pid} has no minimized windows")
+        return 0
+
+    print(f"un-minimized {len(result.restored)} window(s): "
+          + ", ".join(f"0x{h:08X}" for h in result.restored))
+    if result.newly_visible:
+        for hwnd in result.newly_visible:
+            left, top, right, bottom = winapi.window_rect(hwnd)
+            print(f"  now on screen: 0x{hwnd:08X}  {winapi.class_name(hwnd)}  "
+                  f"({left}, {top}, {right}, {bottom})")
+    else:
+        # Worth saying plainly rather than reporting success: the owner came
+        # back but the application did not re-show a form, so there may
+        # still be nothing to read.
+        print("  no additional window became visible within the settle "
+              "timeout")
+
+    # Reported every run, not assumed. This command exists precisely because
+    # the obvious implementation of it steals focus.
+    if result.took_foreground:
+        print(f"  WARNING: foreground changed "
+              f"(0x{result.foreground_before:08X} -> "
+              f"0x{result.foreground_after:08X})")
+    else:
+        print("  foreground unchanged")
+    return 0
+
+
+def _use_utf8(stream) -> None:
+    """Force UTF-8 on an output stream, tolerating streams that cannot.
+
+    Windows hands a console-codepage encoder to stdout. Under the common
+    OEM codepage 437 the em dash in a collapsed-run marker raises
+    UnicodeEncodeError and takes the whole command down; under cp1252 it
+    survives but emits cp1252 bytes, so a client decoding this output as
+    UTF-8 -- which any MCP client will -- gets mojibake. The encoding of
+    this tool's output is a property of the tool, not of whichever console
+    it happens to be attached to.
+    """
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return
+    try:
+        reconfigure(encoding="utf-8", errors="backslashreplace")
+    except (OSError, ValueError):
+        # A detached or otherwise unreconfigurable stream. Not worth
+        # failing the command over.
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _use_utf8(sys.stdout)
+    _use_utf8(sys.stderr)
     args = build_parser().parse_args(argv)
     if not args.command:
         print("error: a subcommand is required", file=sys.stderr)
@@ -220,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_read(args.pid, args.locator)
     if args.command == "probe":
         return cmd_probe(args.pid, args.out)
+    if args.command == "restore":
+        return cmd_restore(args.pid)
     return 2
 
 

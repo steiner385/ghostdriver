@@ -20,6 +20,30 @@ class Locator:
 
     _KEYS = ("class", "text", "role", "visible", "index")
 
+    def __post_init__(self) -> None:
+        """Refuse an `index` on a scope, rather than ignoring it.
+
+        Resolution applies `index` to the final match list. Ancestor
+        matching asks a different question -- "is any ancestor like this?"
+        -- and has no ordered list to index into, so an `index` inside
+        `within` had no effect at all. It failed silently and in the worst
+        direction: scoping to `within=Locator(class_name="Tab", index=99)`
+        returned *every* match rather than none, so a locator that reads as
+        precise resolved broadly with nothing to warn the caller.
+
+        Refusing it follows what `parse` already does with `role`: a
+        predicate that cannot mean what it appears to mean is an error, not
+        a silent no-op. Nesting is covered transitively, since every
+        `within` is itself a Locator that ran this check when it was built.
+        """
+        if self.within is not None and self.within.index is not None:
+            raise ValueError(
+                "index= is not usable inside within=: a scope has no "
+                "ordered match list to index into, so it would be silently "
+                "ignored. Put index= on the outer locator to choose among "
+                "its matches, or identify the ancestor by class/text."
+            )
+
     @classmethod
     def parse(cls, expr: str) -> "Locator":
         """Parse `class=X text="y" visible=false index=0`.

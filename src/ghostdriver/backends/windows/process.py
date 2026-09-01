@@ -58,13 +58,26 @@ class ProcessFacts:
     integrity_level: str | None
     dpi_awareness: str
     modules: list[str] = field(default_factory=list)
+    #: False when the module list could not be read. `modules` is then empty
+    #: because nothing was legible, not because nothing matched.
+    modules_readable: bool = True
 
 
-def list_modules(pid: int) -> list[str]:
+def list_modules(pid: int) -> list[str] | None:
+    """Loaded module paths, or None when they could not be read at all.
+
+    None and [] are different answers and must not be conflated. Toolkit
+    inference treats an empty list as "no framework signature is present",
+    which is a real finding about a statically linked target; if a refused
+    handle or a dead process also produced [], the probe would report that
+    same confident finding on no evidence whatsoever. This is the
+    distinction `match_profile` already makes for the UIA assessment when
+    it returns "indeterminate" rather than guessing.
+    """
     try:
         maps = psutil.Process(pid).memory_maps()
     except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
-        return []
+        return None
     seen: list[str] = []
     for entry in maps:
         path = entry.path
@@ -140,6 +153,7 @@ def _integrity_level(handle) -> str | None:
 
 
 def process_facts(pid: int) -> ProcessFacts:
+    modules = list_modules(pid)
     try:
         executable = psutil.Process(pid).exe()
     except (psutil.Error, OSError):
@@ -165,5 +179,6 @@ def process_facts(pid: int) -> ProcessFacts:
     return ProcessFacts(
         pid=pid, executable=executable, bitness=bitness,
         wow64=bool(wow64), integrity_level=integrity,
-        dpi_awareness=dpi, modules=list_modules(pid),
+        dpi_awareness=dpi, modules=modules or [],
+        modules_readable=modules is not None,
     )

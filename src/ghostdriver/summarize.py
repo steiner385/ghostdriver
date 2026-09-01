@@ -28,11 +28,30 @@ class Summary:
     #: node cap, so a caller can tell "the tree is too big" from "repeated
     #: containers swallowed their contents".
     elided_nodes: int = 0
+    #: Descendants dropped by the depth cap -- a third, separate cause. It
+    #: is reported apart from `elided_nodes` because the remedy differs:
+    #: raise --depth, not --collapse-threshold.
+    depth_elided_nodes: int = 0
 
 
-def _label(node: WindowNode) -> str:
+#: Longest caption rendered in full. A real target put a 363-character
+#: dispatch string in an address-bar control; emitted in the tree and again
+#: as a suggested locator, that one control accounted for 17% of the whole
+#: summary -- on the command whose entire purpose is fitting a budget. The
+#: full value stays available through `read`.
+MAX_TEXT = 80
+
+
+def _clip(text: str, max_text: int) -> str:
+    """Shorten a caption, saying how much was withheld rather than eliding silently."""
+    if max_text <= 0 or len(text) <= max_text:
+        return text
+    return f"{text[:max_text]}... (+{len(text) - max_text} more chars)"
+
+
+def _label(node: WindowNode, max_text: int = MAX_TEXT) -> str:
     if node.text:
-        return f'{node.class_name} "{node.text}"'
+        return f'{node.class_name} "{_clip(node.text, max_text)}"'
     return node.class_name
 
 
@@ -59,10 +78,11 @@ def summarize(
     visible_only: bool = True,
     max_nodes: int = 200,
     collapse_threshold: int = 3,
+    max_text: int = MAX_TEXT,
 ) -> Summary:
     lines: list[str] = []
     suggested: list[str] = []
-    state = {"emitted": 0, "capped": False, "elided": 0}
+    state = {"emitted": 0, "capped": False, "elided": 0, "depth_elided": 0}
 
     def visible_children(node: WindowNode) -> list[WindowNode]:
         return [c for c in node.children if c.visible or not visible_only]
@@ -77,17 +97,29 @@ def summarize(
         return True
 
     def suggest(class_name: str, text: str) -> None:
+        # A caption longer than the clip width is not offered at all. The
+        # clipped form would silently match nothing, and the full form is
+        # unusable on a command line and blows the budget this module
+        # exists to keep. Neither is a suggestion worth making.
+        if max_text > 0 and len(text) > max_text:
+            return
         candidate = f'class={class_name} text="{_quote(text)}"'
         if candidate not in suggested:
             suggested.append(candidate)
 
     def render(node: WindowNode, depth: int) -> None:
         indent = "  " * depth
-        if not emit(f"{indent}{_label(node)}"):
+        if not emit(f"{indent}{_label(node, max_text)}"):
             return
         if node.text and node.class_name:
             suggest(node.class_name, node.text)
         if depth + 1 >= max_depth:
+            # Everything below this point is being dropped. Counting it is
+            # what stops a depth-limited summary from reporting itself as
+            # the whole tree.
+            state["depth_elided"] += sum(
+                1 + _descendant_count(c) for c in visible_children(node)
+            )
             return
 
         kids = visible_children(node)
@@ -120,7 +152,7 @@ def summarize(
                 # Captions carry the information a count destroys, so keep
                 # them even when the structure is collapsed.
                 for member in captioned:
-                    if not emit(f'{child_indent}  "{member.text}"'):
+                    if not emit(f'{child_indent}  "{_clip(member.text, max_text)}"'):
                         return
                     suggest(class_name, member.text)
             else:
@@ -134,9 +166,19 @@ def summarize(
     return Summary(
         text="\n".join(lines),
         node_count=state["emitted"],
-        # Elision makes the output no longer a representation of the whole
-        # tree, which is exactly what `truncated` means to a caller.
-        truncated=state["capped"] or state["elided"] > 0,
+        # `truncated` means "this is not the whole tree", so it has to cover
+        # every way this module drops nodes. It previously omitted the depth
+        # cap, which is the most common of the three: a summary that stopped
+        # at --depth and left out an entire document body reported
+        # truncated=False, and a caller trusting that flag -- which is
+        # exactly what a tool schema does -- concluded the editor contained
+        # a panel and a status bar.
+        truncated=(
+            state["capped"]
+            or state["elided"] > 0
+            or state["depth_elided"] > 0
+        ),
         suggested_locators=suggested,
         elided_nodes=state["elided"],
+        depth_elided_nodes=state["depth_elided"],
     )

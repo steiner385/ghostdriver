@@ -89,3 +89,84 @@ def test_single_framework_is_not_marked_ambiguous():
     assert got.toolkit == "delphi-vcl"
     assert got.confidence == "high"
     assert got.competing == []
+
+
+# --- window classes, when no runtime is loaded --------------------------
+#
+# A statically linked application drags in no framework runtime, so the
+# module list cannot identify it even in principle. Observed on a real
+# target: 122 modules loaded, not one a framework signature, while the
+# window classes named the toolkit unambiguously.
+
+VCL_CLASSES = [
+    "TApplication", "TSfShellWin", "TPanel", "TAdvPanel",
+    "TsfCommandButton", "TAdvToolBar",
+]
+
+
+def test_window_classes_identify_a_statically_linked_target():
+    result = infer_toolkit(["ntdll.dll", "kernel32.dll", "user32.dll"],
+                           class_names=VCL_CLASSES)
+
+    assert result.toolkit == "delphi-vcl"
+    assert result.source == "window-classes"
+    assert result.evidence, "an inference with no evidence is not reviewable"
+    assert all(e.startswith("class:") for e in result.evidence)
+
+
+def test_class_inference_never_claims_high_confidence():
+    """Weaker evidence than a loaded runtime, and it must say so.
+
+    A component library or theme can borrow another toolkit's naming
+    convention, so this fingerprint is suggestive rather than decisive.
+    """
+    result = infer_toolkit([], class_names=VCL_CLASSES)
+
+    assert result.confidence in ("medium", "low")
+
+
+def test_loaded_modules_still_win_over_classes():
+    result = infer_toolkit(["C:/app/mfc140.dll"], class_names=VCL_CLASSES)
+
+    assert result.toolkit == "mfc"
+    assert result.source == "modules"
+
+
+def test_unreadable_modules_are_not_reported_as_no_signature():
+    """None and [] are different answers.
+
+    An empty list is a real finding about a statically linked target. A
+    module list that could not be read is no finding at all, and the
+    profile has to be able to tell a reader which one it is holding.
+    """
+    unreadable = infer_toolkit(None, class_names=[])
+    assert unreadable.toolkit == "unknown"
+    assert unreadable.modules_readable is False
+
+    clean_look = infer_toolkit([], class_names=[])
+    assert clean_look.toolkit == "unknown"
+    assert clean_look.modules_readable is True
+
+
+def test_classes_still_identify_the_toolkit_when_modules_are_unreadable():
+    result = infer_toolkit(None, class_names=VCL_CLASSES)
+
+    assert result.toolkit == "delphi-vcl"
+    assert result.modules_readable is False
+
+
+def test_an_embedded_browser_is_reported_from_its_window_class():
+    """The profile calls this significant: those regions are a web
+    document the window tree cannot see into, so they need a different
+    driver from the rest of the application."""
+    result = infer_toolkit([], class_names=VCL_CLASSES + ["Chrome_WidgetWin_1"])
+
+    assert result.toolkit == "delphi-vcl"
+    assert "embedded-webview" in result.secondary
+
+
+def test_no_evidence_at_all_stays_unknown():
+    result = infer_toolkit([], class_names=["SomeVendorThing", "Static"])
+
+    assert result.toolkit == "unknown"
+    assert result.source == "none"

@@ -2,6 +2,7 @@ import subprocess
 import sys
 import time
 
+import psutil
 import pytest
 
 on_windows = pytest.mark.skipif(
@@ -28,6 +29,8 @@ on_windows = pytest.mark.skipif(
 # constant at all.
 _WIN32_APP = r'''
 import ctypes
+import os
+import sys
 from ctypes import wintypes
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -106,7 +109,23 @@ WS_CHILD = 0x40000000
 WS_VISIBLE = 0x10000000
 WS_BORDER = 0x00800000
 WS_OVERLAPPEDWINDOW = 0x00CF0000
-SW_SHOWNORMAL = 1
+# The tool under test exists to observe a desktop without disturbing it, and
+# its own test suite must hold to that: a developer running pytest is using
+# the machine at the time. A plain top-level window shown with
+# SW_SHOWNORMAL is activated by the system on creation, which takes
+# foreground and keyboard focus away from whatever the developer is typing
+# into -- once per test, across every test that uses this fixture.
+#
+# WS_EX_NOACTIVATE keeps the system from activating it, SW_SHOWNOACTIVATE
+# keeps this script from activating it, WS_EX_TOOLWINDOW keeps it out of the
+# taskbar and the alt-tab list, and parking it off-screen keeps it from
+# painting over the developer's work. None of that changes what the tests
+# read: the window is still genuinely visible, still enumerable, and still
+# answers WM_GETTEXT.
+WS_EX_NOACTIVATE = 0x08000000
+WS_EX_TOOLWINDOW = 0x00000080
+SW_SHOWNOACTIVATE = 4
+OFFSCREEN = -32000
 COLOR_WINDOW = 5
 
 CLASS_NAME = "GhostdriverTestClass"
@@ -144,8 +163,9 @@ if not user32.RegisterClassW(ctypes.byref(wndclass)):
     raise ctypes.WinError(ctypes.get_last_error())
 
 main = user32.CreateWindowExW(
-    0, CLASS_NAME, "GhostdriverTestWindow", WS_OVERLAPPEDWINDOW,
-    120, 120, 360, 260, None, None, instance, None,
+    WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+    CLASS_NAME, "GhostdriverTestWindow", WS_OVERLAPPEDWINDOW,
+    OFFSCREEN, OFFSCREEN, 360, 260, None, None, instance, None,
 )
 if not main:
     raise ctypes.WinError(ctypes.get_last_error())
@@ -182,8 +202,16 @@ if not user32.CreateWindowExW(
 ):
     raise ctypes.WinError(ctypes.get_last_error())
 
-user32.ShowWindow(main, SW_SHOWNORMAL)
+user32.ShowWindow(main, SW_SHOWNOACTIVATE)
 user32.UpdateWindow(main)
+
+# Announce the pid that actually owns these windows. It is not necessarily
+# the pid Popen returned: a virtualenv's Scripts/python.exe can be a
+# launcher stub that re-executes the base interpreter as a separate
+# process, in which case Popen holds the stub and every window here belongs
+# to a pid the parent has never seen. Reporting it from the inside is the
+# only account that is right either way.
+print(os.getpid(), flush=True)
 
 message = wintypes.MSG()
 while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
@@ -192,21 +220,180 @@ while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
 '''
 
 
+# A second target, shaped like an application that minimizes to a taskbar
+# proxy: a small owner window that stands for the application, and a real
+# form it owns. Minimizing hides the form and minimizes the owner, and
+# restoring the owner makes the application put its own form back.
+#
+# That shape is the whole reason `restore` works the way it does, so it has
+# to be reproduced rather than mocked. The decoy below is the point of the
+# exercise: an owned window that is hidden and *stays* hidden, standing for
+# the dialogs and pooled forms a real target keeps back. A restore that
+# un-hides windows itself, instead of letting the application decide, would
+# put the decoy on screen.
+#
+# Everything starts minimized and off-screen, and nothing here is ever
+# activated: the suite must not disturb the desktop of whoever runs it.
+_WIN32_MINIMIZED_APP = r"""
+import ctypes
+import os
+from ctypes import wintypes
+
+user32 = ctypes.WinDLL("user32", use_last_error=True)
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+LRESULT = ctypes.c_ssize_t
+WNDPROC = ctypes.WINFUNCTYPE(
+    LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
+)
+
+
+class WNDCLASSW(ctypes.Structure):
+    _fields_ = [
+        ("style", wintypes.UINT),
+        ("lpfnWndProc", WNDPROC),
+        ("cbClsExtra", ctypes.c_int),
+        ("cbWndExtra", ctypes.c_int),
+        ("hInstance", wintypes.HINSTANCE),
+        ("hIcon", wintypes.HANDLE),
+        ("hCursor", wintypes.HANDLE),
+        ("hbrBackground", wintypes.HBRUSH),
+        ("lpszMenuName", wintypes.LPCWSTR),
+        ("lpszClassName", wintypes.LPCWSTR),
+    ]
+
+
+kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+user32.DefWindowProcW.argtypes = [
+    wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
+]
+user32.DefWindowProcW.restype = LRESULT
+user32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASSW)]
+user32.RegisterClassW.restype = wintypes.ATOM
+user32.CreateWindowExW.argtypes = [
+    wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
+    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID,
+]
+user32.CreateWindowExW.restype = wintypes.HWND
+user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.ShowWindow.restype = wintypes.BOOL
+user32.GetMessageW.argtypes = [
+    ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT
+]
+user32.GetMessageW.restype = ctypes.c_int
+user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
+user32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
+user32.DispatchMessageW.restype = LRESULT
+
+WS_VISIBLE = 0x10000000
+WS_OVERLAPPEDWINDOW = 0x00CF0000
+WS_EX_NOACTIVATE = 0x08000000
+WS_EX_TOOLWINDOW = 0x00000080
+SW_HIDE = 0
+SW_SHOWNA = 8
+SW_SHOWMINNOACTIVE = 7
+WM_SIZE = 0x0005
+SIZE_RESTORED = 0
+SIZE_MINIMIZED = 1
+OFFSCREEN = -32000
+
+OWNER_CLASS = "GhostdriverOwnerClass"
+FORM_CLASS = "GhostdriverFormClass"
+
+state = {"form": None, "decoy": None}
+
+
+# Hide the form on minimize, put it back on restore. This is the
+# behaviour `restore` relies on and must not duplicate: the application,
+# not the driver, decides which of its windows belong on screen. The
+# decoy is deliberately never shown.
+def _owner_proc(hwnd, message, wparam, lparam):
+    if message == WM_SIZE and state["form"]:
+        if wparam == SIZE_MINIMIZED:
+            user32.ShowWindow(wintypes.HWND(state["form"]), SW_HIDE)
+        elif wparam == SIZE_RESTORED:
+            user32.ShowWindow(wintypes.HWND(state["form"]), SW_SHOWNA)
+    return user32.DefWindowProcW(hwnd, message, wparam, lparam)
+
+
+OWNER_PROC = WNDPROC(_owner_proc)
+FORM_PROC = WNDPROC(
+    lambda h, m, w, l: user32.DefWindowProcW(h, m, w, l)
+)
+
+instance = kernel32.GetModuleHandleW(None)
+
+for name, proc in ((OWNER_CLASS, OWNER_PROC), (FORM_CLASS, FORM_PROC)):
+    cls = WNDCLASSW()
+    cls.lpfnWndProc = proc
+    cls.hInstance = instance
+    cls.hbrBackground = 6
+    cls.lpszClassName = name
+    if not user32.RegisterClassW(ctypes.byref(cls)):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+owner = user32.CreateWindowExW(
+    WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+    OWNER_CLASS, "GhostdriverOwner", WS_OVERLAPPEDWINDOW,
+    OFFSCREEN, OFFSCREEN, 200, 120, None, None, instance, None,
+)
+if not owner:
+    raise ctypes.WinError(ctypes.get_last_error())
+
+# Owned, not child: a top-level window whose owner is `owner`.
+form = user32.CreateWindowExW(
+    WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+    FORM_CLASS, "GhostdriverForm", WS_OVERLAPPEDWINDOW,
+    OFFSCREEN, OFFSCREEN, 400, 300, owner, None, instance, None,
+)
+if not form:
+    raise ctypes.WinError(ctypes.get_last_error())
+state["form"] = form
+
+decoy = user32.CreateWindowExW(
+    WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+    FORM_CLASS, "GhostdriverDecoyDialog", WS_OVERLAPPEDWINDOW,
+    OFFSCREEN, OFFSCREEN, 200, 150, owner, None, instance, None,
+)
+if not decoy:
+    raise ctypes.WinError(ctypes.get_last_error())
+state["decoy"] = decoy
+
+# Reach the target state the real application is found in: owner minimized
+# and still carrying WS_VISIBLE, every owned form hidden.
+user32.ShowWindow(wintypes.HWND(form), SW_HIDE)
+user32.ShowWindow(wintypes.HWND(decoy), SW_HIDE)
+user32.ShowWindow(wintypes.HWND(owner), SW_SHOWMINNOACTIVE)
+
+print(f"{os.getpid()} {owner} {form} {decoy}", flush=True)
+
+message = wintypes.MSG()
+while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
+    user32.TranslateMessage(ctypes.byref(message))
+    user32.DispatchMessageW(ctypes.byref(message))
+"""
+
+
 def main_tree(pid: int):
     """The target's largest window tree, matching how the tool selects it.
 
     Indexing enumerate_process(pid)[0] takes the first window in Z-order,
     which is not necessarily the application's main window -- a process can
-    own hidden top-level windows it never created deliberately. runner.py and
-    cli.py both select by node count, so the tests must too, or they verify a
-    different window than the tool reports on.
+    own hidden top-level windows it never created deliberately. The tests
+    call the same selector the tool calls, rather than reimplementing it:
+    an earlier version of this helper duplicated the tool's node-count
+    heuristic, so the suite agreed with a selection bug instead of catching
+    it.
     """
     from ghostdriver.backends.windows.enumerate import enumerate_process
+    from ghostdriver.model.window import select_main_tree
 
-    trees = enumerate_process(pid)
-    if not trees:
+    tree = select_main_tree(enumerate_process(pid))
+    if tree is None:
         raise AssertionError(f"pid {pid} has no top-level windows on this desktop")
-    return max(trees, key=lambda t: sum(1 for _ in t.walk()))
+    return tree
 
 
 @pytest.fixture
@@ -215,19 +402,81 @@ def win32_target():
 
     Cross-process is the case that matters: reading text and enumerating
     windows behave differently for windows we do not own.
+
+    The pid comes from the target itself rather than from Popen. A
+    virtualenv's Scripts/python.exe may be a launcher stub that re-executes
+    the base interpreter in a separate process; Popen then reports the stub,
+    which owns no windows, and every test here would fail in setup against a
+    backend that is working perfectly.
     """
-    proc = subprocess.Popen([sys.executable, "-c", _WIN32_APP])
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _WIN32_APP],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    pid = None
     try:
+        announced = proc.stdout.readline().strip()
+        if not announced:
+            raise RuntimeError("target exited before announcing its pid")
+        pid = int(announced)
+
         deadline = time.time() + 10
         from ghostdriver.backends.windows.enumerate import top_level_windows
         while time.time() < deadline:
-            if top_level_windows(proc.pid):
+            if top_level_windows(pid):
                 break
             time.sleep(0.1)
         else:
             raise RuntimeError("target did not create a window in time")
         time.sleep(0.3)  # let child controls finish being created
-        yield proc.pid
+        yield pid
     finally:
+        # Terminating Popen's process is not enough when it is only a stub:
+        # the interpreter holding the message loop is a separate process and
+        # would outlive the test.
+        if pid is not None and pid != proc.pid:
+            try:
+                psutil.Process(pid).terminate()
+            except psutil.Error:
+                pass
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+@pytest.fixture
+def minimized_target():
+    """A target minimized to a taskbar proxy; yields (pid, owner, form, decoy).
+
+    Started already minimized, so the test never has to minimize it and
+    never has to show anything on the developer's screen to get there.
+    """
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _WIN32_MINIMIZED_APP],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    pid = None
+    try:
+        announced = proc.stdout.readline().split()
+        if len(announced) != 4:
+            raise RuntimeError("target exited before announcing its windows")
+        pid, owner, form, decoy = (int(x) for x in announced)
+
+        deadline = time.time() + 10
+        from ghostdriver.backends.windows.enumerate import top_level_windows
+        while time.time() < deadline:
+            if top_level_windows(pid):
+                break
+            time.sleep(0.1)
+        else:
+            raise RuntimeError("target did not create a window in time")
+        yield pid, owner, form, decoy
+    finally:
+        if pid is not None and pid != proc.pid:
+            try:
+                psutil.Process(pid).terminate()
+            except psutil.Error:
+                pass
         proc.terminate()
         proc.wait(timeout=5)

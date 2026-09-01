@@ -23,6 +23,22 @@ SMTO_ABORTIFHUNG = 0x0002
 GW_CHILD = 5
 GW_HWNDNEXT = 2
 
+# Window-manager state, read and (only by the `restore` command) written.
+#
+# ShowWindow is not a message send: it asks the window manager to change a
+# window's show state, and no WM_* reaches the target's controls because of
+# it. That distinction is what keeps the read-only guarantee above intact --
+# `restore` is the one command permitted to change on-screen state, and even
+# it never sends a message a control could act on.
+GWL_STYLE = -16
+WS_VISIBLE = 0x10000000
+WS_MINIMIZE = 0x20000000
+
+# Restores a minimized window *without* activating it. SW_RESTORE would do
+# the same job and take the foreground with it, which is the one outcome a
+# non-interfering driver must not cause.
+SW_SHOWNOACTIVATE = 4
+
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
 WNDENUMPROC = ctypes.WINFUNCTYPE(
@@ -50,6 +66,18 @@ user32.IsWindow.restype = wintypes.BOOL
 user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
 user32.GetWindowRect.restype = wintypes.BOOL
 
+user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.ShowWindow.restype = wintypes.BOOL
+
+# GWL_STYLE is a 32-bit value on every architecture, so GetWindowLongW is
+# the right call even on 64-bit; c_long states that the result is signed and
+# must not be widened.
+user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.GetWindowLongW.restype = ctypes.c_long
+
+user32.GetForegroundWindow.argtypes = []
+user32.GetForegroundWindow.restype = wintypes.HWND
+
 user32.GetWindowThreadProcessId.argtypes = [
     wintypes.HWND, ctypes.POINTER(wintypes.DWORD)
 ]
@@ -72,6 +100,34 @@ kernel32.CloseHandle.restype = wintypes.BOOL
 
 kernel32.IsWow64Process.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
 kernel32.IsWow64Process.restype = wintypes.BOOL
+
+
+def window_style(hwnd: int) -> int:
+    """The window's style bits, as an unsigned 32-bit value."""
+    return user32.GetWindowLongW(wintypes.HWND(hwnd), GWL_STYLE) & 0xFFFFFFFF
+
+
+def is_minimized(hwnd: int) -> bool:
+    return bool(window_style(hwnd) & WS_MINIMIZE)
+
+
+def is_visible_style(hwnd: int) -> bool:
+    """WS_VISIBLE on this window alone, ignoring its ancestors.
+
+    IsWindowVisible answers for the whole chain, which is the right question
+    for a control and the wrong one for a top-level window whose owner is
+    minimized.
+    """
+    return bool(window_style(hwnd) & WS_VISIBLE)
+
+
+def foreground_window() -> int:
+    return user32.GetForegroundWindow() or 0
+
+
+def show_no_activate(hwnd: int) -> None:
+    """Restore `hwnd` from minimized without giving it the foreground."""
+    user32.ShowWindow(wintypes.HWND(hwnd), SW_SHOWNOACTIVATE)
 
 
 def window_pid(hwnd: int) -> int:

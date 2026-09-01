@@ -123,3 +123,82 @@ def test_suggested_locator_survives_a_caption_containing_a_quote():
     parsed = Locator.parse(s.suggested_locators[0])
     assert parsed.class_name == "VendorButton"
     assert parsed.text == 'Say "Hi"'
+
+
+# --- depth truncation must be reported ----------------------------------
+
+def _chain(depth, class_name="TLevel"):
+    """A single spine `depth` nodes deep."""
+    leaf = node(1000 + depth, f"{class_name}{depth}")
+    current = leaf
+    for level in range(depth - 1, 0, -1):
+        current = node(1000 + level, f"{class_name}{level}", children=[current])
+    return current
+
+
+def test_depth_cutoff_marks_the_summary_truncated():
+    """The flag has to mean "this is not the whole tree".
+
+    It previously covered only the node cap and sibling collapsing, so a
+    summary that stopped at max_depth and dropped an entire document body
+    reported truncated=False. A caller trusting that -- which is exactly
+    what a tool schema does -- concluded the window held nothing.
+    """
+    summary = summarize(_chain(8), max_depth=3, max_nodes=200)
+
+    assert summary.truncated
+    assert summary.depth_elided_nodes == 5
+    assert summary.elided_nodes == 0, "not collapsing; a different cause"
+
+
+def test_no_depth_elision_when_the_tree_fits():
+    summary = summarize(_chain(3), max_depth=10, max_nodes=200)
+
+    assert not summary.truncated
+    assert summary.depth_elided_nodes == 0
+
+
+def test_depth_elision_counts_whole_subtrees_not_just_children():
+    parent = node(1, "Root", children=[
+        node(2, "Mid", children=[node(3, "Leaf"), node(4, "Leaf")]),
+    ])
+    summary = summarize(parent, max_depth=1, max_nodes=200)
+
+    assert summary.depth_elided_nodes == 3
+
+
+# --- caption clipping ----------------------------------------------------
+
+def test_long_captions_are_clipped_and_say_how_much_was_withheld():
+    """One control must not be able to eat the whole budget.
+
+    A real target put a 363-character dispatch string in an address-bar
+    control; rendered in full it accounted for 17% of the entire summary.
+    """
+    long_text = "x" * 500
+    summary = summarize(node(1, "TAddressBar", text=long_text), max_text=80)
+
+    assert long_text not in summary.text
+    assert "x" * 80 in summary.text
+    assert "(+420 more chars)" in summary.text
+
+
+def test_a_clipped_caption_is_not_offered_as_a_locator():
+    """Neither form of the suggestion is worth making.
+
+    The clipped text would match nothing, and the full text is unusable on
+    a command line -- so the node is left out of the suggestions rather
+    than handed over as a locator that cannot work.
+    """
+    summary = summarize(node(1, "TAddressBar", text="y" * 300), max_text=80)
+
+    assert summary.suggested_locators == []
+
+
+def test_short_captions_are_untouched_and_still_suggested():
+    summary = summarize(node(1, "TsfCommandButton", text="Claim Task"), max_text=80)
+
+    assert '"Claim Task"' in summary.text
+    assert summary.suggested_locators == [
+        'class=TsfCommandButton text="Claim Task"'
+    ]

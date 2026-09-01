@@ -4,3 +4,9 @@ __pycache__/
 venv/
 .venv/
 .pytest_cache/
+
+# Probe output. `probe --out` writes into the working directory by default,
+# and a profile document carries the target's executable path, full command
+# line, host names and window captions -- customer identifiers that have no
+# business in version control.
+profile*.json

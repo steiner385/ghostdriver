@@ -6,7 +6,7 @@ profile document plus enough evidence for a human to disagree with it.
 
 import hashlib
 
-from ..model.window import WindowNode
+from ..model.window import WindowNode, select_main_tree
 from .profile import ProfileDocument, class_census, match_profile
 from .toolkit import infer_toolkit
 
@@ -37,12 +37,23 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
     if not trees:
         raise RuntimeError(f"pid {pid} has no top-level windows on this desktop")
 
-    # Profile the largest tree: an application's main window is the one
-    # with the most controls beneath it.
-    main = max(trees, key=lambda t: sum(1 for _ in t.walk()))
+    # The window showing the UI, not the largest one. Both matter here:
+    # `main.handle` is the root of the UIA walk below, and rooting that at a
+    # toolkit's off-screen proxy reports a handful of bridge-provided
+    # elements as a rich provider, which classifies an L1 target as M1.
+    main = select_main_tree(trees)
     nodes = list(main.walk())
 
-    toolkit = infer_toolkit(facts.modules)
+    # Class evidence comes from every top-level tree, not just `main`. The
+    # class that identifies a toolkit most decisively can be the proxy
+    # window's own -- and that window is a different tree from the one
+    # showing the UI, so scoping this to `main` would discard the single
+    # best piece of evidence available.
+    all_classes = [n.class_name for t in trees for n in t.walk()]
+    toolkit = infer_toolkit(
+        facts.modules if facts.modules_readable else None,
+        class_names=all_classes,
+    )
 
     uia_control = assess_uia(main.handle, view="control")
     uia_raw = assess_uia(main.handle, view="raw")
@@ -82,6 +93,12 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
             "evidence": toolkit.evidence,
             "secondary": toolkit.secondary,
             "competing": toolkit.competing,
+            # Which evidence carried the answer, and whether the primary
+            # evidence was even legible. Without these, "unknown" from an
+            # unreadable module list is indistinguishable from "unknown"
+            # after a clean look at a full one.
+            "source": toolkit.source,
+            "modules_readable": toolkit.modules_readable,
         },
         integrity_level=facts.integrity_level,
         dpi={"awareness": facts.dpi_awareness},
