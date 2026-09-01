@@ -376,6 +376,110 @@ while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
 """
 
 
+# A target that creates a window and then never pumps messages.
+#
+# This exists for one branch that nothing else can reach. `read_window_text`
+# distinguishes "answered with no text" ("") from "did not answer" (None),
+# and every other fixture -- and every control on every real target measured
+# so far -- answers. The distinction is load-bearing: an unresponsive
+# control reports empty text that is *unknown*, not confirmed blank, and a
+# caller that collapses the two silently asserts a field is empty when it
+# simply never replied.
+#
+# A window whose owning thread never calls GetMessage cannot service
+# WM_GETTEXT, so a cross-process send hits its timeout. The window is
+# otherwise completely normal: it enumerates, and its class and rect read
+# back fine, because those come from the kernel rather than from the
+# window's own thread. That is exactly the shape of a hung target.
+_WIN32_SILENT_APP = r"""
+import ctypes
+import os
+import time
+from ctypes import wintypes
+
+user32 = ctypes.WinDLL("user32", use_last_error=True)
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+LRESULT = ctypes.c_ssize_t
+WNDPROC = ctypes.WINFUNCTYPE(
+    LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
+)
+
+
+class WNDCLASSW(ctypes.Structure):
+    _fields_ = [
+        ("style", wintypes.UINT),
+        ("lpfnWndProc", WNDPROC),
+        ("cbClsExtra", ctypes.c_int),
+        ("cbWndExtra", ctypes.c_int),
+        ("hInstance", wintypes.HINSTANCE),
+        ("hIcon", wintypes.HANDLE),
+        ("hCursor", wintypes.HANDLE),
+        ("hbrBackground", wintypes.HBRUSH),
+        ("lpszMenuName", wintypes.LPCWSTR),
+        ("lpszClassName", wintypes.LPCWSTR),
+    ]
+
+
+kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+user32.DefWindowProcW.argtypes = [
+    wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
+]
+user32.DefWindowProcW.restype = LRESULT
+user32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASSW)]
+user32.RegisterClassW.restype = wintypes.ATOM
+user32.CreateWindowExW.argtypes = [
+    wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
+    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID,
+]
+user32.CreateWindowExW.restype = wintypes.HWND
+user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.ShowWindow.restype = wintypes.BOOL
+
+WS_VISIBLE = 0x10000000
+WS_OVERLAPPEDWINDOW = 0x00CF0000
+WS_EX_NOACTIVATE = 0x08000000
+WS_EX_TOOLWINDOW = 0x00000080
+SW_SHOWNOACTIVATE = 4
+OFFSCREEN = -32000
+
+CLASS_NAME = "GhostdriverSilentClass"
+
+WINDOW_PROC = WNDPROC(
+    lambda h, m, w, l: user32.DefWindowProcW(h, m, w, l)
+)
+
+instance = kernel32.GetModuleHandleW(None)
+cls = WNDCLASSW()
+cls.lpfnWndProc = WINDOW_PROC
+cls.hInstance = instance
+cls.hbrBackground = 6
+cls.lpszClassName = CLASS_NAME
+if not user32.RegisterClassW(ctypes.byref(cls)):
+    raise ctypes.WinError(ctypes.get_last_error())
+
+# Real window text, which a pumping target would return happily. That it
+# comes back as "did not answer" rather than as this string is the whole
+# point: the text exists, the thread just cannot be asked for it.
+window = user32.CreateWindowExW(
+    WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+    CLASS_NAME, "GhostdriverSilentWindow", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+    OFFSCREEN, OFFSCREEN, 200, 120, None, None, instance, None,
+)
+if not window:
+    raise ctypes.WinError(ctypes.get_last_error())
+user32.ShowWindow(wintypes.HWND(window), SW_SHOWNOACTIVATE)
+
+print(f"{os.getpid()} {window}", flush=True)
+
+# No message loop, deliberately. Sleeping rather than pumping is what makes
+# every cross-process WM_GETTEXT to this window time out.
+time.sleep(600)
+"""
+
+
 def main_tree(pid: int):
     """The target's largest window tree, matching how the tool selects it.
 
@@ -472,6 +576,44 @@ def minimized_target():
         else:
             raise RuntimeError("target did not create a window in time")
         yield pid, owner, form, decoy
+    finally:
+        if pid is not None and pid != proc.pid:
+            try:
+                psutil.Process(pid).terminate()
+            except psutil.Error:
+                pass
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+@pytest.fixture
+def silent_target():
+    """A target whose window never answers a message; yields (pid, hwnd).
+
+    Reads against it cost their full timeout, so tests using this fixture
+    are deliberately few.
+    """
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _WIN32_SILENT_APP],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    pid = None
+    try:
+        announced = proc.stdout.readline().split()
+        if len(announced) != 2:
+            raise RuntimeError("target exited before announcing its window")
+        pid, hwnd = (int(x) for x in announced)
+
+        deadline = time.time() + 10
+        from ghostdriver.backends.windows.enumerate import top_level_windows
+        while time.time() < deadline:
+            if hwnd in top_level_windows(pid):
+                break
+            time.sleep(0.1)
+        else:
+            raise RuntimeError("target did not create a window in time")
+        yield pid, hwnd
     finally:
         if pid is not None and pid != proc.pid:
             try:
