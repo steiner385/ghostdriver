@@ -26,16 +26,30 @@ def match_profile(
 ) -> str:
     """Classify a target into a capability profile (spec section 2).
 
-    The distinguishing question for a target with no usable accessibility
-    surface is whether it still has one window per control. If it does, it
-    is drivable by window messages (L1). If it does not, only coordinates
-    and OCR remain (O1).
+    Returns "indeterminate" rather than guessing when the UIA assessment did
+    not actually produce a usable answer. That distinction is the whole point:
+    an assessment that failed for an environmental reason -- COM unavailable,
+    the target running at higher integrity than this process -- looks nothing
+    like a target that genuinely ships no provider, but both leave the tree
+    empty. Reporting the first as the second hands the operator a confident
+    answer built on no evidence, in the one field they act on.
     """
+    if uia_verdict in ("unavailable", "empty", "unknown"):
+        # The assessment did not run to a conclusion. Nothing downstream can
+        # be inferred from its silence.
+        return "indeterminate"
     if uia_verdict == "rich":
         return "M1"
     if window_count >= 50:
+        # One window per control: drivable by window messages even with no
+        # usable accessibility surface.
         return "L1"
-    return "O1"
+    if msaa_verdict == "actionable":
+        # Few windows, but the legacy surface still offers actuation.
+        return "M1"
+    if toolkit != "unknown" and window_count > 0:
+        return "O1"
+    return "indeterminate"
 
 
 @dataclass

@@ -45,6 +45,7 @@ ghostdriver probe --pid <PID> --out profile.json
 | Field | Expected for a Profile L1 target |
 |---|---|
 | `matched_profile` | `L1` |
+| `matched_profile` = `indeterminate` | Never a pass. It means the UIA assessment did not conclude, so the classifier refused to guess and the profile carries **no classification at all** — not a weak one. Read `uia.verdict` and `uia.error` to find out why: `unavailable` points at COM being missing, `comtypes/gen/` being unwritable, or `CoInitialize` failing; it also appears when the target runs at higher integrity than this process, in which case re-run elevated to the target's integrity level and probe again. `empty` or `unknown` mean the walk produced nothing to judge. Do not proceed to Gate 3 treating the profile as L1. |
 | `toolkit.inferred` | The target's actual toolkit, with `confidence` `high` or `medium` — or `ambiguous`, which is not a failure; see the `toolkit.confidence` row below |
 | `toolkit.evidence` | Names the specific signature modules that drove the inference |
 | `toolkit.competing` | A list naming other frameworks whose signatures were also present. Expected empty for a single-toolkit target. |
@@ -78,6 +79,11 @@ later curation, so there is nothing here for this gate to check.
   combination is ambiguous — the walk may have aborted before it reached
   the elements that would have proved the tree rich — and the probe should
   be re-run before the `unusable` verdict is trusted.
+- `matched_profile` is `indeterminate`. The classifier declined to answer
+  because the UIA assessment never concluded. This is the tool working as
+  intended, and it is still a failed gate: fix the cause named by
+  `uia.verdict` / `uia.error` and re-probe rather than reading the rest of
+  the document as if the profile were known.
 
 ## Gate 3 — Scale, the context-budget question
 

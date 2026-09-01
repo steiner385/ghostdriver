@@ -21,13 +21,6 @@ def test_class_census_is_sorted_by_descending_count():
     assert list(class_census(tree))[0] == "Btn"
 
 
-def test_matches_l1_when_uia_unusable_and_windows_are_plentiful():
-    assert match_profile(
-        uia_verdict="unusable", msaa_verdict="identification-only",
-        window_count=1100, toolkit="delphi-vcl",
-    ) == "L1"
-
-
 def test_matches_m1_when_uia_is_rich():
     assert match_profile(
         uia_verdict="rich", msaa_verdict="actionable",
@@ -36,10 +29,59 @@ def test_matches_m1_when_uia_is_rich():
 
 
 def test_matches_o1_when_there_are_no_per_control_windows():
+    """Few windows, no accessibility surface, but the toolkit is identified.
+
+    The toolkit inference is the evidence that makes O1 a conclusion rather
+    than a shrug: it says we know what we are looking at and it has no
+    per-control windows. Without it -- see the companion assertion below --
+    there is nothing to classify from, and the answer is "indeterminate".
+    """
+    assert match_profile(
+        uia_verdict="unusable", msaa_verdict="unusable",
+        window_count=3, toolkit="mfc",
+    ) == "O1"
     assert match_profile(
         uia_verdict="unusable", msaa_verdict="unusable",
         window_count=3, toolkit="unknown",
-    ) == "O1"
+    ) == "indeterminate"
+
+
+def test_failed_uia_assessment_is_indeterminate_not_a_profile():
+    """An assessment that did not conclude must not produce a confident label.
+
+    "unavailable" means COM was missing, unwritable, or the target outranked
+    us -- not that the target ships no provider. Returning L1 here would hand
+    the operator exactly the answer the runbook told them to expect, built on
+    no evidence at all.
+    """
+    for verdict in ("unavailable", "empty", "unknown"):
+        assert match_profile(
+            uia_verdict=verdict, msaa_verdict="unusable",
+            window_count=1100, toolkit="delphi-vcl",
+        ) == "indeterminate", f"{verdict} must not classify"
+
+
+def test_unusable_uia_with_many_windows_is_l1():
+    """A tree that genuinely reports no patterns, with a window per control."""
+    assert match_profile(
+        uia_verdict="unusable", msaa_verdict="identification-only",
+        window_count=1100, toolkit="delphi-vcl",
+    ) == "L1"
+
+
+def test_msaa_actionable_rescues_a_small_window_count():
+    """msaa_verdict must actually influence the result, not be decorative."""
+    assert match_profile(
+        uia_verdict="partial", msaa_verdict="actionable",
+        window_count=5, toolkit="mfc",
+    ) == "M1"
+
+
+def test_profile_boundary_is_pinned_at_fifty():
+    """Pin the threshold so a regression anywhere in 4..1099 cannot hide."""
+    common = dict(uia_verdict="unusable", msaa_verdict="unusable", toolkit="mfc")
+    assert match_profile(window_count=50, **common) == "L1"
+    assert match_profile(window_count=49, **common) == "O1"
 
 
 def test_profile_roundtrips_through_json(tmp_path):
