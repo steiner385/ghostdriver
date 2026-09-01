@@ -28,13 +28,13 @@ class GhostdriverError(Exception):
                 "locator": self.locator}
 
 
-@dataclass
+@dataclass(frozen=True)
 class ActionResult:
     """Outcome of an action.
 
-    `ok` is forced False when a declared postcondition did not verify. An
-    action that cannot distinguish success from a no-op must not claim
-    success (spec section 4.4).
+    Immutable once constructed. `ok` is forced False when a declared
+    postcondition did not verify. An action that cannot distinguish success
+    from a no-op must not claim success (spec section 4.4).
     """
 
     ok: bool
@@ -47,4 +47,4 @@ class ActionResult:
 
     def __post_init__(self) -> None:
         if self.postcondition_verified is False:
-            self.ok = False
+            object.__setattr__(self, "ok", False)
