@@ -59,3 +59,33 @@ def test_evidence_names_the_matching_modules():
     got = infer_toolkit([r"C:\app\vcl170.bpl", r"C:\windows\user32.dll"])
     assert any("vcl170.bpl" in e for e in got.evidence)
     assert not any("user32.dll" in e for e in got.evidence)
+
+
+def test_stronger_evidence_wins_over_list_position():
+    """A framework with more signature hits must beat one that merely sorts earlier.
+
+    Selecting by list position lets a single incidental dependency mask a
+    framework with two independent signature files.
+    """
+    got = infer_toolkit([
+        r"C:\app\mfc42.dll",
+        r"C:\windows\system32\mscoree.dll",
+        r"C:\app\clr.dll",
+    ])
+    assert got.toolkit == "dotnet"
+    assert "mfc" in got.competing
+
+
+def test_colliding_frameworks_are_reported_as_ambiguous():
+    """Contested inference must say so rather than returning a clean guess."""
+    got = infer_toolkit([r"C:\app\mfc42.dll", r"C:\app\vcl170.bpl"])
+    assert got.confidence == "ambiguous"
+    assert got.competing
+
+
+def test_single_framework_is_not_marked_ambiguous():
+    """The ordinary case must be unaffected by the ambiguity path."""
+    got = infer_toolkit([r"C:\app\rtl170.bpl", r"C:\app\vcl170.bpl"])
+    assert got.toolkit == "delphi-vcl"
+    assert got.confidence == "high"
+    assert got.competing == []

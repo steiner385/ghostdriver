@@ -3,6 +3,12 @@
 Every framework drags in a signature runtime, which makes the loaded-module
 list a reliable fingerprint. Pure function over a list of paths: the caller
 supplies the list, so this is testable without a running process.
+
+When multiple frameworks' signatures are present, the one with the most
+independent signature files is selected. If a tie remains (e.g., both have
+2 files), SIGNATURES order (most-specific-first) breaks the tie. If multiple
+frameworks have the same number of files, confidence is "ambiguous" and the
+competing frameworks are named.
 """
 
 import fnmatch
@@ -32,9 +38,16 @@ SECONDARY_SIGNATURES: list[tuple[str, tuple[str, ...]]] = [
 @dataclass
 class ToolkitInference:
     toolkit: str
-    confidence: str  # "high" | "medium" | "low"
+    confidence: str  # "high" | "medium" | "low" | "ambiguous"
     evidence: list[str] = field(default_factory=list)
     secondary: list[str] = field(default_factory=list)
+    competing: list[str] = field(default_factory=list)
+
+
+def _basename(path: str) -> str:
+    """Extract basename, handling both forward and backward slashes."""
+    normalized = path.replace("\\", "/")
+    return os.path.basename(normalized).lower()
 
 
 def _matches(names: list[str], patterns: tuple[str, ...]) -> list[str]:
@@ -48,30 +61,40 @@ def _matches(names: list[str], patterns: tuple[str, ...]) -> list[str]:
 
 
 def infer_toolkit(module_paths: list[str]) -> ToolkitInference:
-    # Extract basenames, handling both forward and backward slashes
-    names = []
-    for p in module_paths:
-        # Replace backslashes with forward slashes for consistent basename extraction
-        normalized = p.replace("\\", "/")
-        names.append(os.path.basename(normalized).lower())
+    names = [_basename(p) for p in module_paths]
 
     secondary = [
         label for label, patterns in SECONDARY_SIGNATURES
         if _matches(names, patterns)
     ]
 
+    matched: list[tuple[str, list[str]]] = []
     for label, patterns in SIGNATURES:
         hits = _matches(names, patterns)
-        if not hits:
-            continue
-        # Two or more independent signature files is materially stronger
-        # evidence than one, which could be an incidental dependency.
-        confidence = "high" if len(hits) >= 2 else "medium"
+        if hits:
+            matched.append((label, sorted(set(hits))))
+
+    if not matched:
         return ToolkitInference(
-            toolkit=label, confidence=confidence,
-            evidence=sorted(set(hits)), secondary=secondary,
+            toolkit="unknown", confidence="low", evidence=[], secondary=secondary
         )
 
+    # Rank by how many independent signature files each framework contributed.
+    # Ties keep SIGNATURES order, which is most-specific-first, so the result is
+    # deterministic rather than dependent on dict or set iteration.
+    matched.sort(key=lambda entry: -len(entry[1]))
+    label, hits = matched[0]
+    competing = [other_label for other_label, _ in matched[1:]]
+
+    if competing:
+        # Two frameworks' signatures coexist. Name the strongest, name the
+        # others, and never claim high confidence: the caller needs to know
+        # the answer is contested rather than being handed a clean guess.
+        confidence = "ambiguous"
+    else:
+        confidence = "high" if len(hits) >= 2 else "medium"
+
     return ToolkitInference(
-        toolkit="unknown", confidence="low", evidence=[], secondary=secondary
+        toolkit=label, confidence=confidence, evidence=hits,
+        secondary=secondary, competing=competing,
     )
