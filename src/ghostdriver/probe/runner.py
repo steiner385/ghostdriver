@@ -17,7 +17,14 @@ def _profile_id(executable: str, version: str) -> str:
 
 
 def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
-    """Profile a running process. Read-only."""
+    """Profile a running process. Read-only.
+
+    `msaa_sample` caps how many controls the legacy-accessibility probe
+    touches. The sample is taken at an even stride across the whole tree,
+    and the profile records both the sample size and the population it was
+    drawn from, so a surprising MSAA verdict can be checked against how
+    much of the tree it actually saw.
+    """
     import psutil
 
     from ..backends.windows.enumerate import enumerate_process
@@ -39,7 +46,12 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
 
     uia_control = assess_uia(main.handle, view="control")
     uia_raw = assess_uia(main.handle, view="raw")
-    msaa = assess_msaa([n.handle for n in nodes[:msaa_sample]])
+    # Spread the sample across the tree rather than taking the first N in
+    # pre-order: a contiguous head slice is the root plus one early branch,
+    # which is not representative of a tree with a thousand controls.
+    step = max(1, len(nodes) // msaa_sample)
+    sampled = [n.handle for n in nodes[::step]][:msaa_sample]
+    msaa = assess_msaa(sampled)
 
     try:
         command_line = psutil.Process(pid).cmdline()
@@ -90,6 +102,10 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
                 "element_count": uia_raw.element_count,
                 "with_patterns": uia_raw.with_patterns,
                 "max_depth_reached": uia_raw.max_depth_reached,
+                # The runbook tells the operator to react to a zero raw-view
+                # count. Without this they cannot tell "the provider is
+                # genuinely empty" from "the raw walk failed".
+                "error": uia_raw.error,
             },
             "verdict": uia_control.verdict,
             "error": uia_control.error,
@@ -100,6 +116,11 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
             "named": msaa.named,
             "with_default_action": msaa.with_default_action,
             "verdict": msaa.verdict,
+            # Both numbers, so a surprising verdict can be recognised as a
+            # sampling artefact rather than a property of the target.
+            "sample_size": len(sampled),
+            "sampled_of": len(nodes),
+            "error": msaa.error,
             "sample": msaa.sample,
         },
     )

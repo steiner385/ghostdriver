@@ -49,15 +49,19 @@ ghostdriver probe --pid <PID> --out profile.json
 | `toolkit.inferred` | The target's actual toolkit, with `confidence` `high` or `medium` — or `ambiguous`, which is not a failure; see the `toolkit.confidence` row below |
 | `toolkit.evidence` | Names the specific signature modules that drove the inference |
 | `toolkit.competing` | A list naming other frameworks whose signatures were also present. Expected empty for a single-toolkit target. |
+| `toolkit.secondary` | Frameworks that coexist with the host toolkit rather than competing with it — an embedded browser control is the case that matters. Expected empty for a target that renders everything natively. **Non-empty is a significant finding, not a footnote:** it means part of the UI is a web document that the window tree cannot see into, so those regions need a different driver from the rest of the application, and the choice of driver in a later iteration depends on which engine is named. Record it explicitly either way. |
 | `toolkit.confidence` | One of `high`, `medium`, `low`, `ambiguous`. `ambiguous` is not a failure: it means two frameworks' signatures coexist (`toolkit.competing` is non-empty) and the answer is contested rather than clean. When you see it, use the evidence lists to decide which framework is the real host. |
 | `executable.bitness` | Matches the target's real bitness |
 | `dpi.awareness` | `unaware` for a DPI-virtualized target |
 | `uia.verdict` | `unusable` if no element supports a pattern |
 | `uia.control_view.with_patterns` | For a target you expect to have no UIA provider: exactly `0`. Any non-zero value means the target exposes real automation patterns and is not the profile you assumed — stop and re-read the tree before continuing. For a target you expect to be accessible: a substantial fraction of `element_count`. |
 | `uia.raw_view.element_count` | Recorded, so an empty tree is attributable to the provider rather than the walker |
+| `uia.raw_view.error` | Normally `null`. Read it together with `uia.raw_view.element_count`: a zero count with a non-null error means the raw walk failed, not that the provider is empty, and the fail condition below about a zero raw-view count should be read as "the walker broke" rather than "the target has no provider". |
 | `uia.error` | Normally `null`. If set, the UIA walk aborted partway through and the counts it did collect are partial — not wrong, but incomplete. A non-null `error` alongside a non-zero `element_count` means the assessment is incomplete, **not** that the target lacks a UIA provider. |
 | `unresponsive_count` | How many controls did not answer a text query within the timeout. Their `text` is unknown rather than genuinely empty. A high count means the tree's text data is not trustworthy overall, and Gate 5 should be read in that light. |
 | `msaa.verdict` | `identification-only` when captions exist but default actions do not |
+| `msaa.sample_size` / `msaa.sampled_of` | The legacy-accessibility surface is not probed exhaustively. `sample_size` controls are sampled at an even stride across all `sampled_of` nodes in the tree — a spread, not the first N in pre-order. Check these two numbers before believing a surprising `msaa.verdict`: on a large tree the verdict rests on a few dozen controls, so `unusable` from a sample that happened to land on unnamed containers is a sampling artefact rather than a property of the target. |
+| `msaa.error` | Normally `null`. When set, the legacy accessibility layer could not be loaded or initialised at all, and `msaa.verdict` reads `unavailable` — which says nothing about the target and everything about this machine. |
 | `window_count` | Within an order of magnitude of the real control count |
 | `class_census` | Top entries are the target's real window classes |
 
