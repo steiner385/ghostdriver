@@ -22,14 +22,14 @@ def test_returns_none_for_a_dead_handle():
     assert read_window_text(0xDEADBEEF) is None
 
 
-def test_distinguishes_empty_text_from_no_answer(tk_target):
-    """A control with no caption returns "", not None.
+def test_answering_controls_are_marked_responsive(tk_target):
+    """Controls that answer a text query must be flagged responsive.
 
-    Collapsing the two would make "the control has no text" and "the target
-    stopped responding" indistinguishable, which is exactly the ambiguity
-    that produces false passes.
+    The empty-vs-no-answer distinction lives on WindowNode.responsive once
+    build_tree has run; asserting on `text` alone cannot see it, because
+    both cases carry "".
     """
     from ghostdriver.backends.windows.enumerate import enumerate_process
-    results = [n.text for n in enumerate_process(tk_target)[0].walk()]
-    assert "" in results
-    assert None not in results
+    nodes = list(enumerate_process(tk_target)[0].walk())
+    assert nodes
+    assert all(n.responsive for n in nodes)

@@ -40,6 +40,25 @@ def test_window_node_is_immutable():
         n.handle = 2
 
 
+def test_window_node_is_responsive_by_default():
+    """A node says its text is trustworthy unless told otherwise."""
+    assert leaf(1, "A", "a").responsive is True
+
+
+def test_window_node_can_record_a_non_answering_control():
+    """An unresponsive control must be distinguishable from an empty one.
+
+    Both carry text="" — only this flag separates "no caption" from
+    "the control never answered".
+    """
+    n = WindowNode(
+        handle=1, class_name="A", text="", rect=(0, 0, 1, 1),
+        visible=True, enabled=True, pid=1, children=(), responsive=False,
+    )
+    assert n.responsive is False
+    assert n.text == ""
+
+
 def test_locator_parse_class_and_text():
     loc = Locator.parse('class=VendorButton text="Expand All"')
     assert loc.class_name == "VendorButton"

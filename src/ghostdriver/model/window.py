@@ -15,6 +15,10 @@ class WindowNode:
     `handle` is an opaque integer supplied by the backend. It is valid only
     for the lifetime of the enumeration that produced it: the OS recycles
     handles, so it must never be persisted or returned to a caller.
+
+    `responsive` is False when the control did not answer a text query
+    within the timeout, in which case `text` is empty but its true value is
+    unknown rather than genuinely absent.
     """
 
     handle: int
@@ -25,6 +29,7 @@ class WindowNode:
     enabled: bool
     pid: int
     children: tuple["WindowNode", ...] = ()
+    responsive: bool = True
 
     def walk(self) -> Iterator["WindowNode"]:
         """Yield this node then all descendants, in pre-order."""

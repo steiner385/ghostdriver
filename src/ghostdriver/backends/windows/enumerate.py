@@ -1,6 +1,5 @@
 """Build platform-neutral WindowNode trees from live windows."""
 
-import ctypes
 from ctypes import wintypes
 
 from ...model.window import WindowNode
@@ -45,15 +44,17 @@ def build_tree(hwnd: int, *, max_depth: int = 32) -> WindowNode:
             children = tuple(
                 build(c, depth + 1) for c in direct_children(handle)
             )
+        raw_text = read_window_text(handle)
         return WindowNode(
             handle=handle,
             class_name=winapi.class_name(handle),
-            text=read_window_text(handle) or "",
+            text=raw_text or "",
             rect=winapi.window_rect(handle),
             visible=bool(winapi.user32.IsWindowVisible(wintypes.HWND(handle))),
             enabled=bool(winapi.user32.IsWindowEnabled(wintypes.HWND(handle))),
             pid=winapi.window_pid(handle),
             children=children,
+            responsive=raw_text is not None,
         )
 
     return build(hwnd, 0)
