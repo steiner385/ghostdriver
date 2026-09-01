@@ -66,3 +66,31 @@ def test_invalid_handle_reports_unavailable_rather_than_raising():
     from ghostdriver.backends.windows.uia import assess_uia
     got = assess_uia(0xDEADBEEF)
     assert got.available is False
+
+
+def test_partial_walk_results_are_preserved():
+    """A walk that errors partway must keep what it already collected.
+
+    Reporting available=False here would render as "no UIA provider", which
+    is the signature of the hard profile this tool exists to detect -- so
+    discarding a partial walk does not lose information, it fabricates a
+    different and wrong conclusion.
+    """
+    from ghostdriver.backends.windows.uia import _build_assessment
+    got = _build_assessment(
+        {"count": 40, "with_patterns": 30, "depth": 5},
+        {"Button": 30, "Pane": 10}, {"Invoke": 30}, [],
+        error="walk aborted",
+    )
+    assert got.available is True
+    assert got.element_count == 40
+    assert got.verdict == "rich"
+    assert got.error == "walk aborted"
+
+
+def test_assessment_records_zero_richness_without_dividing_by_zero():
+    """An empty walk must not raise, and must classify as empty."""
+    from ghostdriver.backends.windows.uia import _build_assessment
+    got = _build_assessment({"count": 0, "with_patterns": 0, "depth": 0}, {}, {}, [])
+    assert got.richness == 0.0
+    assert got.verdict == "empty"

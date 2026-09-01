@@ -154,11 +154,38 @@ def assess_uia(
             except Exception:
                 break
 
+    walk_error: str | None = None
     try:
         visit(root, 0)
     except Exception as exc:
-        return UiaAssessment(available=False, error=str(exc))
+        # Keep whatever the walk accumulated. Discarding it would report
+        # available=False, which reads as "this application ships no UIA
+        # provider" -- the exact signature of the profile this tool exists to
+        # detect. A partial walk reported as an absent provider is a false
+        # profile, and a worse failure than an incomplete one.
+        walk_error = str(exc)
 
+    if walk_error is not None and state["count"] == 0:
+        # Nothing was collected at all, so there is genuinely nothing to report.
+        return UiaAssessment(available=False, error=walk_error)
+
+    return _build_assessment(
+        state, control_types, patterns, sample, error=walk_error
+    )
+
+
+def _build_assessment(
+    state: dict,
+    control_types: dict[str, int],
+    patterns: dict[str, int],
+    sample: list[str],
+    error: str | None = None,
+) -> UiaAssessment:
+    """Assemble an assessment from accumulated walk state.
+
+    Separated from the COM traversal so the accumulation-preserving behaviour
+    is testable off-Windows: everything here is plain data.
+    """
     count = state["count"]
     assessment = UiaAssessment(
         available=True,
@@ -169,6 +196,7 @@ def assess_uia(
         pattern_histogram=patterns,
         max_depth_reached=state["depth"],
         sample=sample,
+        error=error,
     )
     assessment.verdict = verdict_for(assessment)
     return assessment

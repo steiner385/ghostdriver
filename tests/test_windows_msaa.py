@@ -36,17 +36,22 @@ def test_verdict_is_unusable_when_nothing_is_named():
 
 
 @on_windows
-def test_probes_direct_handles_not_synthesized_chrome(tk_target):
-    """Counts must come from the handles we asked about.
+def test_counts_never_exceed_the_handles_supplied(tk_target):
+    """Named and actionable counts must not exceed the handles we asked about.
 
-    oleacc's default proxy fabricates a title bar, menu bars, and scroll
-    bars for every window. Walking children inflates the numbers with
-    controls that do not exist, so this assessment probes named handles
-    directly instead.
+    oleacc's default proxy fabricates a title bar, two menu bars and scroll
+    bars for every window whether or not they exist. An implementation that
+    walked children would count that furniture and push these totals above
+    the number of handles supplied -- which is the failure this module's
+    direct-probing design exists to avoid. Asserting on `probed` alone cannot
+    see it, because `probed` is assigned from len(handles) regardless.
     """
     from ghostdriver.backends.windows.msaa import assess_msaa
     handles = _handles(tk_target, limit=5)
-    assert assess_msaa(handles).probed == len(handles)
+    got = assess_msaa(handles)
+    assert got.probed == len(handles)
+    assert got.named <= got.probed
+    assert got.with_default_action <= got.probed
 
 
 @on_windows
