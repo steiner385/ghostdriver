@@ -45,20 +45,26 @@ ghostdriver probe --pid <PID> --out profile.json
 | Field | Expected for a Profile L1 target |
 |---|---|
 | `matched_profile` | `L1` |
-| `toolkit.inferred` | The target's actual toolkit, with `confidence` `high` or `medium` |
+| `toolkit.inferred` | The target's actual toolkit, with `confidence` `high` or `medium` — or `ambiguous`, which is not a failure; see the `toolkit.confidence` row below |
 | `toolkit.evidence` | Names the specific signature modules that drove the inference |
 | `toolkit.competing` | A list naming other frameworks whose signatures were also present. Expected empty for a single-toolkit target. |
 | `toolkit.confidence` | One of `high`, `medium`, `low`, `ambiguous`. `ambiguous` is not a failure: it means two frameworks' signatures coexist (`toolkit.competing` is non-empty) and the answer is contested rather than clean. When you see it, use the evidence lists to decide which framework is the real host. |
 | `executable.bitness` | Matches the target's real bitness |
 | `dpi.awareness` | `unaware` for a DPI-virtualized target |
 | `uia.verdict` | `unusable` if no element supports a pattern |
-| `uia.control_view.with_patterns` | Consistent with the verdict |
+| `uia.control_view.with_patterns` | For a target you expect to have no UIA provider: exactly `0`. Any non-zero value means the target exposes real automation patterns and is not the profile you assumed — stop and re-read the tree before continuing. For a target you expect to be accessible: a substantial fraction of `element_count`. |
 | `uia.raw_view.element_count` | Recorded, so an empty tree is attributable to the provider rather than the walker |
 | `uia.error` | Normally `null`. If set, the UIA walk aborted partway through and the counts it did collect are partial — not wrong, but incomplete. A non-null `error` alongside a non-zero `element_count` means the assessment is incomplete, **not** that the target lacks a UIA provider. |
 | `unresponsive_count` | How many controls did not answer a text query within the timeout. Their `text` is unknown rather than genuinely empty. A high count means the tree's text data is not trustworthy overall, and Gate 5 should be read in that light. |
 | `msaa.verdict` | `identification-only` when captions exist but default actions do not |
 | `window_count` | Within an order of magnitude of the real control count |
 | `class_census` | Top entries are the target's real window classes |
+
+The document's other top-level fields — `profile_id`, `integrity_level`,
+`command_line`, `actuation_map`, `grid_strategy`, `focus_behavior`,
+`denylist`, `environment_allowlist` — are deliberately not part of this
+gate: phase 1 either does not determine them or emits them empty for
+later curation, so there is nothing here for this gate to check.
 
 **Fail conditions worth reporting rather than working around:**
 
