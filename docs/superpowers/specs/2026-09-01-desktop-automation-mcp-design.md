@@ -472,24 +472,61 @@ that a naive fixture would not exhibit.
 
 ## 11. Build order
 
-1. **Fixture application.** Profile L1 reproduction per §10.
-2. **Core model.** Locator, Element, action-verb interfaces, tier ladder, `ActionResult`.
-3. **Windows backend, read tier.** pywinauto extension, enumeration, locator
-   resolution, `read` via `WM_GETTEXT`.
-4. **Capability probe, phase 1.** Read-only profiling, profile document emission.
-5. **Windows backend, actuation tier.** Input-shaped messages, tier fallback,
-   pre/post conditions. Resolve the `set_text` data-binding question (§4.3).
-6. **MCP server.** Tool surface, session manager, `describe` summarization.
-7. **Safety.** Capability tiers, denylist, environment guard.
-8. **Isolation: `minimized`.** Including the watchdog and `unexpected_foreground`.
-9. **Capability probe, phase 2.** Supervised actuation learning.
-10. **Grid strategy.** Probe clipboard and export routes before building OCR.
-11. **Isolation: `hidden_desktop`.**
+Delivery is **iterative**: each iteration must end in something runnable and
+validatable against a real target, not only against internal tests.
 
-Steps 1–5 are validated entirely against the fixture. First contact with a real
-Profile L1 application happens at step 6, in `read_only` tier.
+### Iteration 1 — Read-only reconnaissance against a real target
 
----
+1. Core model: `Locator`, `Element`, `ActionResult`; read paths only
+2. Windows backend: enumeration and locator resolution, extending pywinauto
+3. `read` via `WM_GETTEXT`
+4. Capability probe, phase 1 — read-only profiling, profile document emission
+
+**Validation gate.** Run against a real Profile L1 application. Passes when:
+the emitted profile correctly identifies toolkit, DPI mode, and UIA/MSAA
+verdicts; locators resolve unambiguously across identically-captioned controls
+on stacked tab pages; and a ~1,100-window tree yields a profile document and a
+`describe` result that fit a practical context budget.
+
+**No fixture is required for this iteration, and none should be built for it.**
+The fixture's value is in developing actuation and inducing failure modes on
+demand. For the read path a real target is the *stronger* validation, because
+it is the only thing that genuinely has ~1,100 windows, vendor-registered
+classes, overlapping rectangles, and ~90% hidden controls. Read-only operation
+against it carries no risk to application state.
+
+### Iteration 2 — MCP server, read-only tier
+
+5. MCP server: tool surface, session manager, `describe` summarization
+6. Safety: session capability tiers, denylist, environment guard
+
+**Validation gate.** An agent explores a real Profile L1 application end to end
+through MCP at `read_only` tier, and the environment guard demonstrably refuses
+a target pointed at a non-allowlisted endpoint.
+
+### Iteration 3 — Fixture, then actuation
+
+7. Fixture application per §10
+8. Actuation tier developed against the fixture: input-shaped messages, tier
+   fallback, pre/post conditions. Resolve the `set_text` data-binding question (§4.3)
+
+**Validation gate.** All fixture failure modes (§10 items 5–7) are handled, and
+actuation succeeds without moving the cursor.
+
+### Iteration 4 — Supervised actuation against a real target
+
+9. Capability probe, phase 2 — supervised actuation learning with an
+   operator-supplied safe-control allowlist
+10. Isolation: `minimized`, including the watchdog and `unexpected_foreground`
+
+**Validation gate.** A view-only control on a real target actuates through the
+full stack, cursor undisturbed, with the watchdog demonstrably re-minimizing
+after the application self-foregrounds.
+
+### Iteration 5 — Remaining gaps
+
+11. Grid strategy — probe clipboard and export routes before building OCR
+12. Isolation: `hidden_desktop`
 
 ## 12. Deferred
 
