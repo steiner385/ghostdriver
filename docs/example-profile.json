@@ -12,19 +12,32 @@
     "Note: a re-probe overwrites this file and takes the curated policy with",
     "it. Keep a copy, or keep policy in a file the probe does not write."
   ],
-
   "matched_profile": "L1",
-
   "environment_allowlist": [
     "http://dev-host:8183/dev-environment/*",
     "https://staging.example.internal/*"
   ],
-
   "denylist": [
     "*delete*",
     "*submit*",
     "*approve*",
     "*complete task*",
     "*release*"
+  ],
+  "input_sensitivity": [
+    {
+      "cadence": "fast_human",
+      "source": "declared",
+      "surface": "web",
+      "evidence": "hosted web content counts input events; machine-speed typing is rejected without a visible error",
+      "recorded": "2026-09-02"
+    },
+    {
+      "cadence": "robot",
+      "source": "declared",
+      "surface": "*",
+      "evidence": "the native shell does not inspect input timing",
+      "recorded": "2026-09-02"
+    }
   ]
 }

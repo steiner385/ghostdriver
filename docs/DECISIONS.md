@@ -467,6 +467,123 @@ is detectable generically — compare the resulting display against what was
 asked. Whether the value *committed* is not, and still needs an expectation
 only the caller can state.
 
+### D25. `WM_SETTEXT` is deleted, not kept as a fast path
+
+**Decision.** The programmatic write is gone. `set_text` types, and at robot
+cadence offers a UIA Value pattern above it.
+
+**Reasoning.** D19 made it work; measuring it made the case for keeping it
+collapse. It bought about **twelve milliseconds** on a twenty-character
+field — 0.3ms against 12ms — while every action pays a 250ms settle before
+anything is verified. A field would have to run past four hundred characters
+before typing cost as much as the settle already does.
+
+Against that: it splits display from committed value (D21), it is not
+subject to the control's input handling so it writes values the application
+would have refused (D24), and it produces **no input events at all**, which
+is the most detectable thing this module could do on a target that watches
+for automation (D26). It was also the one call in the module that had to be
+sent rather than posted, so deleting it makes "posted, not sent"
+unconditional.
+
+The remaining case was a long unbound memo field. If one turns up, it comes
+back as its own verb with a name that says what it does, rather than as a
+boolean called `fast_path` on the verb agents reach for by default.
+
+### D26. Typed input is paced, and the cadence changes the ladder
+
+**Decision.** `cadence` on the typing primitives. `robot` sends at queue
+speed and is the default; `fast_human` puts uneven gaps of roughly 80ms
+between characters, longer after a word ends.
+
+**Reasoning.** Posted characters land about 0.6ms apart, which is a rate no
+person types at, and some applications look. The messages are identical
+either way — only the timing changes — so this is not a second code path,
+which is asserted rather than assumed.
+
+Robot stays the default because most targets do not look and human pacing
+makes a long field take minutes. That cost has to be chosen, so it is
+per-call and recorded per target (D27) rather than global.
+
+**A non-robot cadence drops tier 1 from `set_text`.** A caller asking for
+human pacing is saying this target watches its input; a pattern call
+produces no input events at all. Offering it first would satisfy the action
+and defeat the reason for asking, silently — the one failure mode a cadence
+must not have.
+
+**What this cannot reach.** Three things are observable to a detector:
+timing, event shape, and physical key state. Cadence fixes the first. The
+second — real keystrokes arrive as `KEYDOWN`/`CHAR`/`KEYUP`, and we post a
+bare `CHAR` — is fixable but not free: posting the full triple double-types,
+because the target's own `TranslateMessage` synthesises the `CHAR` from the
+`KEYDOWN`, and letting it do so makes uppercase and symbols depend on a
+shift state we cannot set from outside. The third is not reachable at tier 3
+at all: `GetAsyncKeyState` only moves for real or synthetic input. A target
+checking key state can only be satisfied at tier 4, which needs the
+foreground — so for that target, unattended and undetected cannot both be
+had, and the operator has to choose.
+
+### D27. Input sensitivity is recorded per target, and declared beats learned
+
+**Decision.** An `input_sensitivity` section in the profile document, read
+at attach and reported in the session summary.
+
+**Reasoning.** The fact cannot live in a chat session. Sessions forget, and
+clients do not share notes, so every new session would rediscover it the
+only way it can be discovered — by tripping the target at machine speed,
+which is what the note exists to prevent.
+
+Two sources, and the asymmetry is the point. **Declared** is the only kind
+that helps on a first encounter, and one failure mode is invisible: a target
+can accept the input and flag the account server-side, where nothing
+observable will ever reveal it. Only a person can say so in advance.
+**Learned** means a session ran the differential — same action, robot
+failed, human succeeded — which is the single observation that separates
+input sensitivity from an ordinary validation failure.
+
+Keyed by target *and surface*, because a native shell hosting web content is
+two detectors in one window and they will not agree. A web region counting
+DOM events and a native toolkit that does not look are different answers to
+the same question about the same process.
+
+**This does not weaken R1.** Consent cannot be persisted because a person
+has to be *asked*; a cadence note carries no authority and gets nobody
+access to anything. It is a fact about the target, like its toolkit.
+
+A typo in a hand-edited note raises rather than defaulting to robot, for the
+same reason the rest of the file does: silently downgrading a caller who
+asked for pacing means they find out from the target.
+
+### D28. Actions report disturbances, and disturbances are never a verdict
+
+**Decision.** `ActionResult.disturbances` lists what moved around an action
+— a window that appeared, the application becoming held, the target taking
+the foreground, the target going away. It never affects `ok`.
+
+**Reasoning.** A postcondition answers one question the caller thought to
+ask. It will never mention the dialog that appeared next to it, and an
+action can succeed on its own terms while the application ends up somewhere
+the caller did not expect — measured against the fixture, and it is exactly
+how a driver walks into a held application on the following call.
+
+Not a verdict, because every observation has a benign twin. A new dialog is
+the application rejecting what was typed, or the confirmation the action was
+meant to raise. A vanished target is a robot-speed logout, or an idle
+timeout. The tool cannot tell, and a result that guessed would be wrong in
+whichever direction it guessed. The caller has the context; this makes sure
+the caller also has the observation.
+
+**The differential is the caller's to run, not the server's.** Retrying at
+`fast_human` is the experiment that separates the twins, and the error text
+says so. It is not automatic: a second attempt on a target that just flagged
+the first is a judgement call, and for a non-idempotent action a silent
+retry is a double click.
+
+**Instrumentation cannot break the action.** Both snapshots are guarded. An
+observer that throws reports no disturbances rather than failing an action
+that really happened — caught by a test written for exactly that, which
+failed the first time because only the second snapshot was wrapped.
+
 ## Open, for whoever picks this up
 
 - **The denylist is enforced but unexercised.** It matches captions and

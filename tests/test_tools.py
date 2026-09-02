@@ -236,7 +236,8 @@ def test_capture_returns_a_png(box, win32_target):
     session = attached(box, win32_target)
     result = box.capture(session)
 
-    assert result["ok"] and result["mime_type"] == "image/png"
+    assert result["ok"], result.get("error")
+    assert result["mime_type"] == "image/png"
     assert base64.b64decode(result["base64"])[:8] == PNG_MAGIC
     assert result["width"] > 0
 
