@@ -9,4 +9,8 @@ venv/
 # and a profile document carries the target's executable path, full command
 # line, host names and window captions -- customer identifiers that have no
 # business in version control.
-profile*.json
+# Any name an operator gives one: `profile*.json` missed dev-profile.json
+# during iteration 2, which is exactly the near-miss this is guarding.
+*profile*.json
+# ...except the documented placeholder, which carries no real endpoint.
+!docs/example-profile.json

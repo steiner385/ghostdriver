@@ -116,3 +116,102 @@ this stretch began, so branching now would split one iteration across a
 branch and `main` for no benefit. Pushing is outward-facing and nothing
 depends on it happening tonight. `main` is a local superset of `origin/main`
 and can be reviewed, amended or reset in the morning.
+
+### D9. The protocol layer holds no decisions
+
+**Decision.** `tools.py` returns plain data and carries every rule;
+`mcp_server.py` is a thin adapter over it.
+
+**Reasoning.** Everything that can be wrong — a tier not enforced, a result
+that blows a context budget, an error that says nothing actionable — is
+wrong in the toolbox, where it can be tested without a protocol client. The
+binding is tested separately, for wiring only: a tool registered but
+unreachable, or a schema that rejects an argument the implementation
+accepts, fails there and nowhere else.
+
+**Test of whether this is holding.** If a rule about tiers, truncation or
+error shape appears in `mcp_server.py`, it has leaked out of where it can be
+tested.
+
+### D10. Errors are results, not exceptions
+
+**Decision.** Every tool returns `{"ok": false, "error": {...}}` rather than
+raising through the protocol.
+
+**Reasoning.** An agent has to read a refusal and change course. A
+protocol-level exception gives it nothing to act on, and the error kinds
+(`denied_by_environment`, `ambiguous`, `timeout`) are the whole point of
+having distinguishable ones.
+
+### D11. Results cap themselves and say so
+
+**Decision.** `find` returns at most 50 elements; `describe` spends one node
+budget across all windows; both report what they left out.
+
+**Reasoning.** A target with ~1,100 windows can answer almost any query with
+more than a caller can read. A cap that stays silent is worse than no cap:
+it produces a confident, incomplete answer.
+
+### D12. Tool returns are `dict[str, Any]`, not `dict`
+
+**Decision.** A concrete annotation on every tool.
+
+**Reasoning.** The SDK refuses a bare `dict` for structured output. Without
+the annotation a client receives JSON text it has to parse rather than a
+structured result. Verified: all twelve tools publish an output schema.
+
+**Pinned consequence.** `mcp` is pinned `>=2.1,<3`. FastMCP was renamed to
+MCPServer at the 2.0 boundary, so 1.x and 2.x are not interchangeable.
+
+### D13. Fixture targets need an environment override
+
+**Assumption made visible by testing.** Fixture targets are
+`python -c <script>` and carry no URL, so the guard cannot determine what
+they are connected to and refuses them as `indeterminate`.
+
+**Consequence.** Every test that attaches to a fixture passes
+`override_environment=True`. That is the honest path — the guard is right
+that it cannot tell — and it exercises the override in the process.
+
+### D14. Class names are case-sensitive, and the system rewrites their case
+
+**Gotcha, found by a failing test.** The fixture registers its controls as
+`"BUTTON"`; Windows canonicalises that and reports `Button`. Class matching
+is `fnmatchcase`, so `class=BUTTON` matches nothing.
+
+**Consequence.** A locator must use the class name the system *reports*, not
+the one the application registered. `describe`'s suggested locators are
+generated from reported names and are therefore always correct — which is
+one more reason to prefer them over hand-written ones.
+
+### D15. `*profile*.json` is ignored, not `profile*.json`
+
+**Decision.** Widened after `dev-profile.json` — written during the
+validation run — was not caught by the original pattern.
+
+**Reasoning.** A profile document carries the target's executable path, full
+command line, host names and window captions. Operators name these files
+whatever suits them. `docs/example-profile.json` is negated back in, since
+it carries only placeholders and is the documentation for curating one.
+
+---
+
+## Open, for whoever picks this up
+
+- **The denylist is enforced but unexercised.** It matches captions and
+  refuses, and is unit-tested, but nothing calls it end to end because no
+  action verb exists yet. Iteration 3 is where it first does something.
+- **A re-probe overwrites curated policy** (D3). Foreseen, not yet
+  mitigated. The fix, if it bites, is for `probe` to merge rather than
+  replace.
+- **The endpoint-extraction assumption is n=1** (D5). One real target, whose
+  client happens to put its endpoint in the command line as a URL. A target
+  that identifies its server another way extracts nothing and is refused as
+  `indeterminate` — safe, but unhelpful.
+- **`capture` has no OCR behind it.** It returns pixels. Reading an
+  owner-drawn grid from those pixels is Iteration 5 per the spec, and the
+  spec is right that clipboard and export routes should be probed before
+  anything is built on OCR.
+- **The region model still mixes three axes.** See the Iteration 1 scoping
+  note in the published validation report. Deliberately unresolved until
+  there is a second target to decide against.

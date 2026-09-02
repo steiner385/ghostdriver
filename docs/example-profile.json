@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "A curated profile document. `ghostdriver probe --out` emits everything",
+    "here except `denylist` and `environment_allowlist`, which it leaves",
+    "empty for a human to fill in. Both are policy; everything else is",
+    "evidence.",
+    "",
+    "Until environment_allowlist has an entry, `attach` refuses: an empty",
+    "list means no environment has been approved, not that none is",
+    "required.",
+    "",
+    "Note: a re-probe overwrites this file and takes the curated policy with",
+    "it. Keep a copy, or keep policy in a file the probe does not write."
+  ],
+
+  "matched_profile": "L1",
+
+  "environment_allowlist": [
+    "http://dev-host:8183/dev-environment/*",
+    "https://staging.example.internal/*"
+  ],
+
+  "denylist": [
+    "*delete*",
+    "*submit*",
+    "*approve*",
+    "*complete task*",
+    "*release*"
+  ]
+}

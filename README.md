@@ -6,11 +6,14 @@ machine.
 
 ## Status
 
-Iteration 1: read-only reconnaissance. A CLI that enumerates a target's
-window tree, resolves declarative locators, reads control text, and emits a
-capability profile. No actuation. The MCP server arrives in Iteration 2.
+**Iteration 2: MCP server, read-only tier.** Twelve tools over a session
+manager, with capability tiers, a denylist, and an environment guard that
+refuses to attach to a target pointed somewhere it should not be driven.
+Still no actuation: nothing clicks, types, or changes application state.
 
-See `docs/superpowers/specs/2026-09-01-desktop-automation-mcp-design.md`.
+See `docs/superpowers/specs/2026-09-01-desktop-automation-mcp-design.md` for
+the design, `docs/DECISIONS.md` for what was decided along the way and why,
+and `docs/VALIDATION.md` for the Iteration 1 runbook.
 
 ## Why
 
@@ -20,55 +23,87 @@ pre-UIA toolkits expose a tree in which every element is a `Pane` and no
 element supports any pattern. Those applications remain drivable through
 window messages, and that tier is what this tool implements.
 
+Validation against a real target found the picture is not uniform even
+within one application. Its native shell exposed 29 accessibility elements
+with 2 usable patterns; an embedded web view inside the same window exposed
+231 with 92. Which mechanism reads a region is a per-region question, so the
+tool answers it per region.
+
 ## Install
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,server]"
 pytest
 ```
 
-## Use
+The `server` extra pulls in the MCP SDK. The CLI and the library work
+without it.
+
+## Use — MCP
+
+```bash
+ghostdriver-mcp          # stdio transport
+```
+
+Twelve tools at the `read_only` tier: `list_targets`, `attach`, `release`,
+`describe`, `find`, `read`, `capture`, `wait_for`, `probe`, `surfaces`,
+`modals`, `restore`.
+
+`attach` refuses unless the target's endpoint — read from its own command
+line — matches the `environment_allowlist` in a curated profile document.
+See `docs/example-profile.json`.
+
+## Use — CLI
 
 ```bash
 ghostdriver list-targets
 ghostdriver probe --pid 1234 --out profile.json
 ghostdriver describe --pid 1234 --depth 5
-ghostdriver describe --pid 1234 --depth 5 --collapse-threshold 1000
+ghostdriver describe --pid 1234 --depth 5 --all-windows
 ghostdriver find --pid 1234 --locator 'class=VendorButton text="Expand All"'
 ghostdriver read --pid 1234 --locator 'class=VendorEdit visible=true'
+ghostdriver surfaces --pid 1234
+ghostdriver modals --pid 1234
+ghostdriver restore --pid 1234
 ```
-
-See `docs/VALIDATION.md` for the full validation runbook, including gate-by-
-gate pass criteria and the shell form for ancestor-scoped locators.
 
 ## What this iteration does not do
 
-- **No actuation of any kind.** Nothing in this iteration clicks, types,
-  focuses, or otherwise changes a target's state.
-- **Only two cross-process messages are ever sent:** `WM_GETTEXT` and
-  `WM_GETTEXTLENGTH`. No other window message goes out to a target.
-- **Owner-drawn data grids yield no text through any accessibility
-  surface.** Neither UI Automation nor MSAA exposes cell contents for
-  that control shape, and this iteration does not address it — a grid
-  reading strategy is future work.
-- **Ancestor scoping (`within`) is Python-API-only.** `Locator.parse` has
-  no shorthand for it; there is no command-line equivalent in Iteration 1.
+- **No actuation of any kind.** Nothing clicks, types, focuses, or changes
+  application state. No actuation verb is registered as a tool, because a
+  tool an agent can find is a tool it will call.
+- **`launch` is not implemented.** It needs an isolation strategy, and the
+  `minimized` strategy ships in Iteration 4. Attach to a running target.
+- **The denylist is enforced but unexercised.** The machinery matches
+  captions and refuses, and is tested — but nothing calls it end to end,
+  because there is no action to refuse yet.
+- **Owner-drawn grids yield no text through any accessibility surface.**
+  Measured directly against two real grids across four surfaces: no child
+  windows, no text, no MSAA children, and a UIA subtree containing only
+  their own scrollbars. `capture` is the way in; a grid reading strategy is
+  future work.
 - **No role mapping.** `Locator` carries a `role` field for profiles to
-  populate later, but nothing resolves it yet, so `Locator.parse` rejects
+  populate later, but nothing resolves it, so `Locator.parse` rejects
   `role=` outright rather than accepting a query that would match nothing.
-- **There is no MCP server yet.** Everything above is a CLI that calls the
-  same functions an MCP server will call later. The protocol layer arrives
-  in Iteration 2.
 
 ## Design notes
 
 - **Locators, not handles.** The OS recycles window handles and voids them
   when a process exits, so elements are re-resolved from a declarative
-  query on every call.
+  query on every call. Results still report a handle, marked ephemeral,
+  because it is the only thing that distinguishes two identically-captioned
+  controls within a single result.
 - **Input-shaped messages, not semantic ones.** Semantic messages such as
   `BM_CLICK` are implemented by a specific window class and are discarded
   by anything else. Input-shaped messages only assume the toolkit handles
   mouse and keyboard input.
 - **Pure logic separated from platform calls.** The Windows backend
-  produces plain `WindowNode` trees; matching, summarization, and inference
-  operate on those and are testable on any platform.
+  produces plain `WindowNode` trees; matching, summarization, inference,
+  policy and waiting operate on those and are testable on any platform.
+- **The protocol layer holds no decisions.** `tools.py` returns plain data
+  and carries every rule; `mcp_server.py` is an adapter over it. Anything
+  that can be wrong is wrong somewhere testable without a protocol client.
+- **Menus, dropdowns and dialogs are separate top-level windows.** On a
+  measured target, 48% of the process's windows sat outside its main
+  window. Tools default to the main window and say so; `all_windows` reaches
+  the rest.

@@ -287,7 +287,14 @@ control and may be hand-edited — particularly `denylist`, `environment_allowli
 
 ## 6. MCP tool surface
 
-Fifteen tools, fixed regardless of how many applications are onboarded.
+Eighteen tools, fixed regardless of how many applications are onboarded.
+
+> **Amended during Iteration 2.** This read fifteen. Iteration 1's
+> validation added three capabilities — `surfaces`, `modals` and
+> `restore` — and they are exposed as tools rather than folded into
+> existing ones. The constraint that matters is unchanged: onboarding a
+> new application must not grow the surface. These are capabilities of
+> the tool, not of any application. See `docs/DECISIONS.md` D1.
 
 | Group | Tool | Purpose |
 |---|---|---|
@@ -306,6 +313,9 @@ Fifteen tools, fixed regardless of how many applications are onboarded.
 | Meta | `probe` | Run or refresh a capability profile |
 | | `wait_for` | Block until a locator matches a condition |
 | | `await_human` | Pause the run, surface the target, and wait for the operator |
+| Surface | `surfaces` | Classify each region by which mechanism can drive it |
+| | `modals` | Report whether a modal dialog is holding the target |
+| | `restore` | Un-minimize a target without taking the foreground |
 
 ### 6.1 `describe` must be engineered against context exhaustion
 
@@ -385,7 +395,7 @@ Set at `attach`/`launch`, immutable for the session's lifetime.
 
 | Tier | Permits |
 |---|---|
-| `read_only` | `describe`, `find`, `read`, `capture`, `wait_for`, probe phase 1 |
+| `read_only` | `describe`, `find`, `read`, `capture`, `wait_for`, `surfaces`, `modals`, `restore`, probe phase 1 |
 | `interactive` | Adds actions, **except** locators matching the profile denylist |
 | `full` | Everything, including probe phase 2 |
 
@@ -503,6 +513,16 @@ against it carries no risk to application state.
 **Validation gate.** An agent explores a real Profile L1 application end to end
 through MCP at `read_only` tier, and the environment guard demonstrably refuses
 a target pointed at a non-allowlisted endpoint.
+
+> **Met.** Against a live 196-window L1 client: `list_targets` → `attach`
+> refused with an uncurated profile, refused again with a production-only
+> allowlist (naming the endpoint it refused), then attached with the correct
+> one → `describe` → `surfaces` → `find` → `wait_for` (`settled`) →
+> `capture` of an owner-drawn region → `modals` → `release`. Zero foreground
+> changes and zero cursor movement throughout.
+>
+> `launch` is deferred to the iteration that ships an isolation strategy; the
+> gate does not require it. See `docs/DECISIONS.md` D2.
 
 ### Iteration 3 — Fixture, then actuation
 
