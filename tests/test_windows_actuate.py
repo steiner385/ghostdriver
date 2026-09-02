@@ -492,6 +492,134 @@ def test_the_precondition_holds_again_once_the_modal_is_dismissed():
         stop(proc, handles)
 
 
+def test_the_read_model_reports_a_blocked_control_as_unactionable():
+    """The same finding, on the read side, where an agent meets it first.
+
+    Reconnaissance is what a caller acts on. If `describe` shows every
+    control in a held application as enabled, the agent has no reason not to
+    try -- so the tree carries both answers: the window's own flag, and
+    whether anything above it is holding the application.
+    """
+    from ghostdriver.backends.windows.enumerate import enumerate_process
+    from ghostdriver.model.window import select_main_tree
+    from ghostdriver.tools import _element
+
+    proc, handles = start("--modal-after", "300")
+    try:
+        time.sleep(0.6)
+        tree = select_main_tree(enumerate_process(handles["pid"]))
+        button = next(n for n in tree.walk()
+                      if n.class_name == "GhostFixtureCommandButton")
+
+        assert button.enabled is True, "its own flag says nothing is wrong"
+        assert button.actionable is False, "and the chain says otherwise"
+        assert _element(button)["actionable"] is False, "a caller is told"
+    finally:
+        stop(proc, handles)
+
+
+def test_waiting_for_enabled_does_not_return_on_a_blocked_control():
+    """Otherwise the wait is worse than none at all.
+
+    "Wait until I can act on this" that returns immediately on a held
+    application hands the caller a green light into the block.
+    """
+    from ghostdriver.backends.windows.enumerate import enumerate_process
+    from ghostdriver.model.window import select_main_tree
+    from ghostdriver.wait import Condition, holds
+
+    proc, handles = start("--modal-after", "300")
+    try:
+        time.sleep(0.6)
+        tree = select_main_tree(enumerate_process(handles["pid"]))
+        buttons = [n for n in tree.walk()
+                   if n.class_name == "GhostFixtureCommandButton"]
+
+        assert buttons
+        assert not holds(Condition.ENABLED, buttons)
+    finally:
+        stop(proc, handles)
+
+
+def test_an_unactionable_element_becomes_actionable_again(app):
+    """And the ordinary case still reads as actionable, so the field is
+    reporting a state rather than a permanent property."""
+    from ghostdriver.backends.windows.enumerate import enumerate_process
+    from ghostdriver.model.window import select_main_tree
+
+    tree = select_main_tree(enumerate_process(app["pid"]))
+    buttons = [n for n in tree.walk()
+               if n.class_name == "GhostFixtureCommandButton"]
+
+    assert buttons
+    assert all(n.actionable for n in buttons)
+
+
+# --- what typing costs, and what it cannot promise -----------------------
+
+def test_typing_stops_where_the_control_stops_accepting_it(app):
+    """The other half of the `set_text` trade, measured.
+
+    A single-line field without ES_AUTOHSCROLL stops accepting keystrokes at
+    the visible width -- around twenty characters here -- while `WM_SETTEXT`
+    writes the whole string, because the programmatic path is not subject to
+    the control's input handling. So the two paths are wrong in opposite
+    directions: the fast path sets a value the application never accepted,
+    and typing sets only as much as the control would take.
+
+    Left as it is, deliberately. Typing is faithful precisely *because* it
+    is subject to whatever the control does to input, and a driver that
+    widened the field or raised its limit to get the whole string in would
+    be changing the target to make its own test pass.
+    """
+    from ghostdriver.backends.windows.input import (set_text_by_message,
+                                                    set_text_by_typing)
+
+    field = find(app["pid"], "GhostFixtureBoundEdit")[0]
+    display = reads(field.handle)
+    long_value = "B" * 80
+
+    assert set_text_by_typing(field.handle, long_value)
+    time.sleep(0.6)
+    typed = display()
+    assert typed and long_value.startswith(typed), "a prefix, silently"
+    assert len(typed) < len(long_value)
+
+    assert set_text_by_message(field.handle, long_value)
+    time.sleep(0.3)
+    assert display() == long_value, "the programmatic path is not limited"
+
+
+def test_the_controls_declared_limit_does_not_predict_where_it_stops(app):
+    """Why this cannot be checked in advance, only verified afterwards.
+
+    The control answers `EM_GETLIMITTEXT` with 30000 and accepts about
+    twenty. The number that matters depends on the rendered width of the
+    glyphs actually typed, so there is nothing to ask beforehand -- which
+    makes reading the value back the only way to know, and an unverified
+    `set_text` a guess.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    from ghostdriver.backends.windows.input import set_text_by_typing
+
+    EM_GETLIMITTEXT = 0x00D5
+    user32 = ctypes.WinDLL("user32")
+    user32.SendMessageW.restype = ctypes.c_ssize_t
+
+    field = find(app["pid"], "GhostFixtureBoundEdit")[0]
+    declared = user32.SendMessageW(wintypes.HWND(field.handle),
+                                   EM_GETLIMITTEXT, 0, 0)
+
+    assert set_text_by_typing(field.handle, "B" * 80)
+    time.sleep(0.6)
+    accepted = len(reads(field.handle)())
+
+    assert declared > 1000, "the control claims a limit far above what it took"
+    assert accepted < 80
+
+
 # --- induced failure: the target grabs the foreground (item 5) -----------
 
 @pytest.mark.skipif(

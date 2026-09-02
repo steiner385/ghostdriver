@@ -36,13 +36,26 @@ def direct_children(hwnd: int) -> list[int]:
 
 
 def build_tree(hwnd: int, *, max_depth: int = 32) -> WindowNode:
-    """Recursively build a WindowNode for `hwnd` and its descendants."""
+    """Recursively build a WindowNode for `hwnd` and its descendants.
 
-    def build(handle: int, depth: int) -> WindowNode:
+    `actionable` is threaded down rather than asked for. `IsWindowEnabled`
+    answers for one window, so a control inside a modally blocked
+    application reports enabled and a caller acting on that answer drives an
+    application nobody can touch. The ancestry is already in hand here,
+    which makes the real answer free -- no extra system call, and no second
+    pass over the tree.
+    """
+
+    def build(handle: int, depth: int, reachable: bool) -> WindowNode:
+        enabled = bool(
+            winapi.user32.IsWindowEnabled(wintypes.HWND(handle))
+        )
+        actionable = reachable and enabled
         children: tuple[WindowNode, ...] = ()
         if depth < max_depth:
             children = tuple(
-                build(c, depth + 1) for c in direct_children(handle)
+                build(c, depth + 1, actionable)
+                for c in direct_children(handle)
             )
         raw_text = read_window_text(handle)
         return WindowNode(
@@ -51,13 +64,14 @@ def build_tree(hwnd: int, *, max_depth: int = 32) -> WindowNode:
             text=raw_text or "",
             rect=winapi.window_rect(handle),
             visible=bool(winapi.user32.IsWindowVisible(wintypes.HWND(handle))),
-            enabled=bool(winapi.user32.IsWindowEnabled(wintypes.HWND(handle))),
+            enabled=enabled,
             pid=winapi.window_pid(handle),
             children=children,
             responsive=raw_text is not None,
+            actionable=actionable,
         )
 
-    return build(hwnd, 0)
+    return build(hwnd, 0, True)
 
 
 def enumerate_process(pid: int) -> list[WindowNode]:

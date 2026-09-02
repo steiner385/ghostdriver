@@ -412,6 +412,61 @@ ignore the result. Two samples separate the cases: the tool either moves the
 cursor at the moment it acts or never, while a hand keeps moving. The
 foreground assertion needs no such guard and is made unconditionally.
 
+### D23. The tree carries `actionable` alongside `enabled`
+
+**Decision.** `WindowNode` gains `actionable` — this window and every
+ancestor enabled — computed while the backend walks the tree. `enabled`
+keeps its old meaning: the window's own flag, and nothing more.
+
+**Reasoning.** D20 fixed actuation; this is the same finding on the read
+side, which is where an agent meets it first. Reconnaissance is what a
+caller acts on, and `describe` showing every control in a modally held
+application as enabled gives the agent no reason not to try.
+
+Both are reported rather than one replacing the other, because "enabled, but
+something above it is holding the application" is a more useful thing to see
+than either half alone. `_element` emits `actionable` only when it is False:
+a key on every element in the ordinary case would cost the result budget to
+say nothing.
+
+`wait_for(condition="enabled")` now means actionable. Anyone waiting to act
+on a control means "until I can act on it", and the old reading returned
+immediately on a blocked application — a wait that hands the caller a green
+light into the block is worse than no wait at all.
+
+Free in system calls: the ancestry is already in hand during the walk.
+
+### D24. Typing is left subject to the control's own limits
+
+**Finding, and a decision not to fix it.** A single-line field without
+`ES_AUTOHSCROLL` stops accepting keystrokes at the visible width. Measured:
+about twenty characters, while `WM_SETTEXT` writes all eighty, because the
+programmatic path is not subject to the control's input handling.
+
+So the two paths are wrong in opposite directions. The fast path sets a value
+the application never accepted; typing sets only as much as the control would
+take, silently, as a prefix.
+
+Typing stays the default anyway, and stays unmodified. It is faithful
+*because* it is subject to whatever the control does to input — the same
+property that makes a bound value commit is the one that makes a length
+limit bite. A driver that widened the field or raised its limit to get the
+whole string in would be changing the target in order to make its own action
+succeed, which is the opposite of what this tool is for.
+
+**The consequence that matters.** The control answers `EM_GETLIMITTEXT` with
+30000 and accepts about twenty. The number that decides the outcome depends
+on the rendered width of the glyphs actually typed, so there is nothing to
+ask beforehand. Combined with D21, an unverified `set_text` can be wrong in
+two unrelated ways, neither detectable in advance. Reading the value back is
+the only way to know.
+
+That is a requirement for the actuation tool surface, which does not exist
+yet: `set_text` should verify by default rather than on request. Truncation
+is detectable generically — compare the resulting display against what was
+asked. Whether the value *committed* is not, and still needs an expectation
+only the caller can state.
+
 ## Open, for whoever picks this up
 
 - **The denylist is enforced but unexercised.** It matches captions and

@@ -19,6 +19,14 @@ class WindowNode:
     `responsive` is False when the control did not answer a text query
     within the timeout, in which case `text` is empty but its true value is
     unknown rather than genuinely absent.
+
+    `enabled` is the window's own flag and nothing more, which is less than
+    it sounds like. Measured on a modally blocked application: the top-level
+    reports disabled and every control inside it reports *enabled*, because
+    a modal disables the top-level and the children are only unreachable
+    through it. `actionable` is the question a caller is really asking --
+    this window and every ancestor enabled -- and it is None when no backend
+    computed it rather than defaulting to the reassuring answer.
     """
 
     handle: int
@@ -30,6 +38,7 @@ class WindowNode:
     pid: int
     children: tuple["WindowNode", ...] = ()
     responsive: bool = True
+    actionable: bool | None = None
 
     def walk(self) -> Iterator["WindowNode"]:
         """Yield this node then all descendants, in pre-order."""

@@ -59,6 +59,14 @@ def _element(node: WindowNode) -> dict:
         # tells two identically-captioned controls apart within one result.
         "handle_ephemeral": f"0x{node.handle:08X}",
     }
+    if node.actionable is False:
+        # Only when False, and only then. A control whose own flag is
+        # enabled but which sits under a disabled ancestor looks perfectly
+        # actionable in a listing, and a caller has no way to tell from the
+        # element itself -- so it is worth the bytes. On the ordinary case
+        # it says nothing, because every element carrying "actionable": true
+        # would cost the result budget for no information.
+        described["actionable"] = False
     if node.text:
         described["locator"] = f'class={node.class_name} text="{node.text}"'
     return described

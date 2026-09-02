@@ -47,7 +47,15 @@ def holds(condition: Condition, matches: Sequence[WindowNode]) -> bool:
     if condition is Condition.VISIBLE:
         return all(n.visible for n in matches)
     if condition is Condition.ENABLED:
-        return all(n.enabled for n in matches)
+        # `actionable` where a backend computed it. Anyone waiting to act on
+        # a control means "until I can act on it", and the window's own flag
+        # answers yes for every control in a modally blocked application --
+        # so the wait would return immediately and the action would then run
+        # into the block.
+        return all(
+            n.enabled if n.actionable is None else n.actionable
+            for n in matches
+        )
     if condition is Condition.RESPONSIVE:
         return all(n.responsive for n in matches)
     return False  # SETTLED is decided across polls, not within one
