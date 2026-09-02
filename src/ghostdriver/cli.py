@@ -53,6 +53,27 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--pid", type=int, required=True)
     probe.add_argument("--out", default=None)
 
+    surfaces = sub.add_parser(
+        "surfaces",
+        help=(
+            "Map which mechanism can drive each region: window messages, "
+            "an accessibility surface, a web document, or pixels only"
+        ),
+    )
+    surfaces.add_argument("--pid", type=int, required=True)
+    surfaces.add_argument(
+        "--all", action="store_true", help="Include hidden windows"
+    )
+    surfaces.add_argument(
+        "--changed-from",
+        default=None,
+        metavar="DIGEST",
+        help=(
+            "Exit 4 if the surface map's shape differs from this digest, "
+            "for detecting that a screen now needs a different approach"
+        ),
+    )
+
     restore = sub.add_parser(
         "restore",
         help=(
@@ -222,6 +243,53 @@ def cmd_probe(pid: int, out: str | None) -> int:
     return 0
 
 
+def cmd_surfaces(pid: int, show_all: bool, changed_from: str | None) -> int:
+    from .backends.windows.region import region_evidence
+    from .surface import SurfaceKind, map_digest, summarize_kinds, surface_map
+
+    tree = _main_tree(pid)
+    if tree is None:
+        return 2
+
+    regions = surface_map(
+        tree, region_evidence, visible_only=not show_all
+    )
+    digest = map_digest(regions)
+
+    counts = summarize_kinds(regions)
+    print("regions by kind: " + ", ".join(f"{k}={v}" for k, v in counts.items()))
+    print(f"shape digest   : {digest}")
+
+    # Only the regions a caller has to do something about. Listing the
+    # native ones would bury them: they are the overwhelming majority and
+    # they are the case that already works.
+    other = [r for r in regions if r.kind is not SurfaceKind.NATIVE]
+    if other:
+        print()
+        print(f"{len(other)} region(s) need a mechanism other than "
+              "window messages:")
+        for region in sorted(other, key=lambda r: -r.area):
+            left, top, right, bottom = region.rect
+            print(
+                f"  {region.kind.value:18s} {region.class_name:26s} "
+                f"({left}, {top}, {right}, {bottom})  {region.area}px"
+            )
+            print(f"      {region.reason}")
+    else:
+        print()
+        print("every visible region is reachable by window messages")
+
+    if changed_from is not None and changed_from != digest:
+        print(
+            f"CHANGED: shape digest was {changed_from}, now {digest}. "
+            "A region changed kind, or a new kind appeared -- an approach "
+            "that worked before may not now.",
+            file=sys.stderr,
+        )
+        return 4
+    return 0
+
+
 def cmd_restore(pid: int) -> int:
     # Imported here, like every other backend use in this module, so the CLI
     # stays importable on a host with no Windows backend.
@@ -302,6 +370,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_probe(args.pid, args.out)
     if args.command == "restore":
         return cmd_restore(args.pid)
+    if args.command == "surfaces":
+        return cmd_surfaces(args.pid, args.all, args.changed_from)
     return 2
 
 
