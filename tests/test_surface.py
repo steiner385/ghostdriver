@@ -85,6 +85,42 @@ def test_a_browser_host_class_is_a_web_document():
     assert kind_of(node(class_name="Internet Explorer_Server")) is SurfaceKind.WEB
 
 
+def test_a_browser_host_wins_over_its_own_child_windows():
+    """Order inside the classifier is load-bearing, and this is why.
+
+    Measured on a real embedded browser: the host window owns a chain of
+    compositing child windows -- a second host, a render-widget window, a
+    D3D window. They are real child HWNDs, so the "window tree continues"
+    test matches, and on evidence alone the region classifies as native.
+    A caller would then walk into the compositor and try to drive a
+    document with window messages.
+
+    The class signature carries information no amount of probing recovers:
+    with the engine's accessibility surface dormant, the host exposes a
+    single Pane and nothing else.
+    """
+    host = node(class_name="Chrome_WidgetWin_0", w=1508, h=625, children=[
+        node(class_name="Chrome_WidgetWin_1", handle=2, children=[
+            node(class_name="Chrome_RenderWidgetHostHWND", handle=3),
+        ]),
+    ])
+    assert kind_of(host) is SurfaceKind.WEB
+
+
+def test_a_dormant_engine_is_still_a_web_document():
+    """An embedded engine exposes its document tree lazily.
+
+    Measured: 1 element, no patterns, depth 0 -- evidence indistinguishable
+    from an empty container. The region is still a web document and still
+    needs a DOM, so this must not depend on the engine having woken up.
+    """
+    assert kind_of(
+        node(class_name="Chrome_WidgetWin_0", w=1508, h=625),
+        accessible_elements=0,
+        accessible_named=0,
+    ) is SurfaceKind.WEB
+
+
 def test_an_unresponsive_region_is_not_reported_as_opaque():
     """Silence is not emptiness.
 
