@@ -130,6 +130,14 @@ class ProfileDocument:
     #: were the whole program.
     blocked_by: list[str] = field(default_factory=list)
 
+    #: What this target is known to be sensitive about: whether it wants
+    #: human-paced input, per surface, and whether that was declared by an
+    #: operator or learned by a session that ran the differential. Curated
+    #: rather than probed -- nothing read-only can determine it, and the
+    #: encounter that matters most is the first one, before any session has
+    #: had a chance to learn anything.
+    input_sensitivity: list[dict] = field(default_factory=list)
+
     # Populated by supervised phase-2 learning (Iteration 4) or by operator
     # curation. Empty here because nothing read-only can determine them.
     actuation_map: dict = field(default_factory=dict)
@@ -155,6 +163,7 @@ class ProfileDocument:
             "class_census": self.class_census,
             "uia": self.uia,
             "msaa": self.msaa,
+            "input_sensitivity": self.input_sensitivity,
             "actuation_map": self.actuation_map,
             "grid_strategy": self.grid_strategy,
             "focus_behavior": self.focus_behavior,

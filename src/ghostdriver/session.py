@@ -23,19 +23,29 @@ from pathlib import Path
 
 from .model.result import ErrorKind, GhostdriverError
 from .policy import ConsentSource, Grant, Tier, denied, permits
+from .sensitivity import Sensitivity
 
 
 @dataclass(frozen=True, slots=True)
 class Profile:
     """The curated half of a profile document.
 
-    Only `denylist` is read now: which controls may never be actuated. Which
-    *targets* may be driven is a session-time decision, not a file.
+    Two things are read. `denylist`: which controls may never be actuated.
+    `sensitivity`: how this target wants to be typed at. Which *targets* may
+    be driven is a session-time decision, not a file -- consent has to be
+    asked for, and a file cannot be asked.
+
+    A cadence note is different in kind from consent, which is why it can
+    live here. It carries no authority and gets nobody access to anything;
+    it is a fact about the target, like its toolkit. And it has to be
+    durable, because the alternative is every new session rediscovering it
+    the only way it can be discovered -- by tripping it.
     """
 
     path: Path | None = None
     matched_profile: str = "unknown"
     denylist: tuple[str, ...] = ()
+    sensitivity: Sensitivity = field(default_factory=Sensitivity)
 
     @classmethod
     def load(cls, path: str | Path) -> "Profile":
@@ -53,10 +63,21 @@ class Profile:
                 ErrorKind.DENIED_BY_POLICY,
                 f"profile {location} could not be read: {exc}",
             ) from exc
+        try:
+            sensitivity = Sensitivity.from_list(
+                document.get("input_sensitivity")
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise GhostdriverError(
+                ErrorKind.DENIED_BY_POLICY,
+                f"profile {location} has an unreadable input_sensitivity "
+                f"section: {exc}",
+            ) from exc
         return cls(
             path=location,
             matched_profile=document.get("matched_profile", "unknown"),
             denylist=tuple(document.get("denylist") or ()),
+            sensitivity=sensitivity,
         )
 
     @classmethod
@@ -75,7 +96,7 @@ class Session:
     opened_at: float = field(default_factory=time.time)
 
     def summary(self) -> dict:
-        return {
+        described = {
             "session_id": self.session_id,
             "pid": self.pid,
             "tier": self.tier.value,
@@ -86,6 +107,14 @@ class Session:
             },
             "denylist_patterns": len(self.profile.denylist),
         }
+        # Told, not left to be discovered. A session that has to learn this
+        # learns it by tripping the target at machine speed, which is the
+        # thing the note exists to prevent -- so it is said at attach, in
+        # the summary every session reads first.
+        known = self.profile.sensitivity.describe()
+        if known:
+            described["input_sensitivity"] = known
+        return described
 
 
 class ConsentRequired(GhostdriverError):
