@@ -124,6 +124,7 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
             # after a clean look at a full one.
             "source": toolkit.source,
             "modules_readable": toolkit.modules_readable,
+            "disagreement": toolkit.disagreement,
         },
         integrity_level=facts.integrity_level,
         dpi={"awareness": facts.dpi_awareness},

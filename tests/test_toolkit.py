@@ -125,11 +125,93 @@ def test_class_inference_never_claims_high_confidence():
     assert result.confidence in ("medium", "low")
 
 
-def test_loaded_modules_still_win_over_classes():
+def test_window_classes_outrank_loaded_modules():
+    """The inversion, and the reason for it.
+
+    A plugin can load a DLL into a process; a plugin cannot change the class
+    of the application's own windows. So classes answer "what is this built
+    on" and modules answer "what is running inside it", and only the first
+    is the question being asked.
+
+    Found on a live target: a word processor reported itself as .NET because
+    it loads the CLR for add-ins, while its windows were unmistakably its
+    own framework's.
+    """
     result = infer_toolkit(["C:/app/mfc140.dll"], class_names=VCL_CLASSES)
 
-    assert result.toolkit == "mfc"
+    assert result.toolkit == "delphi-vcl"
+    assert result.source == "window-classes"
+
+
+def test_a_disagreement_is_reported_rather_than_resolved_silently():
+    """The caller may know something the signature tables do not."""
+    result = infer_toolkit(["C:/app/mscoree.dll"], class_names=VCL_CLASSES)
+
+    assert result.toolkit == "delphi-vcl"
+    assert result.confidence == "ambiguous"
+    assert "dotnet" in result.competing
+    assert "mscoree.dll" in result.disagreement
+    assert "cannot change the class" in result.disagreement
+
+
+def test_agreement_between_both_sources_is_stronger_than_either():
+    result = infer_toolkit(
+        ["C:/app/vcl170.bpl", "C:/app/rtl170.bpl"], class_names=VCL_CLASSES
+    )
+
+    assert result.toolkit == "delphi-vcl"
+    assert result.confidence == "high"
+    assert result.source == "window-classes+modules"
+    assert "vcl170.bpl" in result.evidence
+    assert any(e.startswith("class:") for e in result.evidence)
+
+
+def test_modules_still_answer_when_the_class_table_does_not_know_the_app():
+    """Inversion is a precedence rule, not a rejection of module evidence.
+
+    For most frameworks the runtime is definitive -- a JVM, a VB6 virtual
+    machine -- and an application whose classes are unknown to the table
+    would otherwise be reported as unknown despite clear evidence.
+    """
+    result = infer_toolkit(["C:/app/jvm.dll"], class_names=["SomeVendorThing"])
+
+    assert result.toolkit == "java"
     assert result.source == "modules"
+    assert not result.disagreement
+
+
+def test_an_office_application_is_not_reported_as_dotnet():
+    """The case that prompted the inversion.
+
+    Office loads the CLR for add-ins. Its window classes say what it is.
+    """
+    office_classes = ["OpusApp", "NetUIHWND", "MsoWorkPane",
+                      "MsoCommandBarDock", "NUIPane"]
+    result = infer_toolkit(["C:/office/mscoree.dll"],
+                           class_names=office_classes)
+
+    assert result.toolkit == "office"
+    assert "dotnet" in result.competing, "and the CLR is still reported"
+
+
+def test_a_browser_shell_is_identified_as_its_own_host_toolkit():
+    """Chromium is the host here, not an embedded guest."""
+    result = infer_toolkit([], class_names=["Chrome_WidgetWin_1",
+                                            "Chrome_RenderWidgetHostHWND"])
+
+    assert result.toolkit == "chromium"
+    assert "embedded-webview" in result.secondary
+
+
+def test_an_office_app_hosting_a_web_view_keeps_office_as_the_host():
+    """Both sets of classes are present; the host is the one with more of
+    them, and the web view is reported as a secondary framework."""
+    mixed = ["OpusApp", "NetUIHWND", "MsoWorkPane", "NUIPane",
+             "Chrome_WidgetWin_1"]
+    result = infer_toolkit([], class_names=mixed)
+
+    assert result.toolkit == "office"
+    assert "embedded-webview" in result.secondary
 
 
 def test_unreadable_modules_are_not_reported_as_no_signature():
@@ -190,3 +272,19 @@ def test_real_mfc_runtimes_are_still_matched():
     for genuine in ("mfc140.dll", "mfc140u.dll", "mfc42.dll", "mfc42u.dll"):
         result = infer_toolkit([rf"C:\app\{genuine}"])
         assert result.toolkit == "mfc", genuine
+
+
+def test_hosting_uwp_content_is_not_being_a_uwp_application():
+    """A second category error, caught the same way as the first.
+
+    A Win32 shell that hosts XAML islands owns ApplicationFrameWindow and
+    CoreWindow classes. Treating those as host-toolkit evidence reported it
+    as a UWP application -- exactly the mistake that treating a plugin's
+    runtime as host evidence produces.
+    """
+    shell = ["Shell_TrayWnd", "WorkerW", "ApplicationFrameWindow",
+             "Windows.UI.Core.CoreWindow"]
+    result = infer_toolkit([], class_names=shell)
+
+    assert result.toolkit != "uwp-winui"
+    assert "hosts-uwp-content" in result.secondary, "reported, not ignored"
