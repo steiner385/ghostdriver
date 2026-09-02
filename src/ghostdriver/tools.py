@@ -611,7 +611,8 @@ class Toolbox:
 
         from .backends.windows.region import region_evidence
         from .surface import (
-            SurfaceKind, map_digest, summarize_kinds, surface_map,
+            map_digest, needs_other_mechanism, summarize_access,
+            summarize_kinds, surface_map,
         )
 
         trees = self._trees(session.pid, all_windows)
@@ -626,16 +627,25 @@ class Toolbox:
                                  visible_only=not include_hidden)
         ]
         digest = map_digest(regions)
-        other = [r for r in regions if r.kind is not SurfaceKind.NATIVE]
+        # On `access`, not on `kind`. A live embedded document is not native
+        # and does not need another mechanism -- the accessibility surface
+        # already reaches it, and listing it here sent a caller off to build
+        # a browser protocol for a region within reach.
+        other = needs_other_mechanism(regions)
         return {
             "ok": True,
             "blocked": self._blocking(session.pid),
             "kinds": summarize_kinds(regions),
+            # What is readable right now, and how. Separate from `kinds`
+            # because it moves while the application runs and `kinds` does
+            # not: an engine waking changes this and not that.
+            "access": summarize_access(regions),
             "shape_digest": digest,
             "changed": (changed_from is not None and changed_from != digest),
             "regions_needing_another_mechanism": [
                 {
                     "kind": r.kind.value,
+                    "access": r.access.value,
                     "class": r.class_name,
                     "rect": {"left": r.rect[0], "top": r.rect[1],
                              "right": r.rect[2], "bottom": r.rect[3]},

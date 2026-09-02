@@ -887,9 +887,6 @@ findable by searching the history for the name.
   owner-drawn grid from those pixels is Iteration 5 per the spec, and the
   spec is right that clipboard and export routes should be probed before
   anything is built on OCR.
-- **The region model still mixes three axes.** See the Iteration 1 scoping
-  note in the published validation report. Deliberately unresolved until
-  there is a second target to decide against.
 
 ---
 
@@ -947,3 +944,57 @@ deserves rather than treating every tool as potentially destructive.
 `restore` is excluded deliberately: it changes no application state but does
 change what a person can see on their screen, and a client is entitled to
 treat that as worth a prompt.
+
+### R4. The region model splits into two axes
+
+**Supersedes the single `SurfaceKind` enum, and closes the open item that
+deferred this until there was a second target to decide against.**
+
+**What was wrong.** One enum answered three different questions depending on
+which value it held. `NATIVE`, `ACCESSIBLE` and `OPAQUE` said how to reach a
+region. `WEB` said what a region *is*. `UNRESPONSIVE` said that nothing was
+established. A caller reading one field could not know which question it had
+just been answered.
+
+**The defect that made it more than untidy.** An embedded engine keeps the
+class that identifies it whether its document tree is live or dormant, while
+the way in changes completely between those states. `map_digest` fingerprints
+`class:kind`, so it did not move across that transition — and the digest
+exists precisely so a caller can notice "the approach I am using has stopped
+working". Reproduced with the numbers measured earlier on a real target: one
+element while suspended, 203 once awake, same digest both times.
+
+The live/dormant answer did exist, but only inside the prose `reason`.
+Information in a sentence cannot be acted on by a caller or seen by a change
+detector.
+
+**What replaced it.**
+
+- `kind` — what the region is: `native`, `web-document`, `owner-drawn`,
+  `unknown`. Stable while the application runs.
+- `access` — what reaches its content now: `window-messages`,
+  `accessibility`, `pixels`, `none`. Moves as the application runs.
+
+`map_digest` covers both, so waking an engine now registers. `access` is
+about *reading*; actuation is the tier ladder's question, and an owner-drawn
+region that can only be read as pixels still takes an ordinary click.
+
+`unknown` and `owner-drawn` stay separate, as `UNRESPONSIVE` and `OPAQUE`
+did: one region is known to expose nothing, the other never answered.
+Merging them would send a caller to capture pixels of a window that may be
+about to recover.
+
+**Measured against a second target, which is what the deferral was for.** An
+Electron application reports `kind: web-document` with `access:
+accessibility` — one region, 1.27M px, the whole application, readable
+through the accessibility surface with no browser protocol at all. Under the
+old model it said "web-document" and nothing else, and the obvious inference
+from that label is the expensive one. Two native shells classified as
+entirely `window-messages` with no false positives.
+
+**One thing this did *not* fix, contrary to first appearances.** Membership
+of `regions_needing_another_mechanism` is unchanged: a live web region still
+cannot be read with window messages, so it still belongs on that list. A
+test asserting otherwise was wrong and was corrected. What changed is that
+the list now names the mechanism for each entry rather than leaving a caller
+to infer it from a conflated label.

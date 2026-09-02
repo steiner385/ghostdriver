@@ -10,12 +10,13 @@ from ghostdriver.model.window import WindowNode
 from ghostdriver.surface import (
     CHROME_ELEMENT_BUDGET,
     MIN_REGION_AREA,
+    Access,
     Region,
     RegionEvidence,
     SurfaceKind,
     classify_region,
     map_digest,
-    non_native,
+    needs_other_mechanism,
     surface_map,
     walk_regions,
 )
@@ -30,14 +31,22 @@ def node(class_name="TThing", text="", w=400, h=300, visible=True,
     )
 
 
-def kind_of(n, **evidence):
+def classified(n, **evidence):
     base = dict(
         child_windows=len(n.children),
         answers_text=n.responsive,
         has_own_text=bool(n.text),
     )
     base.update(evidence)
-    return classify_region(n, RegionEvidence(**base))[0]
+    return classify_region(n, RegionEvidence(**base))
+
+
+def kind_of(n, **evidence):
+    return classified(n, **evidence)[0]
+
+
+def access_of(n, **evidence):
+    return classified(n, **evidence)[1]
 
 
 # --- the four mechanisms ------------------------------------------------
@@ -63,21 +72,21 @@ def test_a_small_childless_leaf_is_native_not_a_region():
 
 
 def test_a_large_silent_childless_region_is_opaque():
-    assert kind_of(node(w=900, h=200), accessible_elements=0) is SurfaceKind.OPAQUE
+    assert kind_of(node(w=900, h=200), accessible_elements=0) is SurfaceKind.OWNER_DRAWN
 
 
-def test_a_region_with_an_element_tree_beneath_it_is_drivable():
-    """The embedded-document case.
+def test_a_region_with_an_element_tree_beneath_it_is_read_there():
+    """Where the two axes come apart on the same region.
 
     No child windows and no text, exactly like an owner-drawn control --
-    but another surface exposes structure inside it, so there is a way in
-    that is not pixels.
+    but another surface exposes structure inside it. It is still a native
+    window; what changed is the way in.
     """
-    assert kind_of(
-        node(w=900, h=600),
-        accessible_elements=CHROME_ELEMENT_BUDGET + 20,
-        accessible_named=15,
-    ) is SurfaceKind.ACCESSIBLE
+    evidence = dict(accessible_elements=CHROME_ELEMENT_BUDGET + 20,
+                    accessible_named=15)
+
+    assert kind_of(node(w=900, h=600), **evidence) is SurfaceKind.NATIVE
+    assert access_of(node(w=900, h=600), **evidence) is Access.ACCESSIBILITY
 
 
 def test_a_browser_host_class_is_a_web_document():
@@ -125,7 +134,7 @@ def _web_reason(**evidence):
     host = node(class_name="Chrome_WidgetWin_0", w=1508, h=625)
     base = dict(child_windows=1, answers_text=True, has_own_text=False)
     base.update(evidence)
-    return classify_region(host, RegionEvidence(**base))[1]
+    return classify_region(host, RegionEvidence(**base))[2]
 
 
 def test_a_web_region_says_whether_it_can_be_read_right_now():
@@ -138,15 +147,21 @@ def test_a_web_region_says_whether_it_can_be_read_right_now():
     to guess, and the expensive guess, "build a browser protocol", is the
     one the bare label invites.
     """
-    live = _web_reason(accessible_elements=40, accessible_named=13)
-    dormant = _web_reason(accessible_elements=0)
+    host = node(class_name="Chrome_WidgetWin_1")
+    live = classified(host, accessible_elements=40, accessible_named=13)
+    dormant = classified(host, accessible_elements=0)
 
-    assert "live" in live and "40 elements" in live
-    assert "without a separate browser protocol" in live
+    # Identity is the same in both, which is the point of separating them.
+    assert live[0] is dormant[0] is SurfaceKind.WEB
 
-    assert "dormant" in dormant
-    assert "woken" in dormant or "browser protocol" in dormant
-    assert live != dormant
+    # Readability is not, and it is a value rather than a turn of phrase.
+    # It used to live only in the reason string, where nothing could act on
+    # it and no change detector could see it.
+    assert live[1] is Access.ACCESSIBILITY
+    assert dormant[1] is Access.NONE
+
+    assert "live" in live[2] and "40 elements" in live[2]
+    assert "dormant" in dormant[2]
 
 
 def test_a_web_region_is_probed_even_though_its_class_already_decided_it():
@@ -176,7 +191,7 @@ def test_an_unresponsive_region_is_not_reported_as_opaque():
     A control that never answered might be full of data. Calling it opaque
     would send a caller to OCR on the strength of a timeout.
     """
-    assert kind_of(node(w=900, h=600, responsive=False)) is SurfaceKind.UNRESPONSIVE
+    assert kind_of(node(w=900, h=600, responsive=False)) is SurfaceKind.UNKNOWN
 
 
 # --- the trap this classifier fell into once ----------------------------
@@ -195,7 +210,7 @@ def test_a_scrollbars_own_elements_do_not_make_a_region_drivable():
         node(w=1159, h=162),
         accessible_elements=6,
         accessible_named=6,
-    ) is SurfaceKind.OPAQUE
+    ) is SurfaceKind.OWNER_DRAWN
 
 
 def test_the_budget_is_a_threshold_not_a_coincidence():
@@ -203,8 +218,8 @@ def test_the_budget_is_a_threshold_not_a_coincidence():
                         accessible_elements=CHROME_ELEMENT_BUDGET)
     past_budget = kind_of(node(w=900, h=600),
                           accessible_elements=CHROME_ELEMENT_BUDGET + 1)
-    assert at_budget is SurfaceKind.OPAQUE
-    assert past_budget is SurfaceKind.ACCESSIBLE
+    assert at_budget is SurfaceKind.OWNER_DRAWN
+    assert past_budget is SurfaceKind.NATIVE
 
 
 # --- every answer carries its reasons -----------------------------------
@@ -223,7 +238,7 @@ def test_every_classification_explains_itself():
         base = dict(child_windows=len(n.children), answers_text=n.responsive,
                     has_own_text=bool(n.text))
         base.update(ev)
-        _, reason = classify_region(n, RegionEvidence(**base))
+        _, _, reason = classify_region(n, RegionEvidence(**base))
         assert reason and len(reason) > 10
 
 
@@ -266,31 +281,35 @@ def test_evidence_is_only_gathered_where_it_can_change_the_answer():
     assert asked == ["Undecided_BigAndSilent"]
 
 
-def test_non_native_is_the_caller_actionable_subset():
+def test_the_actionable_subset_is_chosen_by_access_not_by_kind():
     tree = node(class_name="Shell", handle=1, children=[
         node(class_name="Button", handle=2, text="Go", w=80, h=20),
         node(class_name="Canvas", handle=3, w=900, h=600),
     ])
     regions = surface_map(tree)
-    assert [r.class_name for r in non_native(regions)] == ["Canvas"]
+    assert [r.class_name for r in needs_other_mechanism(regions)] == ["Canvas"]
 
 
 # --- change detection -----------------------------------------------------
 
-def _regions(*pairs):
-    return [
-        Region(class_name=c, rect=(0, 0, 10, 10), kind=k, reason="")
-        for c, k in pairs
-    ]
+def _regions(*triples):
+    """(class, kind) or (class, kind, access)."""
+    out = []
+    for item in triples:
+        cls, kind = item[0], item[1]
+        access = item[2] if len(item) > 2 else Access.WINDOW_MESSAGES
+        out.append(Region(class_name=cls, rect=(0, 0, 10, 10), kind=kind,
+                          access=access, reason=""))
+    return out
 
 
 def test_the_digest_ignores_position_and_repetition():
     """Screens move and repopulate constantly. None of that changes how
     they have to be driven, and a digest that churned on it would train a
     caller to ignore the one signal it exists to give."""
-    one = _regions(("Grid", SurfaceKind.OPAQUE), ("Btn", SurfaceKind.NATIVE))
+    one = _regions(("Grid", SurfaceKind.OWNER_DRAWN), ("Btn", SurfaceKind.NATIVE))
     many = _regions(
-        ("Grid", SurfaceKind.OPAQUE), ("Grid", SurfaceKind.OPAQUE),
+        ("Grid", SurfaceKind.OWNER_DRAWN), ("Grid", SurfaceKind.OWNER_DRAWN),
         ("Btn", SurfaceKind.NATIVE), ("Btn", SurfaceKind.NATIVE),
     )
     assert map_digest(one) == map_digest(many)
@@ -298,7 +317,7 @@ def test_the_digest_ignores_position_and_repetition():
 
 def test_the_digest_changes_when_a_region_changes_kind():
     before = _regions(("Panel", SurfaceKind.NATIVE))
-    after = _regions(("Panel", SurfaceKind.OPAQUE))
+    after = _regions(("Panel", SurfaceKind.OWNER_DRAWN))
     assert map_digest(before) != map_digest(after)
 
 
@@ -363,3 +382,71 @@ def test_a_budget_alone_cannot_hold_against_two_scrollbars():
     assert ONE_SCROLLBAR <= CHROME_ELEMENT_BUDGET, "one is absorbed"
     assert ONE_SCROLLBAR * 2 > CHROME_ELEMENT_BUDGET, "two are not"
     assert SCROLLBAR_CONTROL_TYPE == 50014, "UIA_ScrollBarControlTypeId"
+
+
+# --- the two axes move independently -------------------------------------
+
+def test_the_digest_notices_an_engine_waking_up():
+    """The defect that made the split worth doing.
+
+    An embedded engine keeps its identity whether its document tree is live
+    or dormant, while the way in changes completely between those states.
+    Fingerprinting kind alone left the digest blind at the one moment a
+    caller's approach had to change -- which is the whole reason the digest
+    exists.
+
+    The numbers are the ones measured on a real target: a single element
+    while suspended, two hundred and three once awake.
+    """
+    host = node(class_name="Chrome_WidgetWin_1", handle=2)
+    shell = node(class_name="Shell", handle=1, children=[host])
+
+    dormant = surface_map(shell, lambda _: RegionEvidence(
+        accessible_elements=1))
+    live = surface_map(shell, lambda _: RegionEvidence(
+        accessible_elements=203, accessible_named=88))
+
+    assert [r.kind for r in dormant] == [r.kind for r in live], (
+        "identity is unchanged, which is why kind alone could not see it"
+    )
+    assert map_digest(dormant) != map_digest(live)
+
+
+def test_the_actionable_list_says_which_mechanism_each_region_needs():
+    """What the split buys on this list, which is not what it looks like.
+
+    Membership does not change: a live embedded document still cannot be
+    read with window messages, so it still belongs here. What changes is
+    that it now says *accessibility* -- a mechanism already in hand -- where
+    before a caller saw only "web-document" and had to infer, and the
+    obvious inference is the expensive one.
+    """
+    host = node(class_name="Chrome_WidgetWin_1", handle=2)
+    shell = node(class_name="Shell", handle=1, children=[host])
+
+    live = surface_map(shell, lambda _: RegionEvidence(
+        accessible_elements=203, accessible_named=88))
+    dormant = surface_map(shell, lambda _: RegionEvidence(
+        accessible_elements=1))
+
+    (live_region,) = needs_other_mechanism(live)
+    (dormant_region,) = needs_other_mechanism(dormant)
+
+    assert live_region.kind is dormant_region.kind is SurfaceKind.WEB
+    assert live_region.access is Access.ACCESSIBILITY, "already reachable"
+    assert dormant_region.access is Access.NONE, "this one is not"
+
+
+def test_unknown_and_owner_drawn_are_not_the_same_answer():
+    """One region is known to expose nothing; the other never said. Merging
+    them would report a target that has stopped answering as a canvas, and
+    send a caller to capture pixels of a window that may be about to
+    recover."""
+    silent = node(w=900, h=600, responsive=False)
+    canvas = node(w=900, h=600)
+
+    assert kind_of(silent) is SurfaceKind.UNKNOWN
+    assert access_of(silent) is Access.NONE
+
+    assert kind_of(canvas, accessible_elements=0) is SurfaceKind.OWNER_DRAWN
+    assert access_of(canvas, accessible_elements=0) is Access.PIXELS

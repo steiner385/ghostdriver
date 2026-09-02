@@ -420,7 +420,8 @@ def cmd_surfaces(
     all_windows: bool = False,
 ) -> int:
     from .backends.windows.region import region_evidence
-    from .surface import SurfaceKind, map_digest, summarize_kinds, surface_map
+    from .surface import (map_digest, needs_other_mechanism,
+                          summarize_access, summarize_kinds, surface_map)
 
     trees = _trees(pid, all_windows)
     if trees is None:
@@ -453,12 +454,17 @@ def cmd_surfaces(
 
     counts = summarize_kinds(regions)
     print("regions by kind: " + ", ".join(f"{k}={v}" for k, v in counts.items()))
+    # The half that moves. `kind` says what the target is made of; this says
+    # what is readable at this moment, and an engine waking changes one and
+    # not the other.
+    reach = summarize_access(regions)
+    print("readable via   : " + ", ".join(f"{k}={v}" for k, v in reach.items()))
     print(f"shape digest   : {digest}")
 
     # Only the regions a caller has to do something about. Listing the
     # native ones would bury them: they are the overwhelming majority and
     # they are the case that already works.
-    other = [r for r in regions if r.kind is not SurfaceKind.NATIVE]
+    other = needs_other_mechanism(regions)
     if other:
         print()
         print(f"{len(other)} region(s) need a mechanism other than "
@@ -466,7 +472,8 @@ def cmd_surfaces(
         for region in sorted(other, key=lambda r: -r.area):
             left, top, right, bottom = region.rect
             print(
-                f"  {region.kind.value:18s} {region.class_name:26s} "
+                f"  {region.kind.value:12s} via {region.access.value:16s} "
+                f"{region.class_name:26s} "
                 f"({left}, {top}, {right}, {bottom})  {region.area}px"
             )
             print(f"      {region.reason}")

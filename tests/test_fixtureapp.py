@@ -160,13 +160,14 @@ def test_3_the_grid_exposes_nothing_through_any_surface(app):
 def test_3b_the_grid_is_classified_as_needing_pixels(app):
     """A driver has to be able to *tell* that this one needs a capture."""
     from ghostdriver.backends.windows.region import region_evidence
-    from ghostdriver.surface import SurfaceKind, surface_map
+    from ghostdriver.surface import Access, SurfaceKind, surface_map
 
     regions = surface_map(tree_of(app["pid"]), region_evidence)
     grids = [r for r in regions if r.class_name == "GhostFixtureDataGrid"]
 
     assert grids, "the grid is in the surface map"
-    assert grids[0].kind is SurfaceKind.OPAQUE
+    assert grids[0].kind is SurfaceKind.OWNER_DRAWN
+    assert grids[0].access is Access.PIXELS, "and says so as a value"
 
 
 def test_4_the_edits_are_superclassed_natives(app, user32):

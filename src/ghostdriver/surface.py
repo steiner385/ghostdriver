@@ -13,6 +13,19 @@ a product or a control class from any particular application: the evidence
 is structural -- does the window tree continue, does the region answer a
 text query, does some other surface expose an element tree beneath it.
 
+**Two axes, because they move independently.** `kind` is what a region *is*
+-- a native window, an embedded document, something that draws itself.
+`access` is what reaches its content *right now*. They were one field once,
+and conflating them hid a real failure: an embedded engine keeps its
+identity whether its document tree is live or dormant, while the way in
+changes completely between those states. A caller watching for "the
+approach I am using has stopped working" was watching a value that does not
+move when that happens.
+
+`access` is about *reading content*. How to actuate a control is a separate
+question, answered by the tier ladder in `actuate`, and an owner-drawn
+region that can only be read as pixels still takes an ordinary click.
+
 Classification is deliberately conservative and always carries its reasons.
 `reason` is not decoration: these are heuristics over incomplete evidence,
 and a caller who disagrees needs to see what the answer was built on.
@@ -27,27 +40,37 @@ from .model.window import WindowNode
 
 
 class SurfaceKind(str, Enum):
-    """How a region can be driven."""
+    """What a region *is*. Stable while the application is running."""
 
-    #: The window tree continues here, or this node answers with its own
-    #: text. Window messages reach it.
+    #: An ordinary window of the host toolkit.
     NATIVE = "native"
-    #: The window tree stops, but another surface exposes an element tree
-    #: underneath. An embedded document is the usual case. Drive it through
-    #: that surface, not through window messages.
-    ACCESSIBLE = "accessible-surface"
     #: A host window for an embedded browser engine. Its content is a web
-    #: document; the window tree cannot see into it and neither, usefully,
-    #: can window messages.
+    #: document, and the window tree cannot see into it.
     WEB = "web-document"
-    #: The window tree stops, the region occupies real screen area, and no
-    #: other surface exposes anything inside it. Whatever it displays, it
-    #: draws itself. Pixels are the only way in.
-    OPAQUE = "opaque"
-    #: The region did not answer a text query, so its emptiness is unknown
-    #: rather than established. Not the same as opaque, and must not be
-    #: reported as it.
-    UNRESPONSIVE = "unresponsive"
+    #: Real screen area with nothing beneath it on any surface. Whatever it
+    #: displays, it paints itself: an owner-drawn grid, a chart, a canvas.
+    OWNER_DRAWN = "owner-drawn"
+    #: The region did not answer, so what it is was never established.
+    #: Distinct from owner-drawn, and must not be reported as it: one is a
+    #: region known to expose nothing, the other a region that did not say.
+    UNKNOWN = "unknown"
+
+
+class Access(str, Enum):
+    """What reaches a region's content right now. Changes as the app runs."""
+
+    #: Window messages read it: the tree continues, or it answers for itself.
+    WINDOW_MESSAGES = "window-messages"
+    #: An accessibility surface exposes an element tree beneath it. Read it
+    #: there; window messages will not see the content.
+    ACCESSIBILITY = "accessibility"
+    #: Nothing exposes the content. Capture reaches the pixels, and turning
+    #: those into text is a separate problem this tool does not yet solve.
+    PIXELS = "pixels"
+    #: Nothing reaches it *yet*. A dormant engine wakes; an unresponsive
+    #: region may answer next time. Deliberately not the same as PIXELS --
+    #: this says "not from here", not "pixels are all there is".
+    NONE = "none"
 
 
 #: Window classes that host an embedded browser engine. These are framework
@@ -95,6 +118,7 @@ class Region:
     class_name: str
     rect: tuple[int, int, int, int]
     kind: SurfaceKind
+    access: Access
     reason: str
     handle: int = 0
     evidence: RegionEvidence = field(default_factory=RegionEvidence)
@@ -116,8 +140,8 @@ def _area(node: WindowNode) -> int:
 
 def classify_region(
     node: WindowNode, evidence: RegionEvidence
-) -> tuple[SurfaceKind, str]:
-    """Decide how one region can be driven, and say why."""
+) -> tuple[SurfaceKind, Access, str]:
+    """Decide what a region is, what reaches it, and say why."""
     if is_web_host(node.class_name):
         # The class settles what this region *is*. It does not settle how to
         # read it, and those are different questions: an embedded engine
@@ -128,13 +152,13 @@ def classify_region(
         # the bare label invites.
         content = evidence.accessible_elements
         if content > CHROME_ELEMENT_BUDGET:
-            return SurfaceKind.WEB, (
+            return SurfaceKind.WEB, Access.ACCESSIBILITY, (
                 "window class hosts an embedded browser engine, and its "
                 f"accessibility surface is live: {content} elements "
                 f"({evidence.accessible_named} named) beneath it, readable "
                 "without a separate browser protocol"
             )
-        return SurfaceKind.WEB, (
+        return SurfaceKind.WEB, Access.NONE, (
             "window class hosts an embedded browser engine, but its "
             f"accessibility surface is dormant ({content} elements): "
             "reading it needs the engine woken, or a browser protocol"
@@ -142,23 +166,27 @@ def classify_region(
 
     if not evidence.answers_text:
         return (
-            SurfaceKind.UNRESPONSIVE,
+            SurfaceKind.UNKNOWN,
+            Access.NONE,
             "did not answer a text query; contents unknown, not absent",
         )
 
     if evidence.child_windows:
         return (
             SurfaceKind.NATIVE,
+            Access.WINDOW_MESSAGES,
             f"window tree continues ({evidence.child_windows} child windows)",
         )
 
     if evidence.has_own_text:
-        return SurfaceKind.NATIVE, "answers with its own text"
+        return (SurfaceKind.NATIVE, Access.WINDOW_MESSAGES,
+                "answers with its own text")
 
     area = _area(node)
     if area < MIN_REGION_AREA:
         return (
             SurfaceKind.NATIVE,
+            Access.WINDOW_MESSAGES,
             f"leaf control, {area}px is below the {MIN_REGION_AREA}px "
             "region threshold",
         )
@@ -172,7 +200,8 @@ def classify_region(
     # and reported, but they do not decide.
     if content > CHROME_ELEMENT_BUDGET:
         return (
-            SurfaceKind.ACCESSIBLE,
+            SurfaceKind.NATIVE,
+            Access.ACCESSIBILITY,
             f"no child windows, but {content} elements "
             f"({evidence.accessible_named} named) on the accessibility "
             f"surface beneath it, past the {CHROME_ELEMENT_BUDGET}-element "
@@ -180,7 +209,8 @@ def classify_region(
         )
 
     return (
-        SurfaceKind.OPAQUE,
+        SurfaceKind.OWNER_DRAWN,
+        Access.PIXELS,
         f"{area}px with no child windows, no text, and "
         f"{content} accessible elements -- within a scrollbar's budget of "
         f"{CHROME_ELEMENT_BUDGET}, so nothing inside is exposed",
@@ -245,12 +275,13 @@ def surface_map(
             )
         )
         evidence = gather(node) if (undecided and gather) else base
-        kind, reason = classify_region(node, evidence)
+        kind, access, reason = classify_region(node, evidence)
         regions.append(
             Region(
                 class_name=node.class_name,
                 rect=node.rect,
                 kind=kind,
+                access=access,
                 reason=reason,
                 handle=node.handle,
                 evidence=evidence,
@@ -259,9 +290,16 @@ def surface_map(
     return regions
 
 
-def non_native(regions: list[Region]) -> list[Region]:
-    """The regions that need a mechanism other than window messages."""
-    return [r for r in regions if r.kind is not SurfaceKind.NATIVE]
+def needs_other_mechanism(regions: list[Region]) -> list[Region]:
+    """Regions whose content window messages will not read.
+
+    Selected on `access`, not on `kind`, and the difference is the whole
+    point of separating them. A live embedded document is a `web-document`
+    that reads perfectly well through the accessibility surface -- listing
+    it here because it is not `native` told a caller to go and build a
+    browser protocol for a region already within reach.
+    """
+    return [r for r in regions if r.access is not Access.WINDOW_MESSAGES]
 
 
 def map_digest(regions: list[Region]) -> str:
@@ -269,19 +307,38 @@ def map_digest(regions: list[Region]) -> str:
 
     Deliberately blind to position and to how many of each region there are.
     Screens move, split and repopulate constantly; none of that changes how
-    they must be driven. What this is sensitive to is a class changing kind
-    -- a region that used to answer window messages now drawing itself, or
-    an embedded document appearing where there was none -- which is exactly
-    the moment a caller's approach stops working and it needs to notice.
+    they must be driven. What this is sensitive to is a class changing what
+    it is or what reaches it -- a region that used to answer window messages
+    now drawing itself, an embedded document appearing where there was none,
+    or an engine waking up -- which is exactly the moment a caller's
+    approach stops working and it needs to notice.
+
+    Both axes are in it, and the second is why. Fingerprinting `kind` alone
+    left the digest blind to the case it most needed to catch: an embedded
+    engine going from dormant to live keeps its kind while its readability
+    flips completely, so a caller polling for change saw none at the one
+    moment the answer had changed.
     """
     import hashlib
 
-    shape = sorted({f"{r.class_name}:{r.kind.value}" for r in regions})
+    shape = sorted({
+        f"{r.class_name}:{r.kind.value}:{r.access.value}" for r in regions
+    })
     return hashlib.sha256("|".join(shape).encode()).hexdigest()[:16]
 
 
-def summarize_kinds(regions: list[Region]) -> dict[str, int]:
+def _tally(values: Iterator[str]) -> dict[str, int]:
     counts: dict[str, int] = {}
-    for region in regions:
-        counts[region.kind.value] = counts.get(region.kind.value, 0) + 1
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
     return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def summarize_kinds(regions: list[Region]) -> dict[str, int]:
+    """What the target is made of."""
+    return _tally(r.kind.value for r in regions)
+
+
+def summarize_access(regions: list[Region]) -> dict[str, int]:
+    """What can be read, and how -- the half that changes as it runs."""
+    return _tally(r.access.value for r in regions)
