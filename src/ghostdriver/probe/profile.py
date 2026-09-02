@@ -118,6 +118,11 @@ class ProfileDocument:
     #: this is an assertion; with it, a reader can disagree.
     classification_reason: str = ""
 
+    #: Set when this process owns windows on behalf of another process -- a frame
+    #: host. Everything else in this document then describes the frame
+    #: rather than the application, which runs in a different process.
+    hosting_note: str = ""
+
     #: Modal dialogs holding the target while it was profiled. Non-empty
     #: means the numbers above may describe the dialog rather than the
     #: application: a modal is a separate top-level window, and on a real
@@ -145,6 +150,7 @@ class ProfileDocument:
             "window_count": self.window_count,
             "unresponsive_count": self.unresponsive_count,
             "classification_reason": self.classification_reason,
+            "hosting_note": self.hosting_note,
             "blocked_by": self.blocked_by,
             "class_census": self.class_census,
             "uia": self.uia,

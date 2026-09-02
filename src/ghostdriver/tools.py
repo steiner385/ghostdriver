@@ -26,6 +26,7 @@ from typing import Any
 from .model.locator import Locator
 from .model.result import ErrorKind, GhostdriverError
 from .model.window import WindowNode, select_main_tree
+from .hosting import classify_process, note_for_measured_window
 from .policy import (
     ConsentSource, Tier, describe_target, extract_endpoints,
 )
@@ -80,6 +81,7 @@ class Toolbox:
         """
         import psutil
 
+        from .backends.windows import winapi
         from .backends.windows.enumerate import top_level_windows
 
         attached = {s.pid: s.session_id for s in self.sessions.open_sessions()}
@@ -97,6 +99,12 @@ class Toolbox:
             except (psutil.Error, OSError):
                 endpoints = []
             grant = self.sessions.grant_for(pid)
+            # Whether this process owns windows for other applications, or
+            # is an application whose frame something else owns. Cheap: the
+            # top-level class names alone decide it.
+            kind, note = classify_process(
+                [winapi.class_name(h) for h in windows]
+            )
             targets.append({
                 "pid": pid,
                 "name": process.info["name"],
@@ -109,6 +117,8 @@ class Toolbox:
                     None if grant is None
                     else ("allowed" if grant.allowed else "restricted")
                 ),
+                "window_ownership": kind,
+                "hosting_note": note,
                 "session_id": attached.get(pid),
             })
         targets.sort(key=lambda t: -t["top_level_windows"])
@@ -214,6 +224,17 @@ class Toolbox:
 
         summary = session.summary()
         summary["ok"] = True
+        # Said at attach, not left for the caller to discover from a
+        # profile that quietly describes a title bar. Judged on the window
+        # this session will actually read, not on the process.
+        selected = self._trees(session.pid, all_windows=False)
+        note = (
+            note_for_measured_window(selected[0].class_name)
+            if selected else ""
+        )
+        if note:
+            summary["window_ownership"] = "measured-a-frame"
+            summary["hosting_note"] = note
         # Said at attach because it changes what every later call means: a
         # target with nothing on screen answers every read with nothing.
         summary["blocked"] = self._blocking(session.pid)

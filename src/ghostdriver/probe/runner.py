@@ -32,6 +32,7 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
     from ..backends.windows.msaa import assess_msaa
     from ..backends.windows.process import process_facts
     from ..backends.windows.uia import assess_uia
+    from ..hosting import note_for_measured_window
     from ..modality import find_modal_blocks
     from ..surface import is_web_host
 
@@ -90,6 +91,12 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
     # Whether any window in the process hosts a browser engine. Checked
     # across every tree rather than the selected one: the shell and the web
     # view are usually different top-level windows.
+    # Judged on the window actually measured, not on the process. A shell
+    # can own a hosted frame among dozens of windows of its own, and warning
+    # that "this describes a frame" would then be false. The warning belongs
+    # only where the selected window *is* the frame.
+    hosting_note = note_for_measured_window(main.class_name)
+
     hosts_web_content = any(
         is_web_host(n.class_name) for t in trees for n in t.walk()
     ) or bool(toolkit.secondary)
@@ -106,6 +113,7 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
         profile_id=_profile_id(facts.executable, facts.bitness),
         matched_profile=matched,
         classification_reason=reason,
+        hosting_note=hosting_note,
         blocked_by=blocked_by,
         executable={
             "path": facts.executable,

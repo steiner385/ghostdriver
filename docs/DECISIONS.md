@@ -201,6 +201,49 @@ command line, host names and window captions. Operators name these files
 whatever suits them. `docs/example-profile.json` is negated back in, since
 it carries only placeholders and is the documentation for curating one.
 
+### R3. The process owning a window is not always the process owning the app
+
+**Signposted, not solved.** Deliberately.
+
+**What was measured.** A UWP application and its visible frame live in
+different processes, and *nothing in the window tree connects them*:
+
+    ApplicationFrameHost   ApplicationFrameWindow      rect (-7,-7,1543,919)
+    SystemSettings.exe     Windows.UI.Core.CoreWindow  rect (-25600,-25600,...)
+
+Both top-level. Neither is the other's parent or owner. The frame host owns
+the window a person can see; the application's own window is parked
+off-screen. So a caller who attaches to the pid owning the visible window --
+which is the pid a target listing shows -- profiles a title bar, and nothing
+said so.
+
+**What was built.** Recognition of both ends, at two deliberately different
+strengths. A result *measured from* a hosted frame carries a warning saying
+so and pointing at what to attach to instead. A process that merely *owns* a
+frame among its own windows gets only the weak claim, because a shell does
+exactly that and telling its user "this describes a frame" would be false.
+The first draft conflated them and mislabelled the shell; the distinction is
+now pinned by tests.
+
+**Why not solved.** There is nothing to follow. Pairing frame to application
+would need a heuristic -- matching titles, say -- that can pair the wrong
+application when two have similar ones.
+
+**A lead, tested and inconclusive.** UIA element objects carry a process id,
+and a UIA tree can in principle span processes, so walking the frame's UIA
+tree and reading those ids would resolve the pairing without heuristics.
+Walking it returned one element, belonging to the frame host. *But the
+application was suspended at the time* -- UWP apps are suspended when not in
+the foreground, which is why its window was parked off-screen. This does not
+settle whether UIA crosses the boundary for a running application. Retest
+with the application in the foreground before concluding anything.
+
+**The general shape.** UWP is the instance visible on one desktop.
+Process-per-tab browsers and other broker architectures have the same
+shape, and a signpost keyed to one window class does not address them. The
+honest framing is that a target listing presents "process owns windows" as
+though that mapping were the whole truth, and it is not.
+
 ---
 
 ## Open, for whoever picks this up
