@@ -1,15 +1,18 @@
-"""Target sessions: what is attached, at what tier, under whose policy.
+"""Target sessions, and the consent that has to exist before one opens.
 
-Every tool call happens inside a session, and the session is where the two
-questions that gate it are already answered: which environment this target
-is connected to, and what this caller is permitted to do. Answering them at
-attach rather than per call means a refusal happens once, loudly, at a
-moment an operator is watching -- rather than midway through a run.
+Which targets may be automated is decided *during* a chat session, by the
+person running it, at the moment the question arises — not by configuration
+written in advance. That is the only model that matches how the question
+actually comes up: a person doing a task knows which application they want
+touched and which they need left alone, and they know it then rather than
+when the server was installed.
+
+So consent lives here, in memory, for the life of this server process. For a
+stdio server that process *is* the chat session, which means grants expire
+exactly when they should and nothing has to be cleaned up or persisted.
 
 A session's tier is immutable. Raising it would mean the guarantee under
-which earlier calls were made no longer describes the session, and a
-caller inspecting a session afterwards could not tell what it had been
-allowed to do at the time.
+which earlier calls were made no longer describes the session.
 """
 
 import json
@@ -19,57 +22,45 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .model.result import ErrorKind, GhostdriverError
-from .policy import GuardResult, Tier, check_environment, denied, permits
+from .policy import ConsentSource, Grant, Tier, denied, permits
 
 
 @dataclass(frozen=True, slots=True)
 class Profile:
     """The curated half of a profile document.
 
-    The probe emits `denylist` and `environment_allowlist` empty, for a human
-    to fill in. Everything else in the document is evidence; these two are
-    policy, and they are the only parts this module reads.
+    Only `denylist` is read now: which controls may never be actuated. Which
+    *targets* may be driven is a session-time decision, not a file.
     """
 
     path: Path | None = None
     matched_profile: str = "unknown"
     denylist: tuple[str, ...] = ()
-    environment_allowlist: tuple[str, ...] = ()
 
     @classmethod
     def load(cls, path: str | Path) -> "Profile":
         """Read a profile document from disk.
 
-        Missing policy fields are read as empty rather than as absent,
-        because empty is what the probe emits and what the guard is built to
-        refuse. A profile that fails to parse is an error rather than a
-        default: silently falling back to an empty profile would turn a typo
-        into an unguarded session.
+        A profile that fails to parse is an error rather than a default:
+        falling back silently would turn a typo in a path into a session
+        with no denylist.
         """
         location = Path(path)
         try:
             document = json.loads(location.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise GhostdriverError(
-                ErrorKind.DENIED_BY_ENVIRONMENT,
+                ErrorKind.DENIED_BY_POLICY,
                 f"profile {location} could not be read: {exc}",
             ) from exc
         return cls(
             path=location,
             matched_profile=document.get("matched_profile", "unknown"),
             denylist=tuple(document.get("denylist") or ()),
-            environment_allowlist=tuple(
-                document.get("environment_allowlist") or ()
-            ),
         )
 
     @classmethod
-    def unguarded(cls) -> "Profile":
-        """A profile with no policy at all.
-
-        Named so that a caller constructing one has to say what they are
-        doing. The guard refuses everything under it, which is the point.
-        """
+    def none(cls) -> "Profile":
         return cls()
 
 
@@ -79,7 +70,7 @@ class Session:
     pid: int
     tier: Tier
     profile: Profile
-    guard: GuardResult
+    grant: Grant
     command_line: tuple[str, ...] = ()
     opened_at: float = field(default_factory=time.time)
 
@@ -89,22 +80,61 @@ class Session:
             "pid": self.pid,
             "tier": self.tier.value,
             "matched_profile": self.profile.matched_profile,
-            "profile_path": str(self.profile.path) if self.profile.path else None,
-            "environment": {
-                "verdict": self.guard.verdict.value,
-                "overridden": self.guard.overridden,
-                "endpoints": [e.normalized for e in self.guard.endpoints],
-                "reason": self.guard.reason,
+            "consent": {
+                "source": self.grant.source.value,
+                "note": self.grant.note,
             },
             "denylist_patterns": len(self.profile.denylist),
         }
 
 
+class ConsentRequired(GhostdriverError):
+    """Raised when a target has not been decided on yet.
+
+    Carries the pid so the caller can ask about that specific target. This
+    is not a failure to be retried; it is a question that has not been put
+    to anyone yet.
+    """
+
+    def __init__(self, pid: int, message: str):
+        super().__init__(ErrorKind.DENIED_BY_POLICY, message)
+        self.pid = pid
+
+
 class SessionManager:
-    """Open sessions, and the gate every tool call passes through."""
+    """Open sessions, session-scoped consent, and the gate for every call."""
 
     def __init__(self) -> None:
         self._sessions: dict[str, Session] = {}
+        self._grants: dict[int, Grant] = {}
+
+    # --- consent ---------------------------------------------------------
+
+    def record_grant(
+        self,
+        pid: int,
+        *,
+        allowed: bool,
+        source: ConsentSource,
+        note: str = "",
+    ) -> Grant:
+        """Record a decision about one target for this session.
+
+        A later decision replaces an earlier one, so a person can change
+        their mind mid-task — restrict something they had allowed, or the
+        reverse — without restarting anything.
+        """
+        grant = Grant(pid=pid, allowed=allowed, source=source, note=note)
+        self._grants[pid] = grant
+        return grant
+
+    def grant_for(self, pid: int) -> Grant | None:
+        return self._grants.get(pid)
+
+    def grants(self) -> list[Grant]:
+        return list(self._grants.values())
+
+    # --- sessions --------------------------------------------------------
 
     def attach(
         self,
@@ -113,38 +143,36 @@ class SessionManager:
         command_line: list[str],
         tier: Tier = Tier.READ_ONLY,
         profile: Profile | None = None,
-        override_environment: bool = False,
     ) -> Session:
-        """Open a session against `pid`, or refuse and say why.
+        """Open a session against `pid`, if it has been consented to.
 
-        The environment guard runs here and nowhere else. Its verdict is
-        kept on the session so that a later reader can see what was decided
-        and whether a human overrode it -- an override that left no trace
-        would defeat the purpose of having checked.
+        Raises ConsentRequired when nobody has decided about this target
+        yet, so the caller can ask rather than guess. Refusing outright
+        would be wrong: not-yet-asked is a different state from refused,
+        and only one of them is worth putting a question to a person about.
         """
-        profile = profile or Profile.unguarded()
-        guard = check_environment(
-            command_line,
-            list(profile.environment_allowlist),
-            override=override_environment,
-        )
-        if not guard.ok:
+        grant = self._grants.get(pid)
+        if grant is None:
+            raise ConsentRequired(
+                pid,
+                f"pid {pid} has not been approved for automation in this "
+                "session. Ask the operator which targets to allow, then "
+                "record the answer with grant_targets.",
+            )
+        if not grant.allowed:
+            note = f" ({grant.note})" if grant.note else ""
             raise GhostdriverError(
-                ErrorKind.DENIED_BY_ENVIRONMENT,
-                f"refusing to attach to pid {pid}: {guard.reason}. "
-                + (
-                    "Add it to the profile's environment_allowlist, or "
-                    "attach with override_environment to record a deliberate "
-                    "exception."
-                ),
+                ErrorKind.DENIED_BY_POLICY,
+                f"pid {pid} was restricted for this session{note}. It must "
+                "not be automated; ask the operator if that has changed.",
             )
 
         session = Session(
             session_id=uuid.uuid4().hex[:12],
             pid=pid,
             tier=tier,
-            profile=profile,
-            guard=guard,
+            profile=profile or Profile.none(),
+            grant=grant,
             command_line=tuple(command_line),
         )
         self._sessions[session.session_id] = session
@@ -175,6 +203,16 @@ class SessionManager:
             raise GhostdriverError(
                 ErrorKind.DENIED_BY_POLICY,
                 f"{tool!r} is not permitted at tier {session.tier.value!r}",
+            )
+        # Consent can be withdrawn mid-session, and an open session must not
+        # outlive it. Checked here rather than only at attach, so revoking a
+        # target stops work already under way.
+        grant = self._grants.get(session.pid)
+        if grant is None or not grant.allowed:
+            raise GhostdriverError(
+                ErrorKind.DENIED_BY_POLICY,
+                f"pid {session.pid} is no longer approved for automation in "
+                "this session",
             )
         return session
 

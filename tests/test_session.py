@@ -1,87 +1,111 @@
-"""Sessions, and the gate every tool call passes through."""
+"""Sessions, session-scoped consent, and the gate every call passes through."""
 
 import json
 
 import pytest
 
 from ghostdriver.model.result import ErrorKind, GhostdriverError
-from ghostdriver.policy import GuardVerdict, Tier
-from ghostdriver.session import Profile, SessionManager
+from ghostdriver.policy import ConsentSource, Tier
+from ghostdriver.session import ConsentRequired, Profile, SessionManager
 
-ALLOWED_CMD = [r"C:\App.exe", "/od", "http://devhost:8183/devenv/gateway"]
-DEV_ONLY = Profile(environment_allowlist=("http://devhost:8183/*",))
+CMD = [r"C:\App.exe", "/od", "http://devhost:8183/devenv/gateway"]
 
 
-def test_attaching_to_an_allowlisted_target_opens_a_session():
+def allowed(manager, pid=1234):
+    manager.record_grant(pid, allowed=True, source=ConsentSource.ELICITED)
+    return pid
+
+
+# --- consent gates attaching --------------------------------------------
+
+def test_a_target_nobody_has_decided_on_cannot_be_attached():
+    """Nothing is automatable until someone says so."""
     manager = SessionManager()
-    session = manager.attach(1234, command_line=ALLOWED_CMD, profile=DEV_ONLY)
 
-    assert session.pid == 1234
+    with pytest.raises(ConsentRequired) as raised:
+        manager.attach(1234, command_line=CMD)
+
+    assert raised.value.pid == 1234
+    assert "grant_targets" in raised.value.message
+
+
+def test_consent_required_is_a_question_not_a_refusal():
+    """Not-yet-asked and refused are different states, and only one of them
+    is worth putting to a person."""
+    manager = SessionManager()
+    manager.record_grant(1234, allowed=False, source=ConsentSource.ELICITED)
+
+    with pytest.raises(GhostdriverError) as raised:
+        manager.attach(1234, command_line=CMD)
+
+    assert not isinstance(raised.value, ConsentRequired)
+    assert raised.value.kind is ErrorKind.DENIED_BY_POLICY
+    assert "restricted" in raised.value.message
+
+
+def test_an_approved_target_attaches():
+    manager = SessionManager()
+    pid = allowed(manager)
+
+    session = manager.attach(pid, command_line=CMD)
+
+    assert session.pid == pid
     assert session.tier is Tier.READ_ONLY, "the safe default"
-    assert manager.get(session.session_id) is session
+    assert session.grant.source is ConsentSource.ELICITED
 
 
-def test_attaching_to_a_target_outside_the_allowlist_is_refused():
-    """The validation gate for this iteration turns on exactly this."""
+def test_a_restriction_names_its_reason_back():
     manager = SessionManager()
-    production = [r"C:\App.exe", "/od", "http://prodhost:8183/live/gateway"]
+    manager.record_grant(9, allowed=False, source=ConsentSource.OPERATOR_TOOL,
+                         note="this one is production")
 
     with pytest.raises(GhostdriverError) as raised:
-        manager.attach(1234, command_line=production, profile=DEV_ONLY)
+        manager.attach(9, command_line=CMD)
 
-    assert raised.value.kind is ErrorKind.DENIED_BY_ENVIRONMENT
-    assert "prodhost" in raised.value.message
-    assert manager.open_sessions() == [], "and no session is left behind"
+    assert "production" in raised.value.message
 
 
-def test_a_freshly_probed_profile_refuses_everything():
-    """The probe emits environment_allowlist empty for curation. Until
-    somebody curates it nothing is approved, and reading empty as "no
-    restrictions" would make every new application automatable against
-    production by default."""
+# --- consent is revisable, and revocation bites immediately -------------
+
+def test_a_decision_can_be_changed_mid_session():
+    """Someone doing a task changes their mind, and should not have to
+    restart anything to do it."""
     manager = SessionManager()
+    manager.record_grant(1, allowed=False, source=ConsentSource.ELICITED)
+    manager.record_grant(1, allowed=True, source=ConsentSource.ELICITED)
+
+    assert manager.attach(1, command_line=CMD)
+
+
+def test_restricting_a_target_stops_a_session_already_open():
+    """Otherwise "leave that one alone" only applies to work not yet
+    started, which is not what anybody means by it."""
+    manager = SessionManager()
+    pid = allowed(manager)
+    session = manager.attach(pid, command_line=CMD)
+    manager.authorize(session.session_id, "describe")
+
+    manager.record_grant(pid, allowed=False, source=ConsentSource.ELICITED)
 
     with pytest.raises(GhostdriverError) as raised:
-        manager.attach(1234, command_line=ALLOWED_CMD,
-                       profile=Profile.unguarded())
-
-    assert raised.value.kind is ErrorKind.DENIED_BY_ENVIRONMENT
+        manager.authorize(session.session_id, "describe")
+    assert raised.value.kind is ErrorKind.DENIED_BY_POLICY
 
 
-def test_a_target_whose_endpoint_cannot_be_read_is_refused():
+def test_grants_are_listed_for_inspection():
     manager = SessionManager()
-    with pytest.raises(GhostdriverError):
-        manager.attach(1234, command_line=[r"C:\App.exe"], profile=DEV_ONLY)
+    manager.record_grant(1, allowed=True, source=ConsentSource.ELICITED)
+    manager.record_grant(2, allowed=False, source=ConsentSource.ELICITED)
 
-
-def test_an_override_attaches_and_leaves_the_verdict_on_the_record():
-    """An override that erased the finding would defeat having checked."""
-    manager = SessionManager()
-    production = [r"C:\App.exe", "/od", "http://prodhost/live/gateway"]
-
-    session = manager.attach(
-        1234, command_line=production, profile=DEV_ONLY,
-        override_environment=True,
-    )
-
-    assert session.guard.verdict is GuardVerdict.REFUSED
-    assert session.guard.overridden
-    assert session.summary()["environment"]["overridden"] is True
-
-
-def test_the_summary_names_the_endpoint_that_was_checked():
-    manager = SessionManager()
-    session = manager.attach(1234, command_line=ALLOWED_CMD, profile=DEV_ONLY)
-
-    endpoints = session.summary()["environment"]["endpoints"]
-    assert endpoints == ["http://devhost:8183/devenv/gateway"]
+    grants = {g.pid: g.allowed for g in manager.grants()}
+    assert grants == {1: True, 2: False}
 
 
 # --- the gate ------------------------------------------------------------
 
 def test_a_read_only_session_is_refused_an_action():
     manager = SessionManager()
-    session = manager.attach(1234, command_line=ALLOWED_CMD, profile=DEV_ONLY)
+    session = manager.attach(allowed(manager), command_line=CMD)
 
     manager.authorize(session.session_id, "describe")
 
@@ -93,7 +117,7 @@ def test_a_read_only_session_is_refused_an_action():
 
 def test_an_interactive_session_keeps_the_read_tools():
     manager = SessionManager()
-    session = manager.attach(1234, command_line=ALLOWED_CMD, profile=DEV_ONLY,
+    session = manager.attach(allowed(manager), command_line=CMD,
                              tier=Tier.INTERACTIVE)
 
     manager.authorize(session.session_id, "describe")
@@ -104,7 +128,7 @@ def test_the_tier_cannot_be_changed_after_attach():
     """Raising it would mean the guarantee earlier calls were made under no
     longer describes the session."""
     manager = SessionManager()
-    session = manager.attach(1234, command_line=ALLOWED_CMD, profile=DEV_ONLY)
+    session = manager.attach(allowed(manager), command_line=CMD)
 
     with pytest.raises((AttributeError, TypeError)):
         session.tier = Tier.FULL
@@ -121,7 +145,7 @@ def test_releasing_twice_is_not_an_error():
     """A caller tidying up after a failure should not have to track whether
     it got far enough to open a session."""
     manager = SessionManager()
-    session = manager.attach(1234, command_line=ALLOWED_CMD, profile=DEV_ONLY)
+    session = manager.attach(allowed(manager), command_line=CMD)
 
     manager.release(session.session_id)
     manager.release(session.session_id)
@@ -133,11 +157,10 @@ def test_releasing_twice_is_not_an_error():
 
 def test_a_denied_caption_is_refused_by_the_session():
     manager = SessionManager()
-    guarded = Profile(
-        environment_allowlist=("http://devhost:8183/*",),
-        denylist=("*delete*", "*complete task*"),
+    session = manager.attach(
+        allowed(manager), command_line=CMD,
+        profile=Profile(denylist=("*delete*", "*complete task*")),
     )
-    session = manager.attach(1234, command_line=ALLOWED_CMD, profile=guarded)
 
     manager.check_caption(session.session_id, "Expand All")
 
@@ -146,14 +169,13 @@ def test_a_denied_caption_is_refused_by_the_session():
     assert raised.value.kind is ErrorKind.DENIED_BY_POLICY
 
 
-# --- loading a curated document -----------------------------------------
+# --- profile loading -----------------------------------------------------
 
-def test_a_curated_profile_loads_its_policy(tmp_path):
+def test_a_curated_profile_loads_its_denylist(tmp_path):
     document = tmp_path / "profile.json"
     document.write_text(json.dumps({
         "matched_profile": "L1",
         "denylist": ["*delete*"],
-        "environment_allowlist": ["http://devhost:8183/*"],
         "window_count": 435,
     }), encoding="utf-8")
 
@@ -161,32 +183,25 @@ def test_a_curated_profile_loads_its_policy(tmp_path):
 
     assert profile.matched_profile == "L1"
     assert profile.denylist == ("*delete*",)
-    assert profile.environment_allowlist == ("http://devhost:8183/*",)
-
-
-def test_an_uncurated_probe_output_loads_as_no_policy(tmp_path):
-    """What the probe actually emits: both fields present and empty."""
-    document = tmp_path / "profile.json"
-    document.write_text(json.dumps({
-        "matched_profile": "L1", "denylist": [], "environment_allowlist": [],
-    }), encoding="utf-8")
-
-    profile = Profile.load(document)
-
-    assert profile.environment_allowlist == ()
-    with pytest.raises(GhostdriverError):
-        SessionManager().attach(1, command_line=ALLOWED_CMD, profile=profile)
 
 
 def test_an_unreadable_profile_raises_rather_than_defaulting(tmp_path):
-    """Falling back to an empty profile would turn a typo in a path into an
-    unguarded session."""
+    """Falling back silently would turn a typo in a path into a session with
+    no denylist."""
     broken = tmp_path / "broken.json"
     broken.write_text("{not json", encoding="utf-8")
 
-    with pytest.raises(GhostdriverError) as raised:
+    with pytest.raises(GhostdriverError):
         Profile.load(broken)
-    assert raised.value.kind is ErrorKind.DENIED_BY_ENVIRONMENT
-
     with pytest.raises(GhostdriverError):
         Profile.load(tmp_path / "does-not-exist.json")
+
+
+def test_a_session_needs_no_profile_at_all():
+    """The profile now carries only the caption denylist. A session without
+    one is perfectly valid -- it simply denies no captions."""
+    manager = SessionManager()
+    session = manager.attach(allowed(manager), command_line=CMD)
+
+    assert session.profile.denylist == ()
+    manager.check_caption(session.session_id, "Delete Everything")

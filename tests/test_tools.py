@@ -12,6 +12,7 @@ import json
 import pytest
 
 from ghostdriver.model.result import ErrorKind
+from ghostdriver.policy import ConsentSource
 from ghostdriver.session import SessionManager
 from ghostdriver.tools import MAX_ELEMENTS, Toolbox
 from tests.conftest import on_windows
@@ -27,54 +28,98 @@ def box():
 
 
 def attached(box, pid):
-    """A session against a fixture target.
+    """A session against a fixture target, with consent already recorded.
 
-    Fixture targets are `python -c <script>` and carry no URL, so the
-    environment guard cannot tell what they are connected to and refuses
-    them. Overriding is the honest way in, and exercises that path.
+    Standing in for the operator having been asked and having said yes,
+    which is what every real session does before any of this is reachable.
     """
-    result = box.attach(pid, override_environment=True)
+    box.grant_targets(allow=[pid], note="test fixture")
+    result = box.attach(pid)
     assert result["ok"], result
     return result["session_id"]
 
 
-# --- attach --------------------------------------------------------------
+# --- consent -------------------------------------------------------------
 
-def test_attach_without_a_profile_is_refused(box, win32_target):
-    """A target with no curated policy has had no environment approved."""
+def test_an_undecided_target_asks_rather_than_failing(box, win32_target):
+    """Nothing is automatable until someone says so -- and "nobody has been
+    asked yet" is a question, not a refusal."""
     result = box.attach(win32_target)
 
     assert result["ok"] is False
-    assert result["error"]["kind"] == ErrorKind.DENIED_BY_ENVIRONMENT.value
+    assert result["needs_consent"] is True
+    assert result["target"]["pid"] == win32_target
+    assert "summary" in result["target"], "enough to put the question"
 
 
-def test_an_override_attaches_and_records_the_verdict(box, win32_target):
-    result = box.attach(win32_target, override_environment=True)
+def test_a_granted_target_attaches(box, win32_target):
+    box.grant_targets(allow=[win32_target], note="approved in chat")
+    result = box.attach(win32_target)
 
     assert result["ok"]
-    assert result["environment"]["overridden"] is True
     assert result["tier"] == "read_only"
+    assert result["consent"]["note"] == "approved in chat"
+
+
+def test_a_restricted_target_is_refused_without_asking_again(box, win32_target):
+    """"Leave that one alone" has to stick."""
+    box.grant_targets(restrict=[win32_target], note="not for this task")
+    result = box.attach(win32_target)
+
+    assert result["ok"] is False
+    assert not result.get("needs_consent"), "already decided; do not re-ask"
+    assert "not for this task" in result["error"]["message"]
+
+
+def test_the_target_list_shows_what_a_person_needs_to_decide(box, win32_target):
+    """A pid and a process name are not enough to answer with."""
+    listed = box.list_targets()
+    mine = [t for t in listed["targets"] if t["pid"] == win32_target]
+
+    assert listed["note"], "the caller is told consent is required"
+    if mine:
+        assert "summary" in mine[0]
+        assert "endpoints" in mine[0]
+        assert mine[0]["consent"] is None, "undecided until someone decides"
+
+
+def test_granting_nothing_is_an_error_rather_than_a_silent_no_op(box):
+    result = box.grant_targets()
+
+    assert result["ok"] is False
+    assert "allow" in result["error"]["message"]
+
+
+def test_a_decision_can_be_revised(box, win32_target):
+    box.grant_targets(restrict=[win32_target])
+    assert box.attach(win32_target)["ok"] is False
+
+    box.grant_targets(allow=[win32_target])
+    assert box.attach(win32_target)["ok"] is True
 
 
 def test_attach_reports_blocking_state_immediately(box, modal_target):
     """It changes what every later call means: a held target answers reads
     from a window nobody can act on."""
     pid, _, _ = modal_target
-    result = box.attach(pid, override_environment=True)
+    box.grant_targets(allow=[pid])
+    result = box.attach(pid)
 
     assert result["blocked"], "a modal dialog is up and attach says so"
     assert "Confirm Delete Record" in result["blocked"][0]
 
 
 def test_attaching_to_a_dead_pid_says_so(box):
-    result = box.attach(999_999, override_environment=True)
+    box.grant_targets(allow=[999_999])
+    result = box.attach(999_999)
 
     assert result["ok"] is False
     assert result["error"]["kind"] == ErrorKind.NOT_FOUND.value
 
 
 def test_an_unknown_tier_is_refused_by_name(box, win32_target):
-    result = box.attach(win32_target, tier="root", override_environment=True)
+    box.grant_targets(allow=[win32_target])
+    result = box.attach(win32_target, tier="root")
 
     assert result["ok"] is False
     assert "read_only" in result["error"]["message"]

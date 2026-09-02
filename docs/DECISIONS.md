@@ -10,6 +10,13 @@ Newest last within each iteration.
 
 ## Iteration 2 — MCP server, read-only tier
 
+> **D3, D5, D6 and D7 were superseded on 2026-09-02.** They described an
+> environment allowlist curated in a profile document. It was built,
+> reviewed, and replaced by session-scoped consent — see R1 at the end
+> of this section. They are left in place because a decision log that
+> quietly deletes what was overturned is worth less than one that shows
+> the overturning.
+
 ### D1. The tool surface grows to 18, not 15
 
 **Decision.** `surfaces`, `modals` and `restore` are exposed as their own
@@ -215,3 +222,60 @@ it carries only placeholders and is the documentation for curating one.
 - **The region model still mixes three axes.** See the Iteration 1 scoping
   note in the published validation report. Deliberately unresolved until
   there is a second target to decide against.
+
+---
+
+## Revision, 2026-09-02
+
+### R1. Target selection is interactive and session-scoped, not configured
+
+**Supersedes D3, D5, D6, D7.**
+
+**What was wrong with the old design.** It decided in advance a question that
+arises in the moment. A person doing a task knows which application they want
+touched and which they need left alone *then* — not when the server was
+installed. Curating an allowlist per application, in a JSON file, ahead of
+time, answered a question nobody had asked yet, and the machinery it needed
+(three verdicts, an override that records itself) was complexity spent on the
+wrong model. It was also unlike how comparable MCP servers handle this: the
+convention is to bind the boundary at launch, or to let the client prompt.
+
+**What replaced it.**
+
+- `list_targets` shows each candidate *with the endpoint read from its own
+  command line*, so a person can see what they are approving.
+- `attach` on an undecided target elicits directly from the operator through
+  their own client. Consent obtained that way cannot be fabricated by the
+  agent, which is the property the old design never had.
+- Where the client cannot be asked, `attach` returns `needs_consent` and
+  names `grant_targets`. The agent asks in chat; the client's own
+  tool-approval prompt is what the operator actually sees and approves.
+- Grants live in the server process. For stdio that process *is* the chat
+  session, so they expire exactly when they should, with nothing to persist
+  or clean up.
+- Decisions are revisable, and a restriction stops a session already open on
+  that target. Otherwise "leave that one alone" would apply only to work not
+  yet started, which is not what anyone means by it.
+
+**What survived.** Endpoint extraction, demoted from gatekeeper to informant
+(D6's reasoning about UNC paths still holds — a certificate share is noise in
+the question being asked). The caption denylist, which answers a different
+question and is unaffected. Capability tiers, likewise.
+
+**Assumption.** That the operator is present and reachable during the
+session. This model has no answer for unattended runs — there is nobody to
+ask. When that case arrives, the answer is probably a launch-time flag
+naming pre-approved targets, which is the convention this design deliberately
+did not adopt for the interactive case.
+
+### R2. Tools carry read-only annotations
+
+**Decision.** Every read tool is marked `readOnlyHint`; `attach` and
+`restore` are not.
+
+**Reasoning.** A gap found while answering "what do comparable servers do".
+MCP tool annotations let a client decide for itself how much ceremony a call
+deserves rather than treating every tool as potentially destructive.
+`restore` is excluded deliberately: it changes no application state but does
+change what a person can see on their screen, and a client is entitled to
+treat that as worth a prompt.

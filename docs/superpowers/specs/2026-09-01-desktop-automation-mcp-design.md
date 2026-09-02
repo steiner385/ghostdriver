@@ -395,7 +395,7 @@ Set at `attach`/`launch`, immutable for the session's lifetime.
 
 | Tier | Permits |
 |---|---|
-| `read_only` | `describe`, `find`, `read`, `capture`, `wait_for`, `surfaces`, `modals`, `restore`, probe phase 1 |
+| `read_only` | `describe`, `find`, `read`, `capture`, `wait_for`, `surfaces`, `modals`, `restore`, `grant_targets`, probe phase 1 |
 | `interactive` | Adds actions, **except** locators matching the profile denylist |
 | `full` | Everything, including probe phase 2 |
 
@@ -406,15 +406,32 @@ actuate anything that submits, completes, accepts, approves, or deletes" as an
 enforced rule rather than a remembered one. Matched against resolved element captions
 before any action executes.
 
-### 8.3 Environment guard
+### 8.3 Target consent
 
-A target's own command line commonly contains the server endpoint it is connected to.
-The session manager refuses to attach or launch unless that endpoint matches the
-profile's `environment_allowlist`.
+**Revised during Iteration 2.** This section previously specified an
+`environment_allowlist` in the profile document, checked at attach. That was
+built, then replaced: it decided in advance a question that arises in the
+moment, and a person doing a task knows which application they want touched
+and which they need left alone *then*, not when the server was installed.
 
-This converts "never drive a client pointed at production" from operator discipline
-into a tool-enforced check, using evidence the target supplies for free. When no
-endpoint can be extracted, the guard fails closed and requires explicit override.
+Consent is now session-scoped and interactive. No target may be automated
+until the person running the session approves it:
+
+- `list_targets` reports each candidate with the endpoint read from its own
+  command line, so the decision is informed rather than blind.
+- `attach` on an undecided target elicits directly from the operator where
+  the client supports it — consent obtained that way cannot be fabricated by
+  the agent. Otherwise it returns `needs_consent`, and the agent asks in
+  chat and records the answer with `grant_targets`.
+- Decisions live in the server process, which for stdio *is* the chat
+  session, so they expire exactly when they should.
+- Decisions are revisable, and restricting a target stops a session already
+  using it — otherwise "leave that one alone" would only apply to work not
+  yet started.
+
+Endpoint extraction survives, demoted from gatekeeper to informant. It is
+best-effort: a target that names its server another way yields nothing, and
+the person deciding simply sees no endpoint rather than a wrong one.
 
 ### 8.4 Credentials
 

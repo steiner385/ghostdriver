@@ -26,9 +26,11 @@ from typing import Any
 from .model.locator import Locator
 from .model.result import ErrorKind, GhostdriverError
 from .model.window import WindowNode, select_main_tree
-from .policy import Tier
+from .policy import (
+    ConsentSource, Tier, describe_target, extract_endpoints,
+)
 from .resolve import resolve
-from .session import Profile, SessionManager
+from .session import ConsentRequired, Profile, SessionManager
 from .summarize import summarize
 from .wait import Condition, wait_for
 
@@ -70,7 +72,12 @@ class Toolbox:
     # --- lifecycle -------------------------------------------------------
 
     def list_targets(self) -> dict:
-        """Processes with windows, and whether any are already attached."""
+        """Every process that owns windows, and what it is connected to.
+
+        The endpoint is here because this is the list a person is shown when
+        deciding which targets to allow. "the client" is not enough to
+        answer with; "the client, connected to the dev gateway" is.
+        """
         import psutil
 
         from .backends.windows.enumerate import top_level_windows
@@ -85,15 +92,71 @@ class Toolbox:
                 continue
             if not windows:
                 continue
+            try:
+                endpoints = extract_endpoints(psutil.Process(pid).cmdline())
+            except (psutil.Error, OSError):
+                endpoints = []
+            grant = self.sessions.grant_for(pid)
             targets.append({
                 "pid": pid,
                 "name": process.info["name"],
                 "top_level_windows": len(windows),
+                "endpoints": [e.normalized for e in endpoints],
+                "summary": describe_target(
+                    process.info["name"], pid, endpoints
+                ),
+                "consent": (
+                    None if grant is None
+                    else ("allowed" if grant.allowed else "restricted")
+                ),
                 "session_id": attached.get(pid),
             })
         targets.sort(key=lambda t: -t["top_level_windows"])
-        return {"ok": True, "targets": targets[:MAX_ELEMENTS],
-                "total": len(targets)}
+        return {
+            "ok": True,
+            "targets": targets[:MAX_ELEMENTS],
+            "total": len(targets),
+            "note": (
+                "No target may be automated until the operator approves it "
+                "for this session. Show them the candidates and ask which "
+                "to allow and which to leave alone."
+            ),
+        }
+
+    def grant_targets(
+        self,
+        allow: list[int] | None = None,
+        restrict: list[int] | None = None,
+        *,
+        note: str = "",
+        source: ConsentSource = ConsentSource.OPERATOR_TOOL,
+    ) -> dict:
+        """Record which targets the operator approved or ruled out.
+
+        Session-scoped and revisable: a later decision replaces an earlier
+        one, so someone can change their mind mid-task without restarting
+        anything. Restricting a target that already has an open session
+        takes effect immediately -- the next call on that session refuses.
+        """
+        recorded = []
+        for pid in allow or []:
+            recorded.append(self.sessions.record_grant(
+                pid, allowed=True, source=source, note=note))
+        for pid in restrict or []:
+            recorded.append(self.sessions.record_grant(
+                pid, allowed=False, source=source, note=note))
+        if not recorded:
+            return _error(
+                ErrorKind.NOT_ACTIONABLE,
+                "nothing to record: pass allow=[...] or restrict=[...]",
+            )
+        grants = self.sessions.grants()
+        return {
+            "ok": True,
+            "recorded": [g.describe() for g in recorded],
+            "allowed": sorted(g.pid for g in grants if g.allowed),
+            "restricted": sorted(g.pid for g in grants if not g.allowed),
+        }
 
     def attach(
         self,
@@ -101,29 +164,47 @@ class Toolbox:
         *,
         tier: str = "read_only",
         profile_path: str | None = None,
-        override_environment: bool = False,
     ) -> dict:
-        """Open a session, after the environment guard has had its say."""
+        """Open a session against a target the operator has approved.
+
+        When nobody has decided about this target yet, the result says so
+        and carries what a person needs to be asked -- which application,
+        and where it is pointed. That is a question, not a failure.
+        """
         import psutil
 
         try:
-            command_line = psutil.Process(pid).cmdline()
+            process = psutil.Process(pid)
+            command_line = process.cmdline()
+            name = process.name()
         except (psutil.Error, OSError) as exc:
-            return _error(ErrorKind.NOT_FOUND,
-                          f"cannot read the command line of pid {pid}: {exc}")
+            return _error(ErrorKind.NOT_FOUND, f"cannot read pid {pid}: {exc}")
 
         try:
             profile = (
-                Profile.load(profile_path) if profile_path
-                else Profile.unguarded()
+                Profile.load(profile_path) if profile_path else Profile.none()
             )
             session = self.sessions.attach(
                 pid,
                 command_line=command_line,
                 tier=Tier(tier),
                 profile=profile,
-                override_environment=override_environment,
             )
+        except ConsentRequired as exc:
+            endpoints = extract_endpoints(command_line)
+            return {
+                "ok": False,
+                "error": {"kind": exc.kind.value, "message": exc.message},
+                # Everything needed to put the question to a person, so the
+                # caller does not have to go and gather it.
+                "needs_consent": True,
+                "target": {
+                    "pid": pid,
+                    "name": name,
+                    "endpoints": [e.normalized for e in endpoints],
+                    "summary": describe_target(name, pid, endpoints),
+                },
+            }
         except GhostdriverError as exc:
             return _error(exc.kind, exc.message)
         except ValueError:

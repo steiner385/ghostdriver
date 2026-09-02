@@ -22,7 +22,7 @@ mcp = pytest.importorskip(
 )
 
 EXPECTED_TOOLS = {
-    "list_targets", "attach", "release",
+    "list_targets", "attach", "release", "grant_targets",
     "describe", "find", "read", "capture", "wait_for",
     "probe", "surfaces", "modals", "restore",
 }
@@ -127,9 +127,8 @@ def test_a_full_session_works_end_to_end_through_the_protocol(
 ):
     """attach, describe, find, read, release -- the read-only tier's whole
     arc, driven the way a client drives it."""
-    attached = call(
-        server, "attach", pid=win32_target, override_environment=True
-    )
+    call(server, "grant_targets", allow=[win32_target], note="test")
+    attached = call(server, "attach", pid=win32_target)
     assert attached["ok"], attached
     session = attached["session_id"]
 
@@ -153,11 +152,25 @@ def test_a_full_session_works_end_to_end_through_the_protocol(
 
 
 @on_windows
-def test_the_environment_guard_refuses_through_the_protocol(
-    server, win32_target
-):
-    """The iteration's validation gate, at the layer an agent meets it."""
+def test_an_undecided_target_asks_through_the_protocol(server, win32_target):
+    """Consent is the gate, and an agent meets it here.
+
+    This client cannot be elicited from, so the result carries what the
+    agent needs in order to ask a person and record the answer.
+    """
     refused = call(server, "attach", pid=win32_target)
 
     assert refused["ok"] is False
-    assert refused["error"]["kind"] == "denied_by_environment"
+    assert refused["needs_consent"] is True
+    assert "grant_targets" in refused["error"]["message"]
+
+
+def test_read_tools_are_annotated_read_only(server):
+    """So a client can decide how much ceremony a call deserves rather than
+    treating every tool as potentially destructive."""
+    tools = listed(server)
+    for name in ("describe", "find", "read", "capture", "surfaces", "modals"):
+        assert tools[name].annotations.read_only_hint is True, name
+    # restore changes what is on screen, even though it changes no
+    # application state, so it is deliberately not marked read-only.
+    assert tools["restore"].annotations.read_only_hint is False

@@ -6,10 +6,11 @@ machine.
 
 ## Status
 
-**Iteration 2: MCP server, read-only tier.** Twelve tools over a session
-manager, with capability tiers, a denylist, and an environment guard that
-refuses to attach to a target pointed somewhere it should not be driven.
-Still no actuation: nothing clicks, types, or changes application state.
+**Iteration 2: MCP server, read-only tier.** Thirteen tools over a session
+manager, with capability tiers, a caption denylist, and session-scoped
+consent: no target can be automated until the person running the session
+approves it, and approvals die with the session. Still no actuation:
+nothing clicks, types, or changes application state.
 
 See `docs/superpowers/specs/2026-09-01-desktop-automation-mcp-design.md` for
 the design, `docs/DECISIONS.md` for what was decided along the way and why,
@@ -45,13 +46,20 @@ without it.
 ghostdriver-mcp          # stdio transport
 ```
 
-Twelve tools at the `read_only` tier: `list_targets`, `attach`, `release`,
-`describe`, `find`, `read`, `capture`, `wait_for`, `probe`, `surfaces`,
-`modals`, `restore`.
+Thirteen tools at the `read_only` tier: `list_targets`, `attach`,
+`release`, `grant_targets`, `describe`, `find`, `read`, `capture`,
+`wait_for`, `probe`, `surfaces`, `modals`, `restore`.
 
-`attach` refuses unless the target's endpoint — read from its own command
-line — matches the `environment_allowlist` in a curated profile document.
-See `docs/example-profile.json`.
+**Consent is decided in the chat, not in configuration.** `list_targets`
+shows each candidate with the endpoint read from its own command line —
+`the client (pid 62088) -- http://devhost:8183/devenv/gateway` — so the
+person can see what they are approving. `attach` then asks them directly if
+their client supports elicitation; otherwise it returns `needs_consent` and
+the agent asks in chat and records the answer with `grant_targets`.
+
+Approvals and restrictions last for that session only, can be revised at any
+time, and revoking a target stops a session already using it. A profile
+document is now optional and carries only the caption denylist.
 
 ## Use — CLI
 

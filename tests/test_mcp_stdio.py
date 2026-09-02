@@ -20,7 +20,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 EXPECTED_TOOLS = {
-    "list_targets", "attach", "release",
+    "list_targets", "attach", "release", "grant_targets",
     "describe", "find", "read", "capture", "wait_for",
     "probe", "surfaces", "modals", "restore",
 }

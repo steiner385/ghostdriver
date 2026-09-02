@@ -17,8 +17,9 @@ client receives JSON text it has to parse rather than a structured result.
 
 from typing import Annotated, Any
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
+from .policy import ConsentSource
 from .session import SessionManager
 from .tools import Toolbox
 
@@ -26,8 +27,12 @@ SERVER_INSTRUCTIONS = """\
 Drives desktop applications that predate modern accessibility APIs, by
 reading their window tree directly.
 
-Start with `list_targets`, then `attach` to get a session id. Every other
-tool takes that session id.
+Start with `list_targets`. **No target may be automated until the person
+you are working with has approved it for this session.** Show them the
+candidates, ask which to automate and which to leave alone, then `attach`.
+If your client supports it, `attach` will ask them directly; otherwise
+record their answer with `grant_targets`. Approvals last for this session
+only and can be changed at any time.
 
 Four things about this class of target are worth knowing before you plan:
 
@@ -73,9 +78,25 @@ AllWindows = Annotated[
 ]
 
 
+class ConsentAnswer(BaseModel):
+    """What the operator is asked when a target has not been decided on."""
+
+    allow: bool = Field(
+        description=(
+            "Allow this application to be automated for the rest of this "
+            "session? Choose no to leave it alone."
+        )
+    )
+    note: str = Field(
+        default="",
+        description="Optional reason, recorded with the decision.",
+    )
+
+
 def build_server(sessions: SessionManager | None = None) -> Any:
     """Construct the server. Importable without starting anything."""
-    from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver import Context, MCPServer
+    from mcp.types import ToolAnnotations
 
     box = Toolbox(sessions=sessions or SessionManager())
     server = MCPServer(
@@ -83,7 +104,17 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         instructions=SERVER_INSTRUCTIONS,
     )
 
-    @server.tool(description=(
+    # Every tool here reads. Declaring it lets a client decide for itself
+    # how much ceremony a call deserves, rather than treating them all as
+    # potentially destructive. `restore` is the one that changes anything a
+    # person can see -- it un-minimizes a window -- so it is not marked
+    # read-only, even though it changes no application state.
+    READS = ToolAnnotations(readOnlyHint=True, destructiveHint=False,
+                            idempotentHint=True, openWorldHint=True)
+    CHANGES_SCREEN = ToolAnnotations(readOnlyHint=False, destructiveHint=False,
+                                     idempotentHint=True, openWorldHint=True)
+
+    @server.tool(annotations=READS, description=(
         "Every process that owns windows, with how many top-level windows "
         "each has and whether a session is already open against it. Start "
         "here, then `attach` to the pid you want."
@@ -92,39 +123,99 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         return box.list_targets()
 
     @server.tool(description=(
-        "Open a session against a running target. Refuses unless the "
-        "target's endpoint, read from its own command line, matches the "
-        "profile's environment_allowlist — so a client pointed at "
-        "production cannot be driven by accident. Reports whether the "
-        "target is currently held by a modal dialog."
+        "Record which targets the operator has approved for automation in "
+        "this session, and which they want left alone. Use this after "
+        "asking them. Decisions last for this session only and can be "
+        "revised; restricting a target with an open session stops it "
+        "immediately."
     ))
-    def attach(
+    def grant_targets(
+        allow: Annotated[list[int] | None, Field(description=(
+            "Pids the operator approved."
+        ))] = None,
+        restrict: Annotated[list[int] | None, Field(description=(
+            "Pids the operator wants left alone."
+        ))] = None,
+        note: Annotated[str, Field(description=(
+            "Optional reason, recorded with the decision."
+        ))] = "",
+    ) -> dict[str, Any]:
+        return box.grant_targets(allow=allow, restrict=restrict, note=note)
+
+    @server.tool(annotations=CHANGES_SCREEN, description=(
+        "Open a session against a running target. If the operator has not "
+        "yet approved this target for the session, asks them directly where "
+        "the client supports it, and otherwise returns needs_consent so you "
+        "can ask them and call grant_targets. Reports whether the target is "
+        "currently held by a modal dialog."
+    ))
+    async def attach(
+        ctx: Context,
         pid: Annotated[int, Field(description="From `list_targets`.")],
         tier: Annotated[str, Field(description=(
             "read_only (default), interactive, or full. Immutable for the "
             "session's lifetime."
         ))] = "read_only",
         profile_path: Annotated[str | None, Field(description=(
-            "Path to a curated profile document supplying the "
-            "environment_allowlist and denylist. Without one, nothing is "
-            "approved and attach refuses."
+            "Optional profile document supplying the caption denylist."
         ))] = None,
-        override_environment: Annotated[bool, Field(description=(
-            "Attach despite a refusal, recording the verdict that was "
-            "overridden. For targets whose endpoint cannot be determined."
-        ))] = False,
     ) -> dict[str, Any]:
-        return box.attach(pid, tier=tier, profile_path=profile_path,
-                          override_environment=override_environment)
+        result = box.attach(pid, tier=tier, profile_path=profile_path)
+        if not result.get("needs_consent"):
+            return result
 
-    @server.tool(description=(
+        # Nobody has decided about this target yet. Ask the operator
+        # directly if the client can carry the question -- consent obtained
+        # this way cannot be fabricated by whatever is calling this tool.
+        target = result["target"]
+        try:
+            answer = await ctx.elicit(
+                message=(
+                    f"Allow automation of {target['summary']}?\n\n"
+                    "This lasts for this session only."
+                ),
+                schema=ConsentAnswer,
+            )
+        except Exception:
+            # No elicitation support, or the client refused to carry it.
+            # Say what to do instead rather than failing blankly.
+            result["error"]["message"] = (
+                f"pid {pid} has not been approved for automation, and this "
+                "client cannot be asked directly. Ask the operator which "
+                "targets to allow, then call grant_targets."
+            )
+            return result
+
+        action = getattr(answer, "action", None)
+        data = getattr(answer, "data", None)
+        if action != "accept" or data is None:
+            result["error"]["message"] = (
+                f"the operator did not approve pid {pid}"
+            )
+            return result
+
+        box.grant_targets(
+            allow=[pid] if data.allow else None,
+            restrict=None if data.allow else [pid],
+            note=data.note,
+            source=ConsentSource.ELICITED,
+        )
+        if not data.allow:
+            result["error"]["message"] = (
+                f"the operator restricted pid {pid} for this session"
+            )
+            result["needs_consent"] = False
+            return result
+        return box.attach(pid, tier=tier, profile_path=profile_path)
+
+    @server.tool(annotations=READS, description=(
         "Close a session and forget it. Safe to call twice; a session that "
         "was never opened is not an error."
     ))
     def release(session_id: SessionId) -> dict[str, Any]:
         return box.release(session_id)
 
-    @server.tool(description=(
+    @server.tool(annotations=READS, description=(
         "Summarized window tree, bounded to fit a context window. Repeated "
         "siblings collapse to counts, and what was dropped is reported "
         "rather than silently omitted. Returns suggested locators."
@@ -145,7 +236,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
                             all_windows=all_windows,
                             include_hidden=include_hidden)
 
-    @server.tool(description=(
+    @server.tool(annotations=READS, description=(
         "Resolve a locator to elements. Returns a re-resolvable locator for "
         "each match alongside its properties."
     ))
@@ -153,7 +244,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
              all_windows: AllWindows = False) -> dict[str, Any]:
         return box.find(session_id, locator, all_windows=all_windows)
 
-    @server.tool(description=(
+    @server.tool(annotations=READS, description=(
         "Text of matching controls. A null value means the control never "
         "answered — unknown, not empty. An empty string means it answered "
         "and has no text."
@@ -162,7 +253,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
              all_windows: AllWindows = False) -> dict[str, Any]:
         return box.read(session_id, locator, all_windows=all_windows)
 
-    @server.tool(description=(
+    @server.tool(annotations=READS, description=(
         "PNG of the target's window, or of one element or region. The only "
         "way to read owner-drawn regions such as grids, which expose no "
         "text through any accessibility surface. Does not bring the window "
@@ -180,7 +271,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     ) -> dict[str, Any]:
         return box.capture(session_id, locator=locator, region=region)
 
-    @server.tool(description=(
+    @server.tool(annotations=READS, description=(
         "Poll until a condition holds. Conditions: present, absent, "
         "visible, enabled, responsive, settled. Use `settled` after "
         "navigating — a screen that is still filling answers accurately and "
@@ -196,7 +287,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         return box.wait_for(session_id, locator, condition=condition,
                             timeout_s=timeout_s, all_windows=all_windows)
 
-    @server.tool(description=(
+    @server.tool(annotations=READS, description=(
         "Capability profile: toolkit, bitness, DPI mode, accessibility "
         "verdicts, class census. Read-only and slow-ish; the result is "
         "evidence for a human as much as for you."
@@ -204,7 +295,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     def probe(session_id: SessionId) -> dict[str, Any]:
         return box.probe(session_id)
 
-    @server.tool(description=(
+    @server.tool(annotations=READS, description=(
         "Classify each region by which mechanism can drive it: native "
         "window messages, an accessibility surface, an embedded web "
         "document, or pixels only. Returns a shape digest; pass it back as "
@@ -223,7 +314,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
                             include_hidden=include_hidden,
                             changed_from=changed_from)
 
-    @server.tool(description=(
+    @server.tool(annotations=READS, description=(
         "Whether a modal dialog is holding the target, and which one. A "
         "held window refuses all input by design — that is not a hang, and "
         "retrying will not help."
@@ -231,7 +322,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     def modals(session_id: SessionId) -> dict[str, Any]:
         return box.modals(session_id)
 
-    @server.tool(description=(
+    @server.tool(annotations=CHANGES_SCREEN, description=(
         "Un-minimize the target without taking the foreground, so it can be "
         "read. Changes no application state. Safe to call before reading; "
         "does nothing if the target is already visible."

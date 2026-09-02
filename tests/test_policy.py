@@ -1,16 +1,15 @@
-"""The safety rules, tested where they can be tested: everywhere.
+"""The rules, tested where they can be tested: everywhere.
 
 A rule that only runs against a live desktop is a rule that will not be
 exercised, which is the opposite of what a safety rule is for.
 """
 
-import pytest
-
 from ghostdriver.policy import (
-    GuardVerdict,
+    ConsentSource,
+    Grant,
     Tier,
-    check_environment,
     denied,
+    describe_target,
     extract_endpoints,
     permits,
     tools_for,
@@ -31,7 +30,7 @@ REAL_CMDLINE = [
 ]
 
 
-# --- endpoint extraction -------------------------------------------------
+# --- endpoints, which inform a decision rather than making one -----------
 
 def test_the_endpoint_is_found_among_unrelated_arguments():
     endpoints = extract_endpoints(REAL_CMDLINE)
@@ -44,22 +43,14 @@ def test_the_endpoint_is_found_among_unrelated_arguments():
 
 
 def test_a_file_share_is_not_an_endpoint():
-    """A certificate path is not the environment the target is driving.
-
-    Treating it as one makes operators allowlist things that carry no risk,
-    which is how an allowlist ends up written as "*".
-    """
+    """A certificate path is not the environment the target is driving, and
+    showing it as one is noise in the question a person is being asked."""
     assert extract_endpoints([r"\\fileshare\certs\Root.p7b"]) == []
 
 
-def test_normalization_survives_copy_and_paste():
-    """The refusal message prints the endpoint so an operator can paste it
-    into the allowlist. That round trip has to match."""
+def test_endpoints_are_normalized_for_display():
     pasted = extract_endpoints(["HTTP://DevHost:8183/DevEnv/Gateway/"])[0]
     assert pasted.normalized == "http://devhost:8183/devenv/gateway"
-
-    result = check_environment(REAL_CMDLINE, [pasted.normalized])
-    assert result.verdict is GuardVerdict.ALLOWED
 
 
 def test_several_endpoints_are_all_returned():
@@ -67,75 +58,47 @@ def test_several_endpoints_are_all_returned():
     assert [e.host for e in found] == ["a.example", "b.example"]
 
 
-# --- the guard -----------------------------------------------------------
-
-def test_an_allowlisted_endpoint_is_allowed():
-    result = check_environment(REAL_CMDLINE, ["http://devhost:8183/*"])
-
-    assert result.verdict is GuardVerdict.ALLOWED
-    assert result.ok
+def test_a_target_with_no_endpoint_yields_nothing_rather_than_a_guess():
+    """Best effort by design. A target that names its server another way
+    leaves the person deciding with no endpoint rather than a wrong one."""
+    assert extract_endpoints([r"C:\App.exe", "/flag", "--db=mydsn"]) == []
 
 
-def test_an_endpoint_outside_the_allowlist_is_refused():
-    result = check_environment(REAL_CMDLINE, ["http://prodhost:8183/*"])
+# --- the sentence a person is shown -------------------------------------
 
-    assert result.verdict is GuardVerdict.REFUSED
-    assert not result.ok
+def test_the_description_says_which_application_and_where_it_points():
+    """These are the two things that decide the answer."""
+    line = describe_target("App.Exe", 1234, extract_endpoints(REAL_CMDLINE))
 
-
-def test_the_refusal_names_the_endpoint_it_refused():
-    """Otherwise curating the allowlist is guesswork."""
-    result = check_environment(REAL_CMDLINE, ["http://prodhost/*"])
-
-    assert "http://devhost:8183/devenv/gateway" in result.reason
+    assert "App.Exe" in line
+    assert "1234" in line
+    assert "http://devhost:8183/devenv/gateway" in line
 
 
-def test_an_empty_allowlist_refuses_rather_than_permits():
-    """The probe emits environment_allowlist empty, for curation. Until
-    somebody curates it, nothing has been approved -- and an empty list
-    read as "no restrictions" would make every freshly probed application
-    automatable against production by default."""
-    result = check_environment(REAL_CMDLINE, [])
+def test_a_target_with_no_endpoint_says_so_plainly():
+    """Silence would read as "nothing to worry about"."""
+    line = describe_target("App.Exe", 1234, [])
 
-    assert result.verdict is GuardVerdict.REFUSED
-    assert "empty" in result.reason
+    assert "no endpoint found" in line
 
 
-def test_an_unextractable_endpoint_is_indeterminate_not_refused():
-    """Distinct verdicts because the remedies differ: one needs the
-    allowlist widened, the other needs a human to say what this target is
-    talking to."""
-    result = check_environment([r"C:\App.exe", "/flag"], ["http://devhost/*"])
+# --- consent -------------------------------------------------------------
 
-    assert result.verdict is GuardVerdict.INDETERMINATE
-    assert not result.ok
+def test_a_grant_describes_itself_for_a_transcript():
+    allowed = Grant(pid=1, allowed=True, source=ConsentSource.ELICITED)
+    restricted = Grant(pid=2, allowed=False,
+                       source=ConsentSource.OPERATOR_TOOL, note="production")
 
-
-def test_every_endpoint_must_match_not_merely_one():
-    """A target connected to an approved server and an unknown one is not
-    partially safe to drive."""
-    both = ["http://devhost:8183/env/gateway", "http://elsewhere:9/x"]
-    result = check_environment(both, ["http://devhost:8183/*"])
-
-    assert result.verdict is GuardVerdict.REFUSED
-    assert "elsewhere" in result.reason
+    assert "allowed" in allowed.describe() and "elicited" in allowed.describe()
+    assert "restricted" in restricted.describe()
+    assert "production" in restricted.describe()
 
 
-def test_an_override_records_the_verdict_it_overrode():
-    """An override that erased the finding would leave nothing to audit."""
-    result = check_environment(REAL_CMDLINE, ["http://prodhost/*"], override=True)
-
-    assert result.ok, "the override permits it"
-    assert result.verdict is GuardVerdict.REFUSED, "and the verdict still stands"
-    assert result.overridden
-
-
-def test_a_pattern_cannot_match_by_accident_across_a_host_boundary():
-    """`devhost` must not admit `devhost.evil.example`."""
-    result = check_environment(
-        ["http://devhost.evil.example/gateway"], ["http://devhost/*"]
-    )
-    assert result.verdict is GuardVerdict.REFUSED
+def test_the_source_of_consent_is_kept_rather_than_collapsed():
+    """The two carry different weight. `elicited` means the person answered
+    through their own client, which the agent cannot forge; `operator_tool`
+    means the agent claimed to relay an answer."""
+    assert ConsentSource.ELICITED != ConsentSource.OPERATOR_TOOL
 
 
 # --- tiers ---------------------------------------------------------------
@@ -160,9 +123,14 @@ def test_tiers_are_cumulative():
 
 def test_restore_is_available_to_a_read_only_session():
     """It changes what is on screen but no application state, and without
-    it read_only cannot function against a minimized target -- which is the
-    state a target is most often found in."""
+    it read_only cannot function against a minimized target."""
     assert permits(Tier.READ_ONLY, "restore")
+
+
+def test_granting_targets_is_available_at_every_tier():
+    """A person must be able to restrict a target from any session."""
+    for tier in Tier:
+        assert permits(tier, "grant_targets")
 
 
 def test_an_unknown_tool_is_permitted_by_nothing():
