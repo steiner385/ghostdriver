@@ -119,7 +119,26 @@ def classify_region(
 ) -> tuple[SurfaceKind, str]:
     """Decide how one region can be driven, and say why."""
     if is_web_host(node.class_name):
-        return SurfaceKind.WEB, "window class hosts an embedded browser engine"
+        # The class settles what this region *is*. It does not settle how to
+        # read it, and those are different questions: an embedded engine
+        # exposes its document tree lazily, so the same region is richly
+        # readable when rendered and a single empty pane when dormant.
+        # Reporting only the identity leaves a caller to guess which, and
+        # the expensive guess -- "build a browser protocol" -- is the one
+        # the bare label invites.
+        content = evidence.accessible_elements
+        if content > CHROME_ELEMENT_BUDGET:
+            return SurfaceKind.WEB, (
+                "window class hosts an embedded browser engine, and its "
+                f"accessibility surface is live: {content} elements "
+                f"({evidence.accessible_named} named) beneath it, readable "
+                "without a separate browser protocol"
+            )
+        return SurfaceKind.WEB, (
+            "window class hosts an embedded browser engine, but its "
+            f"accessibility surface is dormant ({content} elements): "
+            "reading it needs the engine woken, or a browser protocol"
+        )
 
     if not evidence.answers_text:
         return (
@@ -212,12 +231,18 @@ def surface_map(
             answers_text=node.responsive,
             has_own_text=bool(node.text),
         )
-        undecided = (
-            node.responsive
-            and not node.children
-            and not node.text
-            and not is_web_host(node.class_name)
-            and _area(node) >= MIN_REGION_AREA
+        # A web host is probed even though it has child windows and would
+        # otherwise be "decided". Its identity is settled by class, but its
+        # readability is not settled at all -- an embedded engine's
+        # document tree comes and goes -- so it is the one region where
+        # the evidence changes the advice rather than the classification.
+        undecided = node.responsive and (
+            is_web_host(node.class_name)
+            or (
+                not node.children
+                and not node.text
+                and _area(node) >= MIN_REGION_AREA
+            )
         )
         evidence = gather(node) if (undecided and gather) else base
         kind, reason = classify_region(node, evidence)

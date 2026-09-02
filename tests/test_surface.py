@@ -111,14 +111,63 @@ def test_a_dormant_engine_is_still_a_web_document():
     """An embedded engine exposes its document tree lazily.
 
     Measured: 1 element, no patterns, depth 0 -- evidence indistinguishable
-    from an empty container. The region is still a web document and still
-    needs a DOM, so this must not depend on the engine having woken up.
+    from an empty container. The region is still a web document, so the
+    identity must not depend on the engine having woken up.
     """
     assert kind_of(
         node(class_name="Chrome_WidgetWin_0", w=1508, h=625),
         accessible_elements=0,
         accessible_named=0,
     ) is SurfaceKind.WEB
+
+
+def _web_reason(**evidence):
+    host = node(class_name="Chrome_WidgetWin_0", w=1508, h=625)
+    base = dict(child_windows=1, answers_text=True, has_own_text=False)
+    base.update(evidence)
+    return classify_region(host, RegionEvidence(**base))[1]
+
+
+def test_a_web_region_says_whether_it_can_be_read_right_now():
+    """Identity and readability are different questions.
+
+    The class settles what the region is. It settles nothing about how to
+    read it: the same embedded engine is richly readable when rendered --
+    measured at 165 elements with Value, Text and Invoke patterns -- and a
+    single empty pane when dormant. A caller told only "web document" has
+    to guess, and the expensive guess, "build a browser protocol", is the
+    one the bare label invites.
+    """
+    live = _web_reason(accessible_elements=40, accessible_named=13)
+    dormant = _web_reason(accessible_elements=0)
+
+    assert "live" in live and "40 elements" in live
+    assert "without a separate browser protocol" in live
+
+    assert "dormant" in dormant
+    assert "woken" in dormant or "browser protocol" in dormant
+    assert live != dormant
+
+
+def test_a_web_region_is_probed_even_though_its_class_already_decided_it():
+    """Every other region is probed only when the evidence could change
+    the classification. A web host is the exception: its identity is
+    settled, but its readability is not, and the probe is what tells them
+    apart."""
+    asked = []
+
+    def gather(n):
+        asked.append(n.class_name)
+        return RegionEvidence(child_windows=1, accessible_elements=40)
+
+    # Child windows would normally mark this "decided" and skip the probe.
+    host = node(class_name="Chrome_WidgetWin_0", w=1508, h=625, children=[
+        node(class_name="Chrome_WidgetWin_1", handle=2),
+    ])
+    tree = node(class_name="Shell", handle=9, children=[host])
+    surface_map(tree, gather)
+
+    assert "Chrome_WidgetWin_0" in asked
 
 
 def test_an_unresponsive_region_is_not_reported_as_opaque():
