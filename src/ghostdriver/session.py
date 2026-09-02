@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .model.result import ErrorKind, GhostdriverError
+from .ledger import Ledger
 from .policy import ConsentSource, Grant, Tier, denied, permits
 from .sensitivity import Sensitivity
 
@@ -136,6 +137,10 @@ class SessionManager:
     def __init__(self) -> None:
         self._sessions: dict[str, Session] = {}
         self._grants: dict[int, Grant] = {}
+        # What this server saw its own actions do. The evidence a learned
+        # sensitivity note rests on, kept here rather than taken on trust
+        # from whoever asks to record one.
+        self.ledger = Ledger()
 
     # --- consent ---------------------------------------------------------
 
@@ -221,6 +226,9 @@ class SessionManager:
         # tidying up after a failure should not have to track whether it got
         # far enough to open one.
         self._sessions.pop(session_id, None)
+        # Its observations go with it: they were evidence about one
+        # session's work, and a later session did not see them.
+        self.ledger.forget(session_id)
 
     def open_sessions(self) -> list[Session]:
         return list(self._sessions.values())

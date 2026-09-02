@@ -449,6 +449,29 @@ def build_server(sessions: SessionManager | None = None) -> Any:
                              all_windows=all_windows, cadence=cadence,
                              expect=expect)
 
+    @server.tool(annotations=CHANGES_SCREEN, description=(
+        "Record that this target refuses machine-speed input, so later "
+        "sessions are told rather than having to find out by tripping it. "
+        "Only works when this server saw the evidence itself: the same "
+        "action failing at the default cadence and succeeding at "
+        "cadence=fast_human. If it has not, the refusal says which half is "
+        "missing. The note goes into the target's profile document; without "
+        "one it is returned for the operator to place."
+    ))
+    def record_input_sensitivity(
+        session_id: SessionId,
+        locator: Annotated[str | None, Field(description=(
+            "Narrow the evidence to one element. Omit to use the strongest "
+            "differential this session can show."
+        ))] = None,
+        note: Annotated[str, Field(description=(
+            "Anything else worth recording alongside it -- what the "
+            "application did when the fast attempt failed, for instance."
+        ))] = "",
+    ) -> dict[str, Any]:
+        return box.record_input_sensitivity(session_id, locator=locator,
+                                            note=note)
+
     return server
 
 

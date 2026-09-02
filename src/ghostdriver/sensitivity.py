@@ -161,3 +161,62 @@ def learned_from_differential(
         ),
         recorded=when,
     )
+
+
+def merge_into_document(path, note: Note) -> dict:
+    """Write `note` into the profile document at `path`, keeping the rest.
+
+    Read-modify-write of the whole document rather than of the one section,
+    because these files are hand-curated: a writer that rebuilt the document
+    from what this process happens to know would silently drop anything an
+    operator had added and this code does not model. Only
+    `input_sensitivity` is touched, and only the entry for that surface.
+
+    A declared note is never overruled by a learned one. A person who said
+    so knows things a measurement cannot reach -- including that a target
+    flags without ever visibly refusing -- so a session that measures the
+    opposite has not disproved them, it has only failed to reproduce it.
+
+    "Overruled" rather than "overwritten", and the difference is a hole this
+    nearly had. A learned note for `native` does not replace a declared note
+    for `*`, but it *beats* it at act time, because a specific note wins
+    over a blanket one -- so checking only for a note on the same surface
+    would have let a measurement quietly override a person by writing at a
+    finer grain. Any declared note that applies to the new note\'s surface
+    blocks it.
+    """
+    import json
+    from pathlib import Path
+
+    location = Path(path)
+    document = json.loads(location.read_text(encoding="utf-8"))
+    existing = Sensitivity.from_list(document.get("input_sensitivity"))
+
+    if note.source is Source.LEARNED:
+        blocking = [
+            n for n in existing.notes
+            if n.source is Source.DECLARED and n.applies_to(note.surface)
+        ]
+        if blocking:
+            standing = blocking[0]
+            where = ("everywhere" if standing.surface == "*"
+                     else repr(standing.surface))
+            return {
+                "written": False,
+                "reason": (
+                    f"an operator already declared {standing.cadence!r} "
+                    f"{where}, which covers {note.surface!r}; a measurement "
+                    "does not overrule that"
+                ),
+                "standing": standing.to_dict(),
+            }
+
+    existing.record(note)
+    document["input_sensitivity"] = existing.to_list()
+    # Written whole, then moved into place, so an interrupted write cannot
+    # leave an operator with a half-parsed profile.
+    temporary = location.with_suffix(location.suffix + ".tmp")
+    temporary.write_text(json.dumps(document, indent=2) + "\n",
+                         encoding="utf-8")
+    temporary.replace(location)
+    return {"written": True, "note": note.to_dict(), "path": str(location)}

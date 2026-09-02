@@ -20,7 +20,7 @@ Everything that can return many rows caps them and says what it capped.
 """
 
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .model.locator import Locator
@@ -778,6 +778,26 @@ class Toolbox:
 
         return Actuator(observe=lambda: snapshot(pid))
 
+    def _remember(self, session_id: str, tool: str, locator: str,
+                  prepared, result) -> None:
+        """Record the outcome, so a later claim about it can be checked.
+
+        Every actuation, not only failures: a differential needs both
+        halves, and the successful paced attempt is the half that makes the
+        failure mean something.
+        """
+        from .backends.windows.modality import surface_of
+        from .ledger import Outcome
+
+        try:
+            surface = surface_of(prepared.node.handle)
+        except Exception:
+            surface = "native"
+        self.sessions.ledger.record(session_id, Outcome(
+            locator=locator, tool=tool, cadence=prepared.cadence.name,
+            ok=bool(result.ok), surface=surface,
+        ))
+
     def _reported(self, result, prepared, locator: str, **extra) -> dict:
         """One shape for every actuation outcome, successful or not.
 
@@ -838,6 +858,7 @@ class Toolbox:
             expect_before=verbs.unblocked(prepared.node.handle),
             expect_after=after,
         )
+        self._remember(session_id, "click", locator, prepared, result)
         return self._reported(
             result, prepared, locator,
             verified=("effect" if after is not None and result.ok
@@ -915,6 +936,7 @@ class Toolbox:
             expect_after=after,
         )
 
+        self._remember(session_id, "set_value", locator, prepared, result)
         shown = read_window_text(handle)
         reported = self._reported(
             result, prepared, locator,
@@ -971,6 +993,7 @@ class Toolbox:
             expect_before=verbs.unblocked(prepared.node.handle),
             expect_after=after,
         )
+        self._remember(session_id, "type_text", locator, prepared, result)
         return self._reported(
             result, prepared, locator,
             verified=("effect" if after is not None and result.ok
@@ -1023,6 +1046,7 @@ class Toolbox:
             expect_before=verbs.unblocked(prepared.node.handle),
             expect_after=after,
         )
+        self._remember(session_id, "send_keys", locator, prepared, result)
         return self._reported(
             result, prepared, locator,
             verified=("effect" if after is not None and result.ok
@@ -1075,3 +1099,69 @@ class Toolbox:
             else f"{where} reads {wanted!r}"
         )
         return Condition(holds, described), described
+
+    def record_input_sensitivity(
+        self,
+        session_id: str,
+        *,
+        locator: str | None = None,
+        note: str = "",
+    ) -> dict:
+        """Record that this target rejects machine-speed input.
+
+        Written only when this server saw the differential itself: the same
+        action, on the same element, failing at robot cadence and succeeding
+        at a human one. A caller cannot assert it -- the party asking for a
+        note recorded is the party that most wants it recorded, and an
+        assertion about its own history is indistinguishable from a guess.
+
+        Where there is no evidence, the refusal says which half is missing,
+        because the caller believes it saw something and needs to know what
+        the server does not have.
+
+        The note goes into the profile document the operator supplied at
+        attach. Without one there is nowhere durable to put it, so the note
+        is returned instead, for a person to place -- writing a file nobody
+        pointed at would be a side effect nobody asked for.
+        """
+        try:
+            session = self.sessions.authorize(
+                session_id, "record_input_sensitivity"
+            )
+        except GhostdriverError as exc:
+            return _error(exc.kind, exc.message)
+
+        from .sensitivity import learned_from_differential, merge_into_document
+
+        found = self.sessions.ledger.differential(session_id, locator)
+        if found is None:
+            return _error(
+                ErrorKind.NOT_ACTIONABLE,
+                "nothing recorded here shows machine-speed input being "
+                "refused: " + self.sessions.ledger.why_not(session_id, locator),
+            )
+
+        learned = learned_from_differential(found.surface, found.describe())
+        if note:
+            learned = replace(learned, evidence=f"{learned.evidence}; {note}")
+
+        if session.profile.path is None:
+            return {
+                "ok": True,
+                "written": False,
+                "note": learned.to_dict(),
+                "reason": (
+                    "this session was attached without a profile document, "
+                    "so there is nowhere durable to record it. Give this note "
+                    "to the operator, or re-attach with profile_path set"
+                ),
+            }
+
+        try:
+            outcome = merge_into_document(session.profile.path, learned)
+        except (OSError, ValueError) as exc:
+            return _error(
+                ErrorKind.DENIED_BY_POLICY,
+                f"could not update {session.profile.path}: {exc}",
+            )
+        return {"ok": True, **outcome}

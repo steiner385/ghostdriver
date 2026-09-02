@@ -49,6 +49,9 @@ TIER_TOOLS: dict[Tier, frozenset[str]] = {
     }),
     Tier.INTERACTIVE: frozenset({
         "click", "type_text", "set_value", "send_keys", "await_human",
+        # Curation rather than actuation, but it belongs to this tier: the
+        # evidence it writes can only be produced by a session that acted.
+        "record_input_sensitivity",
     }),
     Tier.FULL: frozenset({"probe_phase2"}),
 }

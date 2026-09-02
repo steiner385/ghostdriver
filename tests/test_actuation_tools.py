@@ -462,3 +462,93 @@ def test_a_mistyped_expectation_says_so_instead_of_failing_the_action(box, app):
     assert not result["ok"]
     assert "expect is unusable" in result["error"]["message"]
     assert result["error"]["kind"] != "postcondition_failed"
+
+
+# --- the sensitivity loop, driven by real actions ------------------------
+
+def test_the_ledger_records_what_each_tool_actually_did(box, app):
+    """The evidence a learned note rests on has to come from the server's
+    own observations, so those observations have to exist."""
+    session = interactive(box, app["pid"])
+
+    box.set_value(session, "class=GhostFixturePlainEdit", "ONE")
+    box.set_value(session, "class=GhostFixturePlainEdit", "TWO",
+                  cadence="fast_human")
+
+    seen = box.sessions.ledger.outcomes(session)
+    assert [o.cadence for o in seen] == ["robot", "fast_human"]
+    assert all(o.tool == "set_value" for o in seen)
+    assert all(o.ok for o in seen)
+
+
+def test_a_real_differential_is_measured_and_recorded(box, app, tmp_path):
+    """The loop end to end, without seeding anything by hand.
+
+    A value the field cannot take fails at robot cadence. The same value
+    with an expectation that matches what the field will actually hold
+    succeeds when paced. That is the shape of the experiment an agent runs
+    when a target pushes back -- and it is the server, not the agent, that
+    saw both halves.
+    """
+    import json
+
+    from ghostdriver.session import Profile
+
+    path = tmp_path / "profile.json"
+    path.write_text(json.dumps({"matched_profile": "L1", "denylist": []}),
+                    encoding="utf-8")
+
+    from ghostdriver.policy import ConsentSource, Tier
+
+    box.sessions.record_grant(app["pid"], allowed=True,
+                              source=ConsentSource.ELICITED)
+    session = box.sessions.attach(
+        app["pid"], command_line=["fixtureapp"], tier=Tier.INTERACTIVE,
+        profile=Profile.load(path),
+    ).session_id
+
+    locator = "class=GhostFixturePlainEdit"
+    long_value = "B" * 80
+
+    failed = box.set_value(session, locator, long_value)
+    assert not failed["ok"], "the field will not take all of it"
+    landed = failed["display"]
+
+    worked = box.set_value(session, locator, long_value,
+                           expect_text=landed, cadence="fast_human")
+    assert worked["ok"], worked.get("error")
+
+    recorded = box.record_input_sensitivity(session)
+
+    assert recorded["ok"] and recorded["written"], recorded
+    written = json.loads(path.read_text())["input_sensitivity"]
+    assert written[0]["source"] == "learned"
+    assert locator in written[0]["evidence"]
+
+
+def test_recording_is_refused_when_only_the_robot_attempt_ran(box, app,
+                                                              tmp_path):
+    """Half the evidence is not the evidence. A failure at speed is what an
+    ordinary validation error looks like too."""
+    import json
+
+    from ghostdriver.policy import ConsentSource, Tier
+    from ghostdriver.session import Profile
+
+    path = tmp_path / "profile.json"
+    path.write_text(json.dumps({"matched_profile": "L1", "denylist": []}),
+                    encoding="utf-8")
+    box.sessions.record_grant(app["pid"], allowed=True,
+                              source=ConsentSource.ELICITED)
+    session = box.sessions.attach(
+        app["pid"], command_line=["fixtureapp"], tier=Tier.INTERACTIVE,
+        profile=Profile.load(path),
+    ).session_id
+
+    box.set_value(session, "class=GhostFixturePlainEdit", "B" * 80)
+
+    recorded = box.record_input_sensitivity(session)
+
+    assert not recorded["ok"]
+    assert "cadence=fast_human" in recorded["error"]["message"]
+    assert "input_sensitivity" not in json.loads(path.read_text())

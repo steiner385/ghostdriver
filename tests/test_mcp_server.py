@@ -32,7 +32,11 @@ READ_TOOLS = {
 #: because a server cannot know at startup which tier a caller will open.
 ACTUATION_TOOLS = {"click", "type_text", "set_value", "send_keys"}
 
-EXPECTED_TOOLS = READ_TOOLS | ACTUATION_TOOLS
+#: Same tier, but it curates rather than actuates -- so it is not
+#: expected to carry the non-idempotent annotation the others do.
+CURATION_TOOLS = {"record_input_sensitivity"}
+
+EXPECTED_TOOLS = READ_TOOLS | ACTUATION_TOOLS | CURATION_TOOLS
 
 
 @pytest.fixture

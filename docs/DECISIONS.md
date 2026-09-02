@@ -681,6 +681,73 @@ The candidates are returned because the answer to "which one did you mean"
 is in them, and the message names both ways out — `within=` to scope,
 `index=` to choose.
 
+### D34. A learned note rests on what the server saw, not on what it is told
+
+**Decision.** The server keeps a small in-memory ledger of its own action
+outcomes, and `record_input_sensitivity` reads the differential out of that.
+A caller cannot assert one.
+
+**Reasoning.** `Source.LEARNED` is supposed to mean the differential held —
+the same action, on the same element, failing at robot cadence and
+succeeding at a human one. Something has to check that, and taking the
+caller's word is the one option that cannot: the agent asking for a note
+recorded is the party that most wants it recorded, and its account of its
+own history is indistinguishable from a guess. Later sessions will trust
+this file, so the evidence behind it has to be first-hand.
+
+Both halves must match on element *and* tool. "Something failed and
+something else worked" is two unrelated facts, not evidence about input
+speed, and a failed `click` must not vouch for a `set_value`.
+
+Order does not matter. An agent that hits the wall, retries paced, and then
+records is the ordinary case; one told a target is sensitive, working paced,
+that later confirms by trying robot is the same experiment run backwards and
+produces the same evidence.
+
+A refusal names which half is missing. The caller believes it saw something,
+and a bare no leaves it guessing whether to retry, re-measure, or give up.
+
+The ledger is bounded and forgotten on release: it is working evidence for
+one session, not history.
+
+### D35. A measurement never overrules a person, at any grain
+
+**Decision.** A learned note is refused if *any* declared note applies to
+its surface — not merely if one exists on the same surface.
+
+**Reasoning.** The same-surface check was written first and had a hole the
+test found. A learned note for `native` does not *replace* a declared note
+for `*`, so a same-surface check let it through — but it *beats* it at act
+time, because a specific note wins over a blanket one. A measurement could
+therefore override an operator by writing at a finer grain, which is the
+exact thing the rule exists to prevent, reached by the side door.
+
+The rule stops short of blanket refusal: a declaration about `web` says
+nothing about `native`, and does not block a measurement there.
+
+The asymmetry is deliberate and worth restating. A person who declared
+`robot` has not been contradicted by a session that measured otherwise —
+they may know the target flags without ever visibly refusing, which is a
+failure mode no measurement can reach. A declaration can still be replaced
+by another declaration; the rule protects a person from a measurement, not
+from another person.
+
+### D36. The note is written where the operator pointed, or handed back
+
+**Decision.** The note goes into the profile document supplied at attach.
+With no profile document, the note is returned for a person to place.
+
+**Reasoning.** The operator naming a profile path is the act that opts in to
+it being written; writing a file nobody pointed at would be a side effect
+nobody asked for. But the measurement is still worth something, so it comes
+back rather than being discarded.
+
+The whole document is read, modified and written back, because these files
+are hand-curated: a writer that rebuilt the document from what this process
+happens to model would silently drop anything an operator had added. Written
+to a temporary file and moved into place — an interrupted write that
+truncated a profile would leave every later session refusing to attach.
+
 ## Open, for whoever picks this up
 
 - **The denylist is enforced but unexercised.** It matches captions and
