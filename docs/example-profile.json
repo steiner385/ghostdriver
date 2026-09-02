@@ -12,11 +12,14 @@
     "Note: a re-probe overwrites this file and takes the curated policy with",
     "it. Keep a copy, or keep policy in a file the probe does not write."
   ],
+
   "matched_profile": "L1",
+
   "environment_allowlist": [
     "http://dev-host:8183/dev-environment/*",
     "https://staging.example.internal/*"
   ],
+
   "denylist": [
     "*delete*",
     "*submit*",
@@ -24,6 +27,7 @@
     "*complete task*",
     "*release*"
   ],
+
   "input_sensitivity": [
     {
       "cadence": "fast_human",
