@@ -273,6 +273,71 @@ though that mapping were the whole truth, and it is not.
 
 ---
 
+## Iteration 3 — fixture, then actuation
+
+### D16. The fixture is built on ctypes, not Lazarus
+
+**Deviation from spec section 10, taken deliberately.**
+
+The spec calls for Lazarus / Free Pascal, on the grounds that it "produces
+genuinely LCL-based Win32 binaries at no licensing cost and reproduces the
+profile faithfully". No Pascal toolchain exists on the development machine,
+and none of gcc, clang, MSVC or Rust either -- only .NET, which is the wrong
+tool because a WinForms application ships a UIA provider and section 10
+item 9 requires none.
+
+So the fixture is built directly on the Win32 API through ctypes, the same
+way the four smaller test fixtures already in this repository are.
+
+**What that costs.** Not the listed characteristics -- all nine are
+reproduced and each is asserted by a test rather than assumed. What is lost
+is *emergent* behaviour: the quirks a real toolkit exhibits that nobody
+thought to write down. Those are exactly the kind of thing this project
+keeps discovering on live targets, so the loss is real even though nothing
+on the list is missing.
+
+**Why it is acceptable.** The driver develops against the fixture's
+behaviour, not its language. An LCL build can replace this later and the
+actuation work and its tests point at that instead, unchanged.
+
+### D17. "One window per control" is the profile, not decoration
+
+**Found by measurement, and it nearly shipped wrong.**
+
+The first fixture had sixteen windows, several of them native `EDIT` and
+`STATIC` controls. The HWND-to-UIA bridge describes those with patterns, so
+the tree came out at 7 pattern-bearing elements from 16 -- a ratio of 0.44,
+which classifies as **M1**. The fixture whose entire purpose is to reproduce
+Profile L1 was reproducing the profile the project is not about.
+
+A measured L1 target carried 105 windows in its main tree and exposed 29 UIA
+elements between them, because almost every control is a vendor class the
+bridge can only describe as a bare pane.
+
+The fixture now carries a detail panel of caption/value pairs, each its own
+window in a vendor class, and classifies L1 at 57 windows. That is not
+padding to hit a threshold: rows of captions and values, one window each, is
+what a real business form *is*, and it is the same structure that produces
+the ~1,100-window trees this tool exists to summarize.
+
+### D18. Disruptive characteristics are opt-in at two levels
+
+Section 10 items 5 and 7 -- an application that grabs the foreground after
+acting, and a modal that appears mid-run -- exist precisely because a naive
+fixture would not exhibit them. They are also the two that make a machine
+unpleasant to work at.
+
+They are off by default in the application, enabled by command-line flags,
+and the test that induces focus theft is additionally skipped unless
+`GHOSTDRIVER_ALLOW_FOCUS_TESTS=1`. A suite has to be runnable on a machine
+somebody is using -- a lesson this project learned by disrupting its
+operator during iteration 1 -- and a failure induced on demand is more
+useful than one that happens ambiently anyway.
+
+Both were verified once, deliberately, with the operator informed.
+
+---
+
 ## Open, for whoever picks this up
 
 - **The denylist is enforced but unexercised.** It matches captions and
