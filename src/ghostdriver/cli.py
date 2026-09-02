@@ -41,13 +41,21 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    all_windows_help = (
+        "Search every top-level window of the process, not just the main "
+        "one. Menus, dropdowns, lookups and modal dialogs are separate "
+        "top-level windows in some toolkits and are invisible without this"
+    )
+
     find = sub.add_parser("find", help="Resolve a locator")
     find.add_argument("--pid", type=int, required=True)
     find.add_argument("--locator", required=True)
+    find.add_argument("--all-windows", action="store_true", help=all_windows_help)
 
     read = sub.add_parser("read", help="Read text of matching elements")
     read.add_argument("--pid", type=int, required=True)
     read.add_argument("--locator", required=True)
+    read.add_argument("--all-windows", action="store_true", help=all_windows_help)
 
     probe = sub.add_parser("probe", help="Emit a phase-1 capability profile")
     probe.add_argument("--pid", type=int, required=True)
@@ -63,6 +71,15 @@ def build_parser() -> argparse.ArgumentParser:
     surfaces.add_argument("--pid", type=int, required=True)
     surfaces.add_argument(
         "--all", action="store_true", help="Include hidden windows"
+    )
+    surfaces.add_argument(
+        "--all-windows",
+        action="store_true",
+        help=(
+            "Map every top-level window of the process, not just the main "
+            "one. Menus, dropdowns, lookups and modal dialogs are separate "
+            "top-level windows in some toolkits"
+        ),
     )
     surfaces.add_argument(
         "--changed-from",
@@ -96,6 +113,29 @@ def _main_tree(pid: int):
         print(f"error: pid {pid} has no windows on this desktop", file=sys.stderr)
         return None
     return tree
+
+
+def _trees(pid: int, all_windows: bool):
+    """The trees a command should work over.
+
+    One tree is the right default: it is the window the user is looking at,
+    and it keeps a locator from matching something not on screen. But this
+    toolkit family puts every menu, dropdown, lookup list and modal dialog
+    in its *own* top-level window, so a caller restricted to the main tree
+    cannot reach the control it most needs -- measured on a real target,
+    48% of the process's windows sat outside it, including every dialog.
+    `--all-windows` reaches them.
+    """
+    from .backends.windows.enumerate import enumerate_process
+
+    trees = enumerate_process(pid)
+    if not trees:
+        print(f"error: pid {pid} has no windows on this desktop", file=sys.stderr)
+        return None
+    if all_windows:
+        # Largest first, so the main window's matches lead the output.
+        return sorted(trees, key=lambda t: -sum(1 for _ in t.walk()))
+    return [select_main_tree(trees)]
 
 
 def cmd_list_targets() -> int:
@@ -176,16 +216,25 @@ def _parse_locator(expr: str) -> Locator | None:
         return None
 
 
-def cmd_find(pid: int, expr: str) -> int:
+def cmd_find(pid: int, expr: str, all_windows: bool = False) -> int:
     locator = _parse_locator(expr)
     if locator is None:
         return 2
-    tree = _main_tree(pid)
-    if tree is None:
+    trees = _trees(pid, all_windows)
+    if trees is None:
         return 2
-    matches = resolve(tree, locator)
+    matches = [n for tree in trees for n in resolve(tree, locator)]
     if not matches:
         print("no matches", file=sys.stderr)
+        if not all_windows:
+            # Menus, dropdowns, lookups and modal dialogs are separate
+            # top-level windows in some toolkits. Saying so costs one line
+            # and saves a caller concluding the control does not exist.
+            print(
+                "hint: only the main window was searched; add "
+                "--all-windows to include dialogs, menus and dropdowns",
+                file=sys.stderr,
+            )
         return 1
     for node in matches:
         print(
@@ -198,14 +247,14 @@ def cmd_find(pid: int, expr: str) -> int:
     return 0
 
 
-def cmd_read(pid: int, expr: str) -> int:
+def cmd_read(pid: int, expr: str, all_windows: bool = False) -> int:
     locator = _parse_locator(expr)
     if locator is None:
         return 2
-    tree = _main_tree(pid)
-    if tree is None:
+    trees = _trees(pid, all_windows)
+    if trees is None:
         return 2
-    matches = resolve(tree, locator)
+    matches = [n for tree in trees for n in resolve(tree, locator)]
     if not matches:
         print("no matches", file=sys.stderr)
         return 1
@@ -243,17 +292,22 @@ def cmd_probe(pid: int, out: str | None) -> int:
     return 0
 
 
-def cmd_surfaces(pid: int, show_all: bool, changed_from: str | None) -> int:
+def cmd_surfaces(
+    pid: int, show_all: bool, changed_from: str | None,
+    all_windows: bool = False,
+) -> int:
     from .backends.windows.region import region_evidence
     from .surface import SurfaceKind, map_digest, summarize_kinds, surface_map
 
-    tree = _main_tree(pid)
-    if tree is None:
+    trees = _trees(pid, all_windows)
+    if trees is None:
         return 2
 
-    regions = surface_map(
-        tree, region_evidence, visible_only=not show_all
-    )
+    regions = [
+        r
+        for tree in trees
+        for r in surface_map(tree, region_evidence, visible_only=not show_all)
+    ]
     digest = map_digest(regions)
 
     counts = summarize_kinds(regions)
@@ -363,15 +417,17 @@ def main(argv: list[str] | None = None) -> int:
             args.collapse_threshold,
         )
     if args.command == "find":
-        return cmd_find(args.pid, args.locator)
+        return cmd_find(args.pid, args.locator, args.all_windows)
     if args.command == "read":
-        return cmd_read(args.pid, args.locator)
+        return cmd_read(args.pid, args.locator, args.all_windows)
     if args.command == "probe":
         return cmd_probe(args.pid, args.out)
     if args.command == "restore":
         return cmd_restore(args.pid)
     if args.command == "surfaces":
-        return cmd_surfaces(args.pid, args.all, args.changed_from)
+        return cmd_surfaces(
+            args.pid, args.all, args.changed_from, args.all_windows
+        )
     return 2
 
 

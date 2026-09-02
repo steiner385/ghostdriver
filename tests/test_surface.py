@@ -293,3 +293,24 @@ def test_the_element_cap_clears_the_chrome_budget():
     from ghostdriver.backends.windows.region import PROBE_ELEMENTS
 
     assert PROBE_ELEMENTS > CHROME_ELEMENT_BUDGET * 2
+
+
+def test_a_budget_alone_cannot_hold_against_two_scrollbars():
+    """Why scrollbars are excluded structurally rather than out-counted.
+
+    A scrollbar contributes a container plus five parts, all named ("Line
+    up", "Page down", "Position") -- 6 elements. One fits inside the
+    budget. A region that scrolls in *both* directions contributes 12,
+    clears the budget on furniture alone, and would be reported as
+    drivable through an accessibility surface holding nothing at all.
+    Found on a real owner-drawn grid that needed both scrollbars.
+
+    Raising the budget only moves the goalposts; the walk now skips
+    scrollbar subtrees outright, so no number of them can defeat it.
+    """
+    from ghostdriver.backends.windows.region import SCROLLBAR_CONTROL_TYPE
+
+    ONE_SCROLLBAR = 6
+    assert ONE_SCROLLBAR <= CHROME_ELEMENT_BUDGET, "one is absorbed"
+    assert ONE_SCROLLBAR * 2 > CHROME_ELEMENT_BUDGET, "two are not"
+    assert SCROLLBAR_CONTROL_TYPE == 50014, "UIA_ScrollBarControlTypeId"

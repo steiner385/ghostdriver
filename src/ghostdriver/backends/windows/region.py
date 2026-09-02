@@ -40,6 +40,21 @@ PROBE_DEPTH = 8
 #: uses by a wide margin, cheap enough to run per region.
 PROBE_ELEMENTS = 40
 
+#: UIA_ScrollBarControlTypeId. A scrollbar and everything under it is the
+#: region's own chrome, never its content, so the walk skips the whole
+#: subtree rather than trying to out-count it.
+#:
+#: Counting instead of excluding was the original design and it was wrong.
+#: A scrollbar contributes a container plus five parts, all of them named
+#: ("Line up", "Page down", "Position"). One scrollbar is 6 elements, which
+#: a budget of 8 absorbs -- but a region scrolling in *both* directions
+#: contributes 12, clears the budget on furniture alone, and gets reported
+#: as drivable through an accessibility surface that holds nothing at all.
+#: Found on a real owner-drawn grid that happened to need both scrollbars.
+#: A budget can always be defeated by one more scrollbar; excluding them
+#: cannot.
+SCROLLBAR_CONTROL_TYPE = 50014
+
 
 def region_evidence(node: WindowNode, *, view: str = "raw") -> RegionEvidence:
     """Look beneath `node` on the accessibility surface.
@@ -81,6 +96,15 @@ def region_evidence(node: WindowNode, *, view: str = "raw") -> RegionEvidence:
     def visit(element, depth: int) -> None:
         if state["count"] >= PROBE_ELEMENTS or depth > PROBE_DEPTH:
             return
+        try:
+            if element.CurrentControlType == SCROLLBAR_CONTROL_TYPE:
+                # Chrome, not content. Skip it and everything beneath it.
+                return
+        except Exception:
+            # An element that will not say what it is gets counted rather
+            # than skipped: under-counting hides content, which is the
+            # more damaging direction.
+            pass
         if depth:
             # Depth 0 is the element standing for the region itself. Counting
             # it would give every region one element of "content" and make
