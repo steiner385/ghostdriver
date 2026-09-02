@@ -96,11 +96,18 @@ def test_nothing_blocking_is_the_common_case():
 
 
 def test_a_block_describes_itself_for_an_operator():
-    main = win(1, text="VendorApp", enabled=False)
+    """Both names, because either alone leaves an operator guessing.
+
+    The application caption here is deliberately a made-up one. Targets are
+    referred to by their technology profile throughout this project --
+    toolkit, bitness, control classes -- never by product or vendor name,
+    and sample data is not an exception to that.
+    """
+    main = win(1, text="Records Client", enabled=False)
     dialog = win(2, text="Confirm Delete Record", owner=1)
     described = find_modal_blocks([main, dialog])[0][0].describe()
-    assert "Confirm Delete Record" in described
-    assert "VendorApp" in described
+    assert "Confirm Delete Record" in described, "which dialog is holding it"
+    assert "Records Client" in described, "and which application is held"
 
 
 def test_an_untitled_dialog_still_names_itself_by_class():

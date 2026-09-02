@@ -849,6 +849,28 @@ focus-stealing). Worth stating as a standing property rather than a fix:
 this suite runs on a desktop somebody is using, and a test that is
 unpleasant to sit next to will not be run.
 
+### D41. Targets are named by profile, including in sample data
+
+**Convention, written down because it was already being broken.** Targets
+are referred to by their technology profile — toolkit, bitness, control
+classes, Profile L1/M1/W1 — never by product or vendor name. That holds for
+code, tests, commit messages and any report.
+
+Sample data is not an exception, and that is where it slipped: a modality
+test used a real product name as a window caption. Nothing else in the tree
+did, which is the point — a convention followed everywhere except one file
+is one edit away from being followed nowhere.
+
+The replacement is a made-up application name rather than a generic one like
+"Main". The test asserts that the *held application* is named alongside the
+dialog holding it, so the caption has to be distinctive enough to prove it
+came from the right window.
+
+The occurrence remains in history, which no going-forward change can alter.
+Rewriting published commits was judged not worth it for a private repository
+against a partial remedy; if that judgement changes, the two commits are
+findable by searching the history for the name.
+
 ## Open, for whoever picks this up
 
 - **The denylist is enforced but unexercised.** It matches captions and
