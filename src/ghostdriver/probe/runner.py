@@ -28,9 +28,12 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
     import psutil
 
     from ..backends.windows.enumerate import enumerate_process
+    from ..backends.windows.modality import top_level_state
     from ..backends.windows.msaa import assess_msaa
     from ..backends.windows.process import process_facts
     from ..backends.windows.uia import assess_uia
+    from ..modality import find_modal_blocks
+    from ..surface import is_web_host
 
     facts = process_facts(pid)
     trees: list[WindowNode] = enumerate_process(pid)
@@ -72,16 +75,38 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
     except (psutil.Error, OSError):
         command_line = []
 
-    matched = match_profile(
+    # A modal dialog is a separate top-level window, and the main-window
+    # selector will rightly pick it -- it is the only window that can be
+    # acted on. But everything measured above then describes the dialog. On
+    # a real target a one-window "Tip of the Day" was profiled as though it
+    # were the whole application, and nothing in the document said so.
+    blocks, unexplained = find_modal_blocks(top_level_state(pid))
+    blocked_by = [b.describe() for b in blocks] + [
+        f"{u.blocked.text or u.blocked.class_name} is disabled with no "
+        "visible dialog to account for it"
+        for u in unexplained
+    ]
+
+    # Whether any window in the process hosts a browser engine. Checked
+    # across every tree rather than the selected one: the shell and the web
+    # view are usually different top-level windows.
+    hosts_web_content = any(
+        is_web_host(n.class_name) for t in trees for n in t.walk()
+    ) or bool(toolkit.secondary)
+
+    matched, reason = match_profile(
         uia_verdict=uia_control.verdict,
         msaa_verdict=msaa.verdict,
         window_count=len(nodes),
         toolkit=toolkit.toolkit,
+        hosts_web_content=hosts_web_content,
     )
 
     return ProfileDocument(
         profile_id=_profile_id(facts.executable, facts.bitness),
         matched_profile=matched,
+        classification_reason=reason,
+        blocked_by=blocked_by,
         executable={
             "path": facts.executable,
             "bitness": facts.bitness,

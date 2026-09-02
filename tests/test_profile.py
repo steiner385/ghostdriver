@@ -1,7 +1,21 @@
 import json
 
 from ghostdriver.model.window import WindowNode
-from ghostdriver.probe.profile import ProfileDocument, class_census, match_profile
+from ghostdriver.probe.profile import (
+    ProfileDocument, class_census, match_profile,
+)
+
+
+def profile_of(**kwargs) -> str:
+    """The verdict alone.
+
+    match_profile returns (profile, reason): the reason is there so a
+    reader can disagree with which rung of the ladder answered. These
+    tests are about the verdict, so they read it through here.
+    """
+    profile, reason = match_profile(**kwargs)
+    assert reason, f"{profile} was returned with no reason"
+    return profile
 
 
 def node(handle, class_name, children=()):
@@ -22,7 +36,7 @@ def test_class_census_is_sorted_by_descending_count():
 
 
 def test_matches_m1_when_uia_is_rich():
-    assert match_profile(
+    assert profile_of(
         uia_verdict="rich", msaa_verdict="actionable",
         window_count=200, toolkit="dotnet",
     ) == "M1"
@@ -36,11 +50,11 @@ def test_matches_o1_when_there_are_no_per_control_windows():
     per-control windows. Without it -- see the companion assertion below --
     there is nothing to classify from, and the answer is "indeterminate".
     """
-    assert match_profile(
+    assert profile_of(
         uia_verdict="unusable", msaa_verdict="unusable",
         window_count=3, toolkit="mfc",
     ) == "O1"
-    assert match_profile(
+    assert profile_of(
         uia_verdict="unusable", msaa_verdict="unusable",
         window_count=3, toolkit="unknown",
     ) == "indeterminate"
@@ -55,7 +69,7 @@ def test_failed_uia_assessment_is_indeterminate_not_a_profile():
     no evidence at all.
     """
     for verdict in ("unavailable", "empty", "unknown"):
-        assert match_profile(
+        assert profile_of(
             uia_verdict=verdict, msaa_verdict="unusable",
             window_count=1100, toolkit="delphi-vcl",
         ) == "indeterminate", f"{verdict} must not classify"
@@ -63,7 +77,7 @@ def test_failed_uia_assessment_is_indeterminate_not_a_profile():
 
 def test_unusable_uia_with_many_windows_is_l1():
     """A tree that genuinely reports no patterns, with a window per control."""
-    assert match_profile(
+    assert profile_of(
         uia_verdict="unusable", msaa_verdict="identification-only",
         window_count=1100, toolkit="delphi-vcl",
     ) == "L1"
@@ -71,7 +85,7 @@ def test_unusable_uia_with_many_windows_is_l1():
 
 def test_msaa_actionable_rescues_a_small_window_count():
     """msaa_verdict must actually influence the result, not be decorative."""
-    assert match_profile(
+    assert profile_of(
         uia_verdict="partial", msaa_verdict="actionable",
         window_count=5, toolkit="mfc",
     ) == "M1"
@@ -80,8 +94,8 @@ def test_msaa_actionable_rescues_a_small_window_count():
 def test_profile_boundary_is_pinned_at_fifty():
     """Pin the threshold so a regression anywhere in 4..1099 cannot hide."""
     common = dict(uia_verdict="unusable", msaa_verdict="unusable", toolkit="mfc")
-    assert match_profile(window_count=50, **common) == "L1"
-    assert match_profile(window_count=49, **common) == "O1"
+    assert profile_of(window_count=50, **common) == "L1"
+    assert profile_of(window_count=49, **common) == "O1"
 
 
 def test_profile_roundtrips_through_json(tmp_path):
@@ -122,3 +136,84 @@ def test_phase1_fields_that_require_actuation_are_empty_not_absent():
     assert data["denylist"] == []
     assert data["environment_allowlist"] == []
     assert data["unresponsive_count"] == 0
+
+
+# --- the gap the ad-hoc sweep found -------------------------------------
+
+def test_a_partial_uia_tree_is_not_reported_as_unknown():
+    """"We have evidence but no rule matched" is not "we could not tell".
+
+    Found by sweeping ten live applications: a chat client with a working
+    provider exposing 43 elements at depth 11 came back as
+    `indeterminate`, which told an operator nothing was known about a
+    target that was plainly drivable. `indeterminate` is reserved for an
+    assessment that did not conclude.
+    """
+    assert profile_of(
+        uia_verdict="partial", msaa_verdict="identification-only",
+        window_count=25, toolkit="unknown",
+    ) == "M1"
+
+
+def test_an_embedded_web_view_without_a_rich_tree_is_w1():
+    """W1 is in the spec and the classifier never returned it.
+
+    A Chromium-family view inside a native shell, with renderer
+    accessibility not exposing a usable tree, needs a browser driver rather
+    than native-window techniques -- which is exactly what W1 says.
+    """
+    assert profile_of(
+        uia_verdict="partial", msaa_verdict="identification-only",
+        window_count=25, toolkit="unknown", hosts_web_content=True,
+    ) == "W1"
+
+
+def test_a_web_app_whose_renderer_accessibility_is_on_is_m1():
+    """The spec puts "Chromium with renderer accessibility enabled" under
+    M1: the tree is there, so drive it rather than reaching for a separate
+    driver."""
+    assert profile_of(
+        uia_verdict="rich", msaa_verdict="identification-only",
+        window_count=3, toolkit="unknown", hosts_web_content=True,
+    ) == "M1"
+
+
+def test_web_content_does_not_override_an_unconcluded_assessment():
+    """An assessment that never ran cannot be evidence for anything."""
+    assert profile_of(
+        uia_verdict="unavailable", msaa_verdict="unusable",
+        window_count=3, toolkit="unknown", hosts_web_content=True,
+    ) == "indeterminate"
+
+
+def test_indeterminate_still_means_the_assessment_did_not_conclude():
+    for verdict in ("unavailable", "empty", "unknown"):
+        assert profile_of(
+            uia_verdict=verdict, msaa_verdict="unusable",
+            window_count=900, toolkit="mfc",
+        ) == "indeterminate"
+
+
+def test_every_verdict_carries_a_reason_naming_its_evidence():
+    """The reason is what lets a reader disagree with the classification
+    rather than only with the outcome."""
+    profile, reason = match_profile(
+        uia_verdict="unusable", msaa_verdict="unusable",
+        window_count=900, toolkit="mfc",
+    )
+    assert profile == "L1"
+    assert "900 windows" in reason
+
+
+def test_a_document_records_why_it_classified_as_it_did():
+    document = ProfileDocument(
+        profile_id="x", matched_profile="W1",
+        classification_reason="hosts an embedded web view",
+        blocked_by=["'Tip of the Day' is holding 'ProjectLibre'"],
+    )
+    emitted = document.to_dict()
+
+    assert emitted["classification_reason"] == "hosts an embedded web view"
+    assert emitted["blocked_by"] == [
+        "'Tip of the Day' is holding 'ProjectLibre'"
+    ]
