@@ -46,9 +46,16 @@ TIER_TOOLS: dict[Tier, frozenset[str]] = {
         "list_targets", "attach", "release", "grant_targets",
         "describe", "find", "read", "capture", "wait_for",
         "probe", "surfaces", "modals", "restore",
+        # Asks a person to do something and watches for them to have done
+        # it. It changes nothing itself, and a read-only session has as much
+        # need of it as any other -- "please sign in so I can see the
+        # screen" is the commonest case there is. The person decides whether
+        # to act; this only ever asks, and the ask is shown to them as
+        # written.
+        "await_human",
     }),
     Tier.INTERACTIVE: frozenset({
-        "click", "type_text", "set_value", "send_keys", "await_human",
+        "click", "type_text", "set_value", "send_keys",
         # Curation rather than actuation, but it belongs to this tier: the
         # evidence it writes can only be produced by a session that acted.
         "record_input_sensitivity",

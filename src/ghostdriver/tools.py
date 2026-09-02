@@ -20,6 +20,7 @@ Everything that can return many rows caps them and says what it capped.
 """
 
 import base64
+import time
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -441,10 +442,12 @@ class Toolbox:
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, str(exc), locator=locator)
 
+        from .backends.windows.text import is_protected
+
         values = []
         for node in matches[:MAX_ELEMENTS]:
             raw = read_window_text(node.handle)
-            values.append({
+            value = {
                 "class": node.class_name,
                 # None and "" are different answers: one is a control that
                 # never replied, the other is a control that replied with
@@ -452,7 +455,23 @@ class Toolbox:
                 # may be full.
                 "text": raw,
                 "answered": raw is not None,
-            })
+            }
+            # A third answer, and it was previously reported as the first.
+            # The system refuses a cross-process read of a password field,
+            # so it comes back unanswered -- identical to a control that has
+            # stopped pumping messages, and a caller told the wrong one goes
+            # off diagnosing a hang that is not happening. Only asked when
+            # the read came back empty-handed, so the ordinary path pays
+            # nothing.
+            if raw is None and is_protected(node.handle):
+                value["protected"] = True
+                value["reason"] = (
+                    "this field hides its contents; the system does not "
+                    "disclose them to another process, and this tool will "
+                    "not type into it. If a person must fill it in, use "
+                    "await_human"
+                )
+            values.append(value)
         return {
             "ok": True,
             "locator": locator,
@@ -750,6 +769,30 @@ class Toolbox:
 
         return _Prepared(session=session, node=node, cadence=pace), None
 
+    def _refuse_if_protected(self, node, what: str) -> dict | None:
+        """Never put characters into a field that hides its contents.
+
+        A password box is the one control where the right answer is always
+        a person. The value would have to pass through this process to be
+        typed, and there is no version of that worth the convenience --
+        so the boundary is here, in code, rather than in a caller\'s
+        judgement.
+
+        Named keys are a different question and are allowed: `tab` out of a
+        field a person has filled in, or `enter` to submit it, carries
+        nothing.
+        """
+        from .backends.windows.text import is_protected
+
+        if not is_protected(node.handle):
+            return None
+        return _error(
+            ErrorKind.DENIED_BY_POLICY,
+            f"refusing to {what} a field that hides its contents. Passwords "
+            "and the like are for a person to type: use await_human to ask "
+            "them, then carry on once they have",
+        )
+
     def _cadence(self, session, handle: int, requested: str | None):
         """What to type at: the caller\'s choice, else what is known.
 
@@ -909,6 +952,10 @@ class Toolbox:
         if failure is not None:
             return failure
 
+        refusal = self._refuse_if_protected(prepared.node, "type into")
+        if refusal is not None:
+            return refusal
+
         from .actuate import Condition
         from .backends.windows import verbs
         from .backends.windows.text import read_window_text
@@ -981,6 +1028,10 @@ class Toolbox:
         if failure is not None:
             return failure
 
+        refusal = self._refuse_if_protected(prepared.node, "type into")
+        if refusal is not None:
+            return refusal
+
         from .backends.windows import verbs
 
         try:
@@ -1026,6 +1077,14 @@ class Toolbox:
 
         from .backends.windows import verbs
         from .backends.windows.input import NAMED_KEYS
+
+        # Named keys carry nothing, so `tab` out of a password field a
+        # person has filled in is fine. A character is the credential.
+        if any(len(k) == 1 for k in keys):
+            refusal = self._refuse_if_protected(prepared.node,
+                                                "send characters to")
+            if refusal is not None:
+                return refusal
 
         unknown = [k for k in keys
                    if k.lower() not in NAMED_KEYS and len(k) != 1]
@@ -1165,3 +1224,148 @@ class Toolbox:
                 f"could not update {session.profile.path}: {exc}",
             )
         return {"ok": True, **outcome}
+
+    def await_human(
+        self,
+        session_id: str,
+        ask: str,
+        *,
+        until: dict | None = None,
+        timeout_s: float = 120.0,
+        poll_s: float = 0.5,
+        all_windows: bool = False,
+        confirmed: bool = False,
+    ) -> dict:
+        """Hand a step to the person, and wait for the target to show it done.
+
+        Some steps are not the driver\'s to take. A password is the clearest
+        case -- it would have to pass through this process to be typed, and
+        no amount of care makes that worth the convenience -- but the same
+        is true of anything an operator has said they want to do themselves,
+        and of a decision that needs a person\'s judgement rather than a
+        locator.
+
+        What this adds over the agent simply asking in chat is *evidence*.
+        A reply saying "done" is a claim; `until` is a condition checked
+        against the target itself, so the agent resumes on something
+        observed rather than something asserted. Both together are better
+        still: the person confirms, and the application agrees.
+
+        Without `until` this returns immediately, having asked and verified
+        nothing -- said plainly in the result, because "I asked" and "it
+        happened" are as different here as everywhere else in this tool.
+
+        Bounded, and reports a timeout as a timeout. A person may be away
+        from the machine, and a tool that waited indefinitely would take the
+        session with them.
+
+        **It never carries the value.** There is no parameter for a
+        credential and no way to supply one, in either direction. The point
+        is that the secret goes from the person into the application without
+        passing through here.
+        """
+        try:
+            session = self.sessions.authorize(session_id, "await_human")
+        except GhostdriverError as exc:
+            return _error(exc.kind, exc.message)
+
+        asked = (ask or "").strip()
+        if not asked:
+            return _error(
+                ErrorKind.NOT_ACTIONABLE,
+                "say what the person needs to do; this is relayed to them "
+                "as written, so an empty ask reaches them as an empty ask",
+            )
+
+        if until is None:
+            return {
+                "ok": True,
+                "asked": asked,
+                "confirmed_by_operator": confirmed,
+                "waited_ms": 0,
+                "verified": False,
+                "note": (
+                    "nothing was checked against the target, because no "
+                    "`until` was given. Pass one naming what will be true "
+                    "once the person has done it, and this waits for the "
+                    "application to show it rather than taking anyone\'s word"
+                ),
+            }
+
+        where = until.get("locator")
+        if not where:
+            return _error(ErrorKind.NOT_ACTIONABLE,
+                          "`until` needs a locator naming what to wait for")
+        try:
+            Locator.parse(where)
+        except ValueError as exc:
+            return _error(ErrorKind.NOT_FOUND, f"until is unusable: {exc}")
+
+        from .backends.windows.text import read_window_text
+
+        wanted = until.get("text")
+        # "gone" is as common a signal as "there": a sign-in dialog closing
+        # is how you know someone signed in.
+        absent = bool(until.get("absent", False))
+
+        def satisfied() -> bool:
+            found = self._resolve(session.pid, where, all_windows)
+            if absent:
+                return not found
+            if not found:
+                return False
+            if wanted is None:
+                return True
+            return any((read_window_text(n.handle) or "") == wanted
+                       for n in found)
+
+        started = time.monotonic()
+        deadline = started + max(0.0, timeout_s)
+        met = False
+        while True:
+            try:
+                met = satisfied()
+            except GhostdriverError:
+                # The target went away while we waited, which is an answer.
+                met = False
+                break
+            if met:
+                break
+            now = time.monotonic()
+            if now >= deadline:
+                break
+            time.sleep(min(poll_s, deadline - now))
+
+        waited_ms = int((time.monotonic() - started) * 1000)
+        described = (
+            f"{where} is gone" if absent
+            else f"{where} exists" if wanted is None
+            else f"{where} reads {wanted!r}"
+        )
+        if met:
+            return {
+                "ok": True,
+                "asked": asked,
+                "confirmed_by_operator": confirmed,
+                "waited_ms": waited_ms,
+                "verified": True,
+                "expected": described,
+            }
+        return {
+            "ok": False,
+            "asked": asked,
+            "confirmed_by_operator": confirmed,
+            "waited_ms": waited_ms,
+            "verified": False,
+            "expected": described,
+            "error": {
+                "kind": ErrorKind.TIMEOUT.value,
+                "message": (
+                    f"waited {waited_ms}ms and {described} is still not so. "
+                    "The person may not have finished, or may not have seen "
+                    "the request -- ask them before retrying, and do not "
+                    "attempt the step yourself if it was handed over for a "
+                    "reason"
+                ),
+            },
+        }

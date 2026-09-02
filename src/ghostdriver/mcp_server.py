@@ -114,6 +114,19 @@ class ConsentAnswer(BaseModel):
     )
 
 
+class HumanDone(BaseModel):
+    """What the operator is asked when a step is handed to them.
+
+    Only a confirmation. There is deliberately no field for a value: the
+    whole point of handing a step over is that whatever it involves goes
+    from the person into the application without passing through here.
+    """
+
+    done: bool = Field(
+        description="Tick once you have done it, or leave it to skip."
+    )
+
+
 def build_server(sessions: SessionManager | None = None) -> Any:
     """Construct the server. Importable without starting anything."""
     from mcp.server.mcpserver import Context, MCPServer
@@ -471,6 +484,54 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     ) -> dict[str, Any]:
         return box.record_input_sensitivity(session_id, locator=locator,
                                             note=note)
+
+    @server.tool(annotations=READS, description=(
+        "Hand a step to the person and wait for the application to show it "
+        "done. Use it for anything that is not yours to do: a password or "
+        "any other credential, a step the operator asked to perform "
+        "themselves, an irreversible action, or a decision that needs their "
+        "judgement. Pass `until` naming what will be true once they have "
+        "finished -- a dialog gone, a field filled -- so you resume on "
+        "something observed rather than on someone saying they did it. "
+        "Never type a credential yourself, and never ask for one to be told "
+        "to you: it goes from the person into the application directly."
+    ))
+    async def await_human(
+        session_id: SessionId,
+        ask: Annotated[str, Field(description=(
+            "What the person needs to do, in plain words. Relayed to them "
+            "exactly as written, so write it to be read by them and not by "
+            "you."
+        ))],
+        until: Annotated[dict | None, Field(description=(
+            "What proves it is done: {locator, text?, absent?}. `absent` "
+            "waits for the element to be gone, which is how a sign-in "
+            "dialog closing tells you someone signed in. Omit only when "
+            "nothing observable would change."
+        ))] = None,
+        timeout_s: Annotated[float, Field(description=(
+            "How long to wait before giving up and saying so."
+        ))] = 120.0,
+        all_windows: AllWindows = False,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        confirmed = False
+        if ctx is not None:
+            try:
+                answer = await ctx.elicit(
+                    message=ask, schema=HumanDone,
+                )
+                data = getattr(answer, "data", None)
+                if getattr(answer, "action", None) == "accept" and data:
+                    confirmed = bool(data.done)
+            except Exception:
+                # No elicitation here. The agent relays the ask in chat
+                # instead, and `until` still decides whether it happened --
+                # which is why the condition is the part that matters.
+                confirmed = False
+        return box.await_human(session_id, ask, until=until,
+                               timeout_s=timeout_s, all_windows=all_windows,
+                               confirmed=confirmed)
 
     return server
 

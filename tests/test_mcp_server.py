@@ -24,7 +24,7 @@ mcp = pytest.importorskip(
 READ_TOOLS = {
     "list_targets", "attach", "release", "grant_targets",
     "describe", "find", "read", "capture", "wait_for",
-    "probe", "surfaces", "modals", "restore",
+    "probe", "surfaces", "modals", "restore", "await_human",
 }
 
 #: Reachable only from a session opened at the interactive tier. Registered

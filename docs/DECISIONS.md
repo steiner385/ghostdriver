@@ -748,6 +748,107 @@ happens to model would silently drop anything an operator had added. Written
 to a temporary file and moved into place — an interrupted write that
 truncated a profile would leave every later session refusing to attach.
 
+### D37. A password field is protected, not unresponsive
+
+**Finding, and the fix it forced.** Windows refuses a cross-process
+`WM_GETTEXT` on a password field. Measured: the read comes back with no
+answer at all — which is exactly what a control that has stopped pumping
+messages looks like.
+
+That the read is blocked is good and was worth confirming. Reporting it as
+`responsive: false` was not: one answer means the target may be hung, the
+other means a field is working precisely as designed, and a caller told the
+first goes off diagnosing a hang that is not happening.
+
+Detected with `EM_GETPASSWORDCHAR` rather than the `ES_PASSWORD` style bit.
+The bit is 0x0020, which means something else entirely on a non-EDIT class,
+and a superclassed field keeps its vendor class name — so nothing in the
+name says whether to read the bit that way. The message is implemented only
+by EDIT-derived windows and answers 0 everywhere else; verified across every
+class the fixture has.
+
+Asked only when a read came back empty-handed, so the ordinary path pays
+nothing for it.
+
+### D38. Nothing types into a field that hides its contents
+
+**Decision.** `set_value`, `type_text`, and `send_keys` with any single
+character refuse a protected field. Named keys are allowed.
+
+**Reasoning.** The value would have to pass through this process to be
+typed, and no amount of care makes that worth the convenience. Putting the
+boundary in code rather than in a caller's judgement is the whole point: an
+agent under time pressure with a password in hand should find this
+impossible rather than inadvisable.
+
+Named keys are a different question. `tab` out of a field a person has just
+filled in, or `enter` to submit it, carries nothing — and refusing them
+would make the handover useless, because the agent could not continue the
+flow it had just handed over.
+
+The refusal names `await_human`, so the caller is told what to do instead
+rather than only what it cannot do.
+
+### D39. `await_human` waits on the target, not on a reply
+
+**Decision.** A tool that hands a step to a person, and resumes when a
+stated condition holds against the application.
+
+**Reasoning.** Some steps are not the driver's: a credential, an
+irreversible action, a step the operator asked to keep, a decision needing
+judgement. An agent could simply ask in chat — what this adds is *evidence*.
+"Done" is a claim; `until` is an observation. Where the client supports
+elicitation the person is also asked directly, and then there are two
+independent signals: the person confirmed, and the application agrees.
+
+`absent` is supported because a thing going away is as common a signal as a
+thing appearing — a sign-in dialog closing is how you know someone signed
+in.
+
+Without `until` it returns immediately and says it verified nothing, rather
+than implying a handover succeeded because it was requested.
+
+Bounded, and a timeout is reported as a timeout. A person may be away from
+the machine, and a tool that waited indefinitely would take the session with
+them. The timeout message says not to attempt the step instead — the reason
+it was handed over has not gone away just because nobody did it yet.
+
+**It never carries the value.** There is no parameter for a credential in
+either direction, and the elicitation schema is a confirmation with no field
+to type into. The secret goes from the person into the application without
+passing through here.
+
+**At the read-only tier**, deliberately. Asking is not acting: it changes
+nothing itself, the person decides whether to do anything, and the ask is
+relayed to them exactly as written. A read-only session needs it as much as
+any other — "please sign in so I can see the screen" is the commonest case
+there is.
+
+### D40. The fixture stops beeping without stopping truncating
+
+**Decision.** The superclassed edits reject a character past `FIELD_CAPACITY`
+themselves, before the EDIT sees it, and swallow Return and Escape.
+
+**Reasoning.** Reported by the operator during a test run: dozens of system
+beeps stuttering over each other. A real single-line EDIT beeps on every
+character it refuses, and several tests type eighty into a field that stops
+at twenty — around sixty beeps each, four times a run, at whoever is at the
+machine.
+
+The truncation is real behaviour worth keeping; the beep is not observable
+to a driver and has no bearing on anything being tested. Rejecting the
+character a layer earlier preserves the first exactly and removes the
+second.
+
+Enforced privately rather than through `EM_LIMITTEXT`, so the control still
+answers `EM_GETLIMITTEXT` with thirty thousand — which is the point of D24,
+and would have been erased by setting a real limit.
+
+Second time a test run has disturbed the machine it runs on (the first was
+focus-stealing). Worth stating as a standing property rather than a fix:
+this suite runs on a desktop somebody is using, and a test that is
+unpleasant to sit next to will not be run.
+
 ## Open, for whoever picks this up
 
 - **The denylist is enforced but unexercised.** It matches captions and

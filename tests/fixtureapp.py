@@ -65,6 +65,19 @@ WS_OVERLAPPEDWINDOW = 0x00CF0000
 WS_EX_NOACTIVATE = 0x08000000
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_CLIENTEDGE = 0x00000200
+ES_PASSWORD = 0x0020
+
+#: How many characters the superclassed edits accept before they stop.
+#:
+#: Enforced here rather than through EM_LIMITTEXT, for two reasons. The
+#: control keeps answering EM_GETLIMITTEXT with its default of thirty
+#: thousand, which is the point of the finding this reproduces: the limit a
+#: field declares does not predict where it actually stops. And rejecting
+#: the character *before* the EDIT sees it keeps the control from sounding
+#: the system beep on every one -- a real field does beep, but that is not
+#: something a driver can observe, and a test run that fires sixty beeps at
+#: whoever is at the machine is a bad neighbour.
+FIELD_CAPACITY = 20
 
 SW_SHOWNOACTIVATE = 4
 SW_SHOWNORMAL = 1
@@ -107,6 +120,7 @@ for fn, argtypes, restype in (
     ("GetSysColorBrush", [ctypes.c_int], wintypes.HBRUSH),
     ("IsWindowEnabled", [wintypes.HWND], wintypes.BOOL),
     ("GetAncestor", [wintypes.HWND, wintypes.UINT], wintypes.HWND),
+    ("GetWindowTextLengthW", [wintypes.HWND], ctypes.c_int),
 ):
     f = getattr(user32, fn)
     f.argtypes, f.restype = argtypes, restype
@@ -361,8 +375,31 @@ def _superclass_edit(new_name: str, proc) -> None:
         raise ctypes.WinError(ctypes.get_last_error())
 
 
+def _swallow(hwnd, msg, wparam) -> bool:
+    """Whether to drop this keystroke before the EDIT can complain about it.
+
+    Two cases, both of which a real single-line EDIT answers with the system
+    beep: a character arriving at a full field, and Return or Escape, which
+    a single-line edit has nothing to do with. The truncation is real
+    behaviour worth reproducing -- the beep is not observable to a driver,
+    and a suite that sounds it dozens of times is unusable next to a person
+    trying to work.
+    """
+    if msg != WM_CHAR:
+        return False
+    if wparam in (0x0D, 0x1B):  # Return, Escape
+        return True
+    return _text_length(hwnd) >= FIELD_CAPACITY
+
+
+def _text_length(hwnd: int) -> int:
+    return user32.GetWindowTextLengthW(wintypes.HWND(hwnd))
+
+
 def _plain_edit_proc(hwnd, msg, wparam, lparam):
     """Superclassed, but with no binding behind it."""
+    if _swallow(hwnd, msg, wparam):
+        return 0
     return user32.CallWindowProcW(_EDIT_PROC, hwnd, msg, wparam, lparam)
 
 
@@ -381,6 +418,8 @@ def _bound_edit_proc(hwnd, msg, wparam, lparam):
     behaves this way is exactly what was unverified; this reproduces the
     hazardous case so a driver can be built that survives it.
     """
+    if _swallow(hwnd, msg, wparam):
+        return 0
     result = user32.CallWindowProcW(_EDIT_PROC, hwnd, msg, wparam, lparam)
     if msg == WM_CHAR:
         _commit_bound_value(hwnd)
@@ -551,6 +590,11 @@ def build(options) -> dict:
     bound = child(BOUND_EDIT_CLASS, "PART-0001", 90, 288, 220, 22,
                   extra=WS_BORDER, exstyle=WS_EX_CLIENTEDGE)
     mirror = child("STATIC", "committed:PART-0001", 330, 288, 280, 22)
+    # A password field, because a sign-in screen is part of what this class
+    # of target looks like and it behaves unlike every other control here:
+    # the system refuses to hand its contents to another process at all.
+    secret = child("EDIT", "hunter2", 330, 256, 200, 22,
+                   extra=WS_BORDER | ES_PASSWORD, exstyle=WS_EX_CLIENTEDGE)
     status = child("STATIC", "clicks=0 last=", 12, 330, 600, 22)
     _STATE.update(bound_mirror=mirror, status=status,
                   bound_value="PART-0001", page_index=0)
@@ -577,6 +621,7 @@ def build(options) -> dict:
         "grid_class": GRID_CLASS,
         "button_class": BUTTON_CLASS,
         "plain_edit": plain,
+        "password": secret,
         "bound_edit": bound,
         "bound_mirror": mirror,
         "status": status,
