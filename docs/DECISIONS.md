@@ -229,7 +229,7 @@ now pinned by tests.
 would need a heuristic -- matching titles, say -- that can pair the wrong
 application when two have similar ones.
 
-**A lead, tested and inconclusive.** UIA element objects carry a process id,
+**A lead, tested and inconclusive at first.** UIA element objects carry a process id,
 and a UIA tree can in principle span processes, so walking the frame's UIA
 tree and reading those ids would resolve the pairing without heuristics.
 Walking it returned one element, belonging to the frame host. *But the
@@ -237,6 +237,33 @@ application was suspended at the time* -- UWP apps are suspended when not in
 the foreground, which is why its window was parked off-screen. This does not
 settle whether UIA crosses the boundary for a running application. Retest
 with the application in the foreground before concluding anything.
+
+**Resolved, 2026-09-02.** Retested with the application awake, and the lead
+holds decisively. Walking the frame's UIA tree returned 211 elements, of
+which **203 belonged to the application and 8 to the frame host's chrome** --
+a 96% majority. UIA does span the process boundary; the earlier reading was
+an artefact of measuring a sleeping application.
+
+So the pairing is now resolved from evidence rather than signposted: count
+the process ids of the elements beneath a window, and the process owning a
+clear majority of them is the application inside it. No title matching, no
+heuristic on names. `probe` and `attach` name the application and its pid.
+
+Three properties worth keeping:
+
+- The majority threshold is high (60%). Pointing a caller at an unrelated
+  process is worse than admitting the answer is unclear.
+- The walk is bounded -- a few hundred elements, a few levels deep -- because
+  it runs during `attach`. The answer is a majority, not a census.
+- An unidentified application is reported as *suspended*, not as failure.
+  That is what it usually is, and the remedy is to bring the window forward
+  rather than to look for a bug. Getting that wrong once already cost an
+  hour of believing UIA could not cross the boundary.
+
+**Still open:** this addresses hosts that compose another process's UI into
+their own window, which is the shape UWP has. Whether process-per-tab
+browsers and other broker architectures resolve the same way is untested --
+the method is general, the evidence is not.
 
 **The general shape.** UWP is the instance visible on one desktop.
 Process-per-tab browsers and other broker architectures have the same

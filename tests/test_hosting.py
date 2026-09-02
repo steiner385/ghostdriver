@@ -9,9 +9,9 @@ profiling a title bar.
 from ghostdriver.hosting import (
     MEASURED_A_FRAME_NOTE,
     classify_process,
+    hosted_frame_note,
     is_frame_host,
     is_hosted_app,
-    note_for_measured_window,
 )
 
 
@@ -70,13 +70,42 @@ def test_hosting_a_frame_wins_when_a_process_looks_like_both():
 def test_the_strong_claim_applies_only_to_the_measured_window():
     """This is the one that warns, and it has to be precise: it says a
     result is about somebody else's frame."""
-    assert note_for_measured_window("ApplicationFrameWindow")
-    assert not note_for_measured_window("Shell_TrayWnd")
-    assert not note_for_measured_window("Windows.UI.Core.CoreWindow")
+    assert is_frame_host("ApplicationFrameWindow")
+    assert not is_frame_host("Shell_TrayWnd")
+    assert not is_frame_host("Windows.UI.Core.CoreWindow")
+
+
+def test_a_named_application_gives_the_caller_a_pid_not_a_search():
+    """Resolution turns a signpost into an answer."""
+    note = hosted_frame_note(125488, "SystemSettings.exe", 0.96)
+
+    assert "SystemSettings.exe" in note
+    assert "125488" in note
+    assert "96%" in note
+    assert "attach to that pid" in note
+
+
+def test_an_unidentified_application_is_called_suspended_not_broken():
+    """A hosted application that is not in the foreground provides nothing.
+
+    Reporting that as "unresolvable" sends someone looking for a bug; the
+    fix is to click the window. Measured both ways: suspended it yielded a
+    single element, awake it yielded 203.
+    """
+    note = hosted_frame_note(None)
+
+    assert "suspended" in note
+    assert "foreground" in note
 
 
 def test_the_warning_explains_rather_than_merely_labelling():
-    """A caller that only learns "frame-host" knows nothing actionable."""
+    """A caller that only learns "frame-host" knows nothing actionable.
+
+    The advice changed once resolution existed: it used to say "go find a
+    process owning a CoreWindow", which is a search. Now the resolved case
+    hands over a pid, and the unresolved case says why it could not and what
+    to do -- both better than a hunt.
+    """
     assert "describes the frame, not the application" in MEASURED_A_FRAME_NOTE
-    assert "CoreWindow" in MEASURED_A_FRAME_NOTE, "says what to look for"
+    assert "measure again" in MEASURED_A_FRAME_NOTE, "says what to do"
     assert len(MEASURED_A_FRAME_NOTE) > 120

@@ -32,7 +32,7 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
     from ..backends.windows.msaa import assess_msaa
     from ..backends.windows.process import process_facts
     from ..backends.windows.uia import assess_uia
-    from ..hosting import note_for_measured_window
+    from ..hosting import hosted_frame_note, is_frame_host
     from ..modality import find_modal_blocks
     from ..surface import is_web_host
 
@@ -94,8 +94,23 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
     # Judged on the window actually measured, not on the process. A shell
     # can own a hosted frame among dozens of windows of its own, and warning
     # that "this describes a frame" would then be false. The warning belongs
-    # only where the selected window *is* the frame.
-    hosting_note = note_for_measured_window(main.class_name)
+    # only where the selected window *is* the frame -- and there it names the
+    # application inside, so the reader gets a pid rather than a search.
+    hosting_note = ""
+    if is_frame_host(main.class_name):
+        from ..backends.windows.hosted import resolve_hosted_app
+
+        found = resolve_hosted_app(main.handle, pid)
+        app_name = ""
+        if found is not None:
+            try:
+                app_name = psutil.Process(found.pid).name()
+            except (psutil.Error, OSError):
+                app_name = ""
+        hosting_note = hosted_frame_note(
+            found.pid if found else None, app_name,
+            found.share if found else 0.0,
+        )
 
     hosts_web_content = any(
         is_web_host(n.class_name) for t in trees for n in t.walk()

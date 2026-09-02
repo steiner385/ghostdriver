@@ -52,13 +52,41 @@ def is_hosted_app(class_name: str) -> bool:
     return _matches(class_name, HOSTED_APP_CLASSES)
 
 
-#: The strong claim: this window belongs to somebody else's application.
+#: The strong claim, when the application inside could not be identified.
+#: "Suspended" is named first because it is the common case and the
+#: recoverable one: a hosted application that is not in the foreground
+#: provides nothing, and reporting that as "unresolvable" would send someone
+#: looking for a bug instead of clicking the window.
 MEASURED_A_FRAME_NOTE = (
     "The window measured here is a frame hosted on behalf of another "
-    "process. Everything in this result describes the frame, not the "
-    "application -- which runs elsewhere, in a process owning a "
-    "Windows.UI.Core.CoreWindow. Attach to that instead."
+    "process, and the application inside it could not be identified -- most "
+    "likely because it is suspended, which hosted applications are whenever "
+    "they are not in the foreground. Everything in this result describes the "
+    "frame, not the application. Bring the window to the foreground and "
+    "measure again."
 )
+
+
+def hosted_frame_note(
+    app_pid: int | None, app_name: str = "", share: float = 0.0
+) -> str:
+    """What to say about a window that is showing another process's UI.
+
+    Named, when the application could be identified: a caller then has a pid
+    to attach to rather than a search to conduct. Unidentified is reported
+    as suspended-or-unknown rather than as failure, because that is usually
+    what it is and it is fixable by looking at the screen.
+    """
+    if app_pid is None:
+        return MEASURED_A_FRAME_NOTE
+    who = f"{app_name} (pid {app_pid})" if app_name else f"pid {app_pid}"
+    return (
+        f"This window is a frame hosted on behalf of another process. The "
+        f"application shown in it is {who}, which provides {share:.0%} of "
+        f"the window's accessible elements. Everything measured here "
+        f"describes the frame; attach to that pid to reach the application."
+    )
+
 
 #: The weak claim: some of this process's windows are not its own.
 HOSTS_FRAMES_NOTE = (
@@ -86,12 +114,3 @@ def classify_process(class_names: list[str]) -> tuple[str | None, str]:
     if any(is_hosted_app(c) for c in class_names):
         return "hosted-app", HOSTED_APP_NOTE
     return None, ""
-
-
-def note_for_measured_window(root_class: str) -> str:
-    """The strong claim, for a result measured from one specific window.
-
-    Empty unless that window is itself a hosted frame, in which case
-    everything measured from it describes the frame.
-    """
-    return MEASURED_A_FRAME_NOTE if is_frame_host(root_class) else ""

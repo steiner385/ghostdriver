@@ -26,7 +26,7 @@ from typing import Any
 from .model.locator import Locator
 from .model.result import ErrorKind, GhostdriverError
 from .model.window import WindowNode, select_main_tree
-from .hosting import classify_process, note_for_measured_window
+from .hosting import classify_process, hosted_frame_note, is_frame_host
 from .policy import (
     ConsentSource, Tier, describe_target, extract_endpoints,
 )
@@ -226,15 +226,26 @@ class Toolbox:
         summary["ok"] = True
         # Said at attach, not left for the caller to discover from a
         # profile that quietly describes a title bar. Judged on the window
-        # this session will actually read, not on the process.
+        # this session will actually read, not on the process, and it names
+        # the application inside so the caller gets a pid to attach to.
         selected = self._trees(session.pid, all_windows=False)
-        note = (
-            note_for_measured_window(selected[0].class_name)
-            if selected else ""
-        )
-        if note:
+        if selected and is_frame_host(selected[0].class_name):
+            from .backends.windows.hosted import resolve_hosted_app
+
+            found = resolve_hosted_app(selected[0].handle, session.pid)
+            app_name = ""
+            if found is not None:
+                try:
+                    app_name = psutil.Process(found.pid).name()
+                except (psutil.Error, OSError):
+                    app_name = ""
             summary["window_ownership"] = "measured-a-frame"
-            summary["hosting_note"] = note
+            summary["hosting_note"] = hosted_frame_note(
+                found.pid if found else None, app_name,
+                found.share if found else 0.0,
+            )
+            if found is not None:
+                summary["hosted_application_pid"] = found.pid
         # Said at attach because it changes what every later call means: a
         # target with nothing on screen answers every read with nothing.
         summary["blocked"] = self._blocking(session.pid)
