@@ -531,15 +531,31 @@ against it carries no risk to application state.
 through MCP at `read_only` tier, and the environment guard demonstrably refuses
 a target pointed at a non-allowlisted endpoint.
 
-> **Met.** Against a live 196-window L1 client: `list_targets` → `attach`
-> refused with an uncurated profile, refused again with a production-only
-> allowlist (naming the endpoint it refused), then attached with the correct
-> one → `describe` → `surfaces` → `find` → `wait_for` (`settled`) →
-> `capture` of an owner-drawn region → `modals` → `release`. Zero foreground
-> changes and zero cursor movement throughout.
+> **The gate's second clause was rewritten with §8.3.** It asked for an
+> environment guard refusing a non-allowlisted endpoint. That design was
+> replaced by session-scoped consent, so the clause now reads: *no target may
+> be automated until the operator approves it for the session, and an
+> unapproved or restricted target is demonstrably refused.*
+>
+> **Met, 2026-09-02**, against a live 147-window L1 client, driven through
+> the protocol: `list_targets` showed the candidate with the endpoint read
+> from its own command line and no consent recorded → `attach` returned
+> `needs_consent` rather than failing → a restriction made `attach` refuse
+> without re-asking → an approval let it open a `read_only` session →
+> `describe` (19 nodes, bounded, with suggested locators) → `surfaces`
+> (70 native, 6 opaque, 1 web-document) → `find` (4 command buttons) →
+> `wait_for` (`settled`, 3 polls) → `capture` of an owner-drawn region
+> (629×276 PNG) → `modals` → the operator revoked consent mid-task and the
+> **open session stopped on its next call** → `release`.
+>
+> Zero foreground changes and zero cursor movement throughout.
+>
+> One thing the run could not show: the target was not on a form screen, so
+> `read` matched no data-bound fields. Reading real field values is exercised
+> elsewhere and is not in doubt, but this run did not demonstrate it.
 >
 > `launch` is deferred to the iteration that ships an isolation strategy; the
-> gate does not require it. See `docs/DECISIONS.md` D2.
+> gate does not require it. See `docs/DECISIONS.md` D2 and R1.
 
 ### Iteration 3 — Fixture, then actuation
 
