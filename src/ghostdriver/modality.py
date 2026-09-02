@@ -69,14 +69,41 @@ def find_modal_blocks(
     with a *hidden* owned window is not being held by something the user
     can act on, and reporting it as modal would send a caller to interact
     with a window that is not on screen.
+
+    A *disabled* window counts only when something is stacked on it, and
+    that distinction was found on a real target. Two shapes look alike:
+
+    - Dialogs stacked on dialogs. Each disables the one below, so a middle
+      dialog is disabled and still genuinely holding what is under it. It
+      is a link in the chain and belongs in the report.
+    - An application proxy owning both its main window and a dialog. Here
+      the main window is disabled and owns nothing -- it is not holding
+      anything, it is simply another thing being held, alongside the
+      dialog. Reporting it said the application was being held by its own
+      main window, and named that window as something for an operator to go
+      and deal with.
+
+    What separates them is whether anything is stacked on the window in
+    question. A link has something above it; a fellow victim does not.
     """
     by_handle = {w.handle: w for w in windows}
     blockers: dict[int, TopLevel] = {}
     blocks: list[ModalBlock] = []
 
-    for window in windows:
-        owner = by_handle.get(window.owner)
-        if owner is None or owner.enabled or not window.visible:
+    candidates = [
+        (window, by_handle[window.owner])
+        for window in windows
+        if window.visible
+        and window.owner in by_handle
+        and not by_handle[window.owner].enabled
+    ]
+    # Windows that have something stacked on them. A disabled window in
+    # this set is a link in a modal chain; one outside it is just another
+    # window the same modal disabled.
+    held = {owner.handle for _, owner in candidates}
+
+    for window, owner in candidates:
+        if not window.enabled and window.handle not in held:
             continue
         blocks.append(ModalBlock(dialog=window, blocked=owner))
         blockers[owner.handle] = window

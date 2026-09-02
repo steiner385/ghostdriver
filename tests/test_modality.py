@@ -116,3 +116,35 @@ def test_an_untitled_dialog_still_names_itself_by_class():
     main = win(1, text="Main", enabled=False)
     dialog = win(2, cls="TUDVDialog", text="", owner=1)
     assert "TUDVDialog" in find_modal_blocks([main, dialog])[0][0].describe()
+
+
+def test_a_disabled_window_is_not_holding_anything():
+    """The shape a real target actually has, which the fixture never showed.
+
+    An off-screen application proxy owns both the main window and a dialog,
+    and the modal disables the proxy. Both owned windows are visible with a
+    disabled owner, so both qualified -- and the tool reported that the
+    application was being held by its own main window, naming it as
+    something for an operator to go and deal with.
+
+    A disabled window cannot be holding anything. It is being held.
+    """
+    proxy = win(1, cls="TApplication", text="Records Client", enabled=False)
+    main = win(2, cls="TShellWin", text="Records Client - Main",
+               enabled=False, owner=1)
+    dialog = win(3, cls="TSummaryDetailDlg", text="Error", owner=1)
+
+    blocks, unexplained = find_modal_blocks([proxy, main, dialog])
+
+    assert [b.dialog.text for b in blocks] == ["Error"]
+    assert unexplained == [], "the main window is part of the chain, not a puzzle"
+
+
+def test_the_dialog_still_blocks_when_it_owns_the_chain():
+    """The ordinary one-level case has to keep working."""
+    main = win(1, text="Records Client", enabled=False)
+    dialog = win(2, text="Confirm Delete Record", owner=1)
+
+    blocks, _ = find_modal_blocks([main, dialog])
+
+    assert [b.dialog.text for b in blocks] == ["Confirm Delete Record"]
