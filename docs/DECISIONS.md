@@ -584,6 +584,103 @@ observer that throws reports no disturbances rather than failing an action
 that really happened — caught by a test written for exactly that, which
 failed the first time because only the second snapshot was wrapped.
 
+### D29. `set_value` always checks the display, and says what it did not check
+
+**Decision.** Three things can be true after setting a field, and the tool
+can see only two of them: the input was delivered, the field displays the
+value, the application accepted it. `set_value` always verifies the second
+and reports `verified: "display"`; it verifies the third only when the
+caller names where the committed value appears, and then reports
+`verified: "committed"`.
+
+**Reasoning.** Both failures are silent and unrelated (D21, D24), and
+neither can be predicted — the control's declared limit says thirty thousand
+while it accepts twenty, and no property distinguishes a real Value pattern
+from a bridge-synthesised one. Reading the display back is free and catches
+truncation without the caller asking for anything. Reading the *committed*
+value is impossible without knowing where it surfaces, which only the caller
+knows.
+
+The result never says a bare `ok`. A success that verified only the display
+carries an `unverified` line saying so in words, because "it worked" and "it
+looks like it worked" are the distinction this whole design exists to keep.
+
+**A reformatting field fails the first call, deliberately.** A date mask
+turning `01012026` into `01/01/2026` fails the display check, and the caller
+re-sends with `expect_text="01/01/2026"`. One extra round trip, and the
+reformatting becomes something asserted rather than skimmed past. The
+alternative — a non-failing warning — is the pattern the actuator was built
+to avoid: it depends on the reader's discipline, and the reader is the party
+who most wants the action to pass.
+
+### D30. Tier 1 runs only when something would catch it failing
+
+**Decision.** `set_text` offers the UIA rung only when the caller supplied a
+commit expectation (or explicitly allows it). `set_value` passes
+`allow_pattern=commit is not None`.
+
+**Reasoning.** Sharpens D21. Nothing distinguishes a real Value pattern from
+one the HWND bridge synthesised at the point of calling it: both answer, and
+only one commits. With a commit postcondition that is fine — the useless one
+delivers, fails verification and falls through to typing. Without one it is
+a coin flip whose losing side is silent, so it is not offered.
+
+Measured both ways against the fixture: the plain field resolves at tier 1
+and stops there; the bound field with a commit check reports
+`tiers_attempted [1, 3]` and `tier_used 3`.
+
+### D31. `within=(...)` is expressible in the locator string
+
+**Decision.** The locator parser accepts `within=(...)`, nested, with quotes
+respected while scanning for the closing paren.
+
+**Reasoning.** Found by the ambiguity error message, which told callers to
+"add within=... to scope it" — advice the parser could not accept. The
+field existed on the dataclass and resolution honoured it, so `within` was
+reachable from Python and not from a tool call, which is the only way an
+agent reaches any of this.
+
+It matters more here than anywhere else: scoping by ancestor is *the* way
+two identically-captioned controls are told apart on this class of target —
+the same caption at the same offset on two pages — and actuation refuses
+ambiguity outright. Without it the refusal had no answer.
+
+`describe()` now emits the same syntax `parse` accepts, so a locator quoted
+in an error message can be copied back into a call.
+
+### D32. A malformed expectation is an error, not an unmet one
+
+**Decision.** `expect`'s locator is parsed before anything is sent. A bad
+one returns an error naming it; it is not evaluated as a condition that
+happens not to hold.
+
+**Reasoning.** Found by a typo in a test — an unquoted regex containing a
+space, which `shlex` split into a nonsense key. The condition swallowed the
+parse failure and returned False, so the action ran, failed its
+postcondition, and reported that the application had not done what was
+expected.
+
+Those two outcomes look identical from outside and mean opposite things. One
+says the target misbehaved; the other says the caller mistyped. Reported as
+the first, an agent goes looking at the application — and since a malformed
+locator can never hold, every action would fail and a working target would
+look like one that never responds.
+
+### D33. Actuation refuses ambiguity rather than picking
+
+**Decision.** An actuation locator must resolve to exactly one element. More
+than one is an error carrying the candidates.
+
+**Reasoning.** Reads cap ambiguity and carry on, which is right for them: a
+read of eight matching fields returns eight values and the caller sees what
+happened. A click on eight matching buttons picks one, and the caller finds
+out from the consequences. The cost of being wrong is not symmetric, so the
+rule is not either.
+
+The candidates are returned because the answer to "which one did you mean"
+is in them, and the message names both ways out — `within=` to scope,
+`index=` to choose.
+
 ## Open, for whoever picks this up
 
 - **The denylist is enforced but unexercised.** It matches captions and

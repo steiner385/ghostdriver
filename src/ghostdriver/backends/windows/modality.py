@@ -4,6 +4,7 @@ from ctypes import wintypes
 
 from ...disturbance import Snapshot
 from ...modality import TopLevel, find_modal_blocks
+from ...surface import is_web_host
 from . import winapi
 from .enumerate import top_level_windows
 from .text import read_window_text
@@ -91,3 +92,27 @@ def snapshot(pid: int) -> Snapshot:
         foreground=winapi.foreground_window(),
         alive=True,
     )
+
+def surface_of(hwnd: int) -> str:
+    """Which kind of surface a control sits in: "web" or "native".
+
+    Deliberately the cheap answer, and only the split that matters here. The
+    full surface map probes each region through the accessibility layer,
+    which is far too expensive to run before every keystroke -- but the one
+    question a cadence note needs is whether this control lives inside
+    embedded web content, and a web host announces itself in its class name.
+    So this walks ancestors and looks.
+
+    A wrong answer costs a cadence, not a correctness bug: the worst case is
+    typing at full speed in a region an operator had flagged, or paying
+    human pacing in one they had not.
+    """
+    seen: set[int] = set()
+    current = hwnd
+    while current and current not in seen:
+        seen.add(current)
+        if is_web_host(winapi.class_name(current)):
+            return "web"
+        parent = winapi.user32.GetAncestor(wintypes.HWND(current), GA_PARENT)
+        current = int(parent) if parent else 0
+    return "native"

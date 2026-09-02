@@ -19,6 +19,7 @@ class Locator:
     index: int | None = None
 
     _KEYS = ("class", "text", "role", "visible", "index")
+    _WITHIN = "within=("
 
     def __post_init__(self) -> None:
         """Refuse an `index` on a scope, rather than ignoring it.
@@ -45,11 +46,54 @@ class Locator:
             )
 
     @classmethod
+    def _split_within(cls, expr: str) -> tuple[str, "Locator | None"]:
+        """Pull a `within=(...)` group out of `expr`, if there is one.
+
+        Scanning for the balanced closing paren rather than splitting on
+        one, because a caption can contain a bracket -- `text="Save (all)"`
+        is an ordinary button -- and quotes have to be respected while
+        counting depth or that button breaks the parse.
+        """
+        start = expr.find(cls._WITHIN)
+        if start == -1:
+            return expr, None
+
+        opened = start + len(cls._WITHIN)
+        depth, quote, index = 1, "", opened
+        while index < len(expr):
+            char = expr[index]
+            if quote:
+                if char == quote:
+                    quote = ""
+            elif char in "\"'":
+                quote = char
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            index += 1
+        if depth != 0:
+            raise ValueError(
+                f"unbalanced within=( in locator {expr!r}: no closing paren"
+            )
+        inner = expr[opened:index]
+        if not inner.strip():
+            raise ValueError("within=() is empty; name the ancestor")
+        return expr[:start] + expr[index + 1:], cls.parse(inner)
+
+    @classmethod
     def parse(cls, expr: str) -> "Locator":
         """Parse `class=X text="y" visible=false index=0`.
 
-        `within` is not expressible in this shorthand; build it in code or
-        via from_dict(). Values may be quoted with shlex rules.
+        `within=(...)` scopes to a matching ancestor and nests, so
+        `within=(class=Tab within=(class=Frame))` is legal. It is expressible
+        here rather than only in code because scoping by ancestor is how two
+        identically-captioned controls are told apart on this class of
+        target -- the same caption at the same offset on two pages -- and a
+        caller reaching this through a tool can only send a string. Values
+        may be quoted with shlex rules.
 
         `role` is rejected rather than accepted. The field exists on the
         dataclass for profiles to populate, but Iteration 1 has no role
@@ -57,7 +101,10 @@ class Locator:
         Accepting it here would turn a typo-free query into an unexplained
         zero-match; refusing it says why.
         """
+        expr, scope = cls._split_within(expr)
         fields: dict[str, object] = {}
+        if scope is not None:
+            fields["within"] = scope
         for token in shlex.split(expr):
             if "=" not in token:
                 raise ValueError(f"malformed locator token: {token!r}")
@@ -104,5 +151,8 @@ class Locator:
         if self.index is not None:
             parts.append(f"index={self.index}")
         if self.within:
-            parts.append(f"within({self.within.describe()})")
+            # The same syntax `parse` accepts, so a described locator can be
+            # handed straight back to it -- error messages quote locators,
+            # and one that cannot be copied out of a message is friction.
+            parts.append(f"within=({self.within.describe()})")
         return " ".join(parts) or "<empty locator>"

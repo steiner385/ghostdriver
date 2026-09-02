@@ -21,11 +21,18 @@ mcp = pytest.importorskip(
     "mcp", reason="the protocol layer is an optional extra: pip install -e .[server]"
 )
 
-EXPECTED_TOOLS = {
+READ_TOOLS = {
     "list_targets", "attach", "release", "grant_targets",
     "describe", "find", "read", "capture", "wait_for",
     "probe", "surfaces", "modals", "restore",
 }
+
+#: Reachable only from a session opened at the interactive tier. Registered
+#: unconditionally -- the tier check happens per call, against the session,
+#: because a server cannot know at startup which tier a caller will open.
+ACTUATION_TOOLS = {"click", "type_text", "set_value", "send_keys"}
+
+EXPECTED_TOOLS = READ_TOOLS | ACTUATION_TOOLS
 
 
 @pytest.fixture
@@ -52,18 +59,45 @@ def listed(server):
 
 # --- wiring --------------------------------------------------------------
 
-def test_every_read_tier_tool_is_registered(server):
+def test_every_tool_is_registered(server):
     assert set(listed(server)) == EXPECTED_TOOLS
 
 
-def test_the_surface_is_read_only(server):
-    """Nothing that actuates a control is reachable in this iteration.
+def test_actuation_is_annotated_as_changing_things(server):
+    """The annotations are how a client decides how much ceremony a call
+    deserves, so getting them wrong is a safety problem rather than a
+    cosmetic one.
 
-    A tool registered before its safety story exists is a tool an agent will
-    find and call.
+    Not idempotent, and that is the load-bearing part: clicking twice is two
+    clicks, and a client that retried on a timeout would submit twice.
     """
-    actuation = {"click", "type_text", "set_value", "send_keys", "launch"}
-    assert not (set(listed(server)) & actuation)
+    tools = listed(server)
+
+    for name in ACTUATION_TOOLS:
+        annotations = tools[name].annotations
+        assert annotations.read_only_hint is False, name
+        assert annotations.idempotent_hint is False, name
+
+
+def test_reads_are_still_annotated_as_reads(server):
+    """Adding actuation must not quietly relabel everything else."""
+    tools = listed(server)
+    unmarked = [
+        name for name in READ_TOOLS
+        # `attach` and `restore` are deliberately not read-only: one records
+        # a decision, the other changes what is on screen.
+        if name not in ("attach", "restore", "grant_targets", "release")
+        and tools[name].annotations.read_only_hint is not True
+    ]
+
+    assert unmarked == []
+
+
+def test_nothing_launches_a_process(server):
+    """Still true, and still worth asserting. Starting an application is a
+    different kind of authority from driving one already running, and
+    nothing here has been given it."""
+    assert "launch" not in set(listed(server))
 
 
 def test_every_tool_carries_a_description(server):
@@ -81,7 +115,11 @@ def test_the_server_explains_the_target_class_up_front(server):
     instructions = " ".join(server.instructions.split())
     assert "separate top-level windows" in instructions
     assert "modal dialog disables the window" in instructions
-    assert "read-only" in instructions
+    # What an agent most needs told, because the tool list cannot say it:
+    # delivering input and having an effect are different on this class of
+    # target, and a result only claims the second when asked to check.
+    assert "Delivering input is not the same" in instructions
+    assert "interactive" in instructions, "the tier actuation needs"
 
 
 def test_required_arguments_are_marked_required(server):

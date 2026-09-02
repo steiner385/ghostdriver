@@ -33,6 +33,7 @@ from .policy import (
 from .resolve import resolve
 from .session import ConsentRequired, Profile, SessionManager
 from .summarize import summarize
+from .disturbance import INPUT_SENSITIVE_HINT
 from .wait import Condition, wait_for
 
 #: Most elements any single result will enumerate. A locator matching more
@@ -41,8 +42,26 @@ from .wait import Condition, wait_for
 MAX_ELEMENTS = 50
 
 
+#: Appended to an actuation failure that has disturbances alongside it.
+#: A suggestion, not a conclusion: the tool cannot tell a target refusing
+#: machine-speed input from one refusing the value, and the differential is
+#: the caller\'s to run -- a second attempt on a target that just flagged the
+#: first is a judgement call, and for a non-idempotent action a silent retry
+#: is a double click.
+SENSITIVE_HINT = INPUT_SENSITIVE_HINT
+
+
 def _error(kind: ErrorKind, message: str, **extra: Any) -> dict:
     return {"ok": False, "error": {"kind": kind.value, "message": message, **extra}}
+
+
+@dataclass(frozen=True)
+class _Prepared:
+    """What every actuation resolved before it ran."""
+
+    session: object
+    node: WindowNode
+    cadence: object
 
 
 def _element(node: WindowNode) -> dict:
@@ -667,3 +686,392 @@ class Toolbox:
             "note": ("nothing was minimized" if not result.restored else
                      "the application re-showed its own forms"),
         }
+
+    # --- actuation -------------------------------------------------------
+    #
+    # Every tool here runs the same four steps before it touches anything:
+    # resolve to exactly one element, refuse a denylisted caption, refuse a
+    # held application, and pick a cadence. They are in that order because
+    # each one makes the next meaningful -- there is no point asking whether
+    # a caption is denied until it is known which element is being named.
+
+    def _one(self, session, locator: str, all_windows: bool):
+        """The single element `locator` names, or an error explaining why not.
+
+        Actuation refuses ambiguity outright, where a read merely caps it.
+        A read of eight matching fields returns eight values and the caller
+        sees what happened; a click on eight matching buttons picks one at
+        random and the caller finds out afterwards.
+        """
+        try:
+            matches = self._resolve(session.pid, locator, all_windows)
+        except ValueError as exc:
+            return None, _error(ErrorKind.NOT_FOUND, str(exc), locator=locator)
+        if not matches:
+            return None, _error(
+                ErrorKind.NOT_FOUND,
+                f"no element matches {locator!r}"
+                + ("" if all_windows else
+                   "; menus, dropdowns and dialogs are separate top-level "
+                   "windows, so try all_windows=true"),
+                locator=locator,
+            )
+        if len(matches) > 1:
+            return None, _error(
+                ErrorKind.AMBIGUOUS,
+                f"{len(matches)} elements match {locator!r}; actuation needs "
+                "exactly one. Add within=... to scope it, or index=N to pick",
+                locator=locator,
+                candidates=[_element(n) for n in matches[:MAX_ELEMENTS]],
+            )
+        return matches[0], None
+
+    def _prepared(self, session_id: str, tool: str, locator: str,
+                  all_windows: bool, cadence: str | None):
+        """Everything an actuation needs, or the first reason it cannot run."""
+        try:
+            session = self.sessions.authorize(session_id, tool)
+        except GhostdriverError as exc:
+            return None, _error(exc.kind, exc.message)
+
+        node, failure = self._one(session, locator, all_windows)
+        if failure is not None:
+            return None, failure
+
+        try:
+            self.sessions.check_caption(session_id, node.text)
+        except GhostdriverError as exc:
+            return None, _error(exc.kind, exc.message, locator=locator)
+
+        try:
+            pace = self._cadence(session, node.handle, cadence)
+        except ValueError as exc:
+            return None, _error(ErrorKind.DENIED_BY_POLICY, str(exc))
+
+        return _Prepared(session=session, node=node, cadence=pace), None
+
+    def _cadence(self, session, handle: int, requested: str | None):
+        """What to type at: the caller\'s choice, else what is known.
+
+        A caller who names one gets it. Otherwise the profile decides, and
+        the surface is only worked out when some note actually distinguishes
+        surfaces -- the cheap answer costs a walk up the ancestor chain, and
+        there is no reason to pay it on a target nobody has annotated.
+        """
+        from .cadence import ROBOT, by_name
+
+        if requested is not None:
+            return by_name(requested)
+        notes = session.profile.sensitivity
+        if not notes.notes:
+            return ROBOT
+        if all(n.surface == "*" for n in notes.notes):
+            return notes.cadence_for()
+
+        from .backends.windows.modality import surface_of
+
+        return notes.cadence_for(surface_of(handle))
+
+    def _actuator(self, pid: int):
+        from .actuate import Actuator
+        from .backends.windows.modality import snapshot
+
+        return Actuator(observe=lambda: snapshot(pid))
+
+    def _reported(self, result, prepared, locator: str, **extra) -> dict:
+        """One shape for every actuation outcome, successful or not.
+
+        `disturbances` is present either way. A dialog that appeared next to
+        a *successful* action is the case that motivated collecting them at
+        all, so hiding it behind failure would defeat the point.
+        """
+        reported = {
+            "ok": result.ok,
+            "locator": locator,
+            "element": _element(prepared.node),
+            "tier_used": result.tier_used,
+            "tiers_attempted": result.tiers_attempted,
+            "cadence": prepared.cadence.name,
+            "elapsed_ms": result.elapsed_ms,
+            "disturbances": result.disturbances,
+            **extra,
+        }
+        if result.error is not None:
+            error = dict(result.error)
+            if result.disturbances:
+                error["message"] += (
+                    f"; {len(result.disturbances)} other change(s) happened "
+                    "around this action -- see disturbances. " + SENSITIVE_HINT
+                )
+            reported["error"] = error
+        return reported
+
+    def click(
+        self,
+        session_id: str,
+        locator: str,
+        *,
+        all_windows: bool = False,
+        expect: dict | None = None,
+    ) -> dict:
+        """Actuate one control.
+
+        `expect` names something that should be true afterwards -- a locator
+        and the text it should then have. Without it the result reports that
+        the input was delivered and claims nothing about its effect, because
+        on this class of target those are genuinely different statements.
+        """
+        prepared, failure = self._prepared(
+            session_id, "click", locator, all_windows, None
+        )
+        if failure is not None:
+            return failure
+
+        from .backends.windows import verbs
+
+        try:
+            after, described = self._expectation(prepared.session, expect)
+        except ValueError as exc:
+            return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
+        result = self._actuator(prepared.session.pid).perform(
+            verbs.click(prepared.node.handle),
+            expect_before=verbs.unblocked(prepared.node.handle),
+            expect_after=after,
+        )
+        return self._reported(
+            result, prepared, locator,
+            verified=("effect" if after is not None and result.ok
+                      else "delivery_only"),
+            expected=described,
+        )
+
+    def set_value(
+        self,
+        session_id: str,
+        locator: str,
+        text: str,
+        *,
+        all_windows: bool = False,
+        expect_text: str | None = None,
+        expect: dict | None = None,
+        cadence: str | None = None,
+    ) -> dict:
+        """Replace a field\'s contents, and check what actually landed.
+
+        Two different things can go wrong here and both are silent, so both
+        are checked rather than assumed.
+
+        **The field may not have taken all of it.** Typing goes through the
+        control\'s own input handling, so a length limit or a mask applies
+        exactly as it would to a person -- measured at about twenty
+        characters on a field whose declared limit was thirty thousand. The
+        display is therefore always read back and compared. A field that
+        reformats what it is given (a date mask turning 01012026 into
+        01/01/2026) will fail that comparison the first time; pass
+        `expect_text` with the reformatted value and the reformatting
+        becomes something asserted rather than something skimmed past.
+
+        **The application may not have accepted it.** A field can display a
+        value the application never received. Nothing here can see that --
+        it shows up in a mirror label, a grid cell, a change log -- so
+        `expect` is how a caller names where to look. Only then does the
+        result say `verified: "committed"`.
+
+        With `expect`, a pattern-based tier is offered first and falls
+        through if it does not commit. Without it, this types and only
+        types: an unverifiable shortcut whose failure is invisible is not
+        worth the milliseconds it saves.
+        """
+        prepared, failure = self._prepared(
+            session_id, "set_value", locator, all_windows, cadence
+        )
+        if failure is not None:
+            return failure
+
+        from .actuate import Condition
+        from .backends.windows import verbs
+        from .backends.windows.text import read_window_text
+
+        handle = prepared.node.handle
+        wanted = text if expect_text is None else expect_text
+        shows = lambda: (read_window_text(handle) or "") == wanted  # noqa: E731
+
+        try:
+            commit, described = self._expectation(prepared.session, expect)
+        except ValueError as exc:
+            return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
+        if commit is None:
+            after = Condition(shows, f"the field shows {wanted!r}")
+        else:
+            after = Condition(
+                lambda: shows() and commit.check(),
+                f"the field shows {wanted!r} and {commit.description}",
+            )
+
+        result = self._actuator(prepared.session.pid).perform(
+            verbs.set_text(handle, text, cadence=prepared.cadence,
+                           allow_pattern=commit is not None),
+            expect_before=verbs.unblocked(handle),
+            expect_after=after,
+        )
+
+        shown = read_window_text(handle)
+        reported = self._reported(
+            result, prepared, locator,
+            verified=("committed" if commit is not None and result.ok
+                      else "display" if result.ok else "none"),
+            display=shown,
+            expected=described,
+        )
+        if not result.ok and shown is not None and shown != wanted:
+            reported["error"]["message"] += (
+                f"; the field shows {shown!r}, not {wanted!r}. If the control "
+                "reformats what it is given, pass expect_text with the value "
+                "it should end up showing"
+            )
+        if commit is None and result.ok:
+            reported["unverified"] = (
+                "the field displays this value; whether the application "
+                "accepted it was not checked. Pass expect naming where the "
+                "committed value appears to check it"
+            )
+        return reported
+
+    def type_text(
+        self,
+        session_id: str,
+        locator: str,
+        text: str,
+        *,
+        all_windows: bool = False,
+        cadence: str | None = None,
+        expect: dict | None = None,
+    ) -> dict:
+        """Type into a control at the caret, without clearing it first.
+
+        `set_value` is what replaces a field. This appends, inserts, or
+        types into something that is not a field at all -- a grid cell in
+        edit mode, a search box that filters as it goes.
+        """
+        prepared, failure = self._prepared(
+            session_id, "type_text", locator, all_windows, cadence
+        )
+        if failure is not None:
+            return failure
+
+        from .backends.windows import verbs
+
+        try:
+            after, described = self._expectation(prepared.session, expect)
+        except ValueError as exc:
+            return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
+        result = self._actuator(prepared.session.pid).perform(
+            verbs.send_keys(prepared.node.handle, list(text),
+                            cadence=prepared.cadence),
+            expect_before=verbs.unblocked(prepared.node.handle),
+            expect_after=after,
+        )
+        return self._reported(
+            result, prepared, locator,
+            verified=("effect" if after is not None and result.ok
+                      else "delivery_only"),
+            expected=described,
+        )
+
+    def send_keys(
+        self,
+        session_id: str,
+        locator: str,
+        keys: list[str],
+        *,
+        all_windows: bool = False,
+        cadence: str | None = None,
+        expect: dict | None = None,
+    ) -> dict:
+        """Send named keys to a control.
+
+        For keys whose meaning is the key rather than the character:
+        `enter`, `tab`, `escape`, `backspace`, `delete`. On this class of
+        target these often reach things the mouse cannot -- committing a
+        grid row, dismissing a dialog whose buttons ignore clicks.
+        """
+        prepared, failure = self._prepared(
+            session_id, "send_keys", locator, all_windows, cadence
+        )
+        if failure is not None:
+            return failure
+
+        from .backends.windows import verbs
+        from .backends.windows.input import NAMED_KEYS
+
+        unknown = [k for k in keys
+                   if k.lower() not in NAMED_KEYS and len(k) != 1]
+        if unknown:
+            return _error(
+                ErrorKind.NOT_ACTIONABLE,
+                f"unknown key name(s) {unknown}; expected a single character "
+                f"or one of {sorted(NAMED_KEYS)}",
+            )
+
+        try:
+            after, described = self._expectation(prepared.session, expect)
+        except ValueError as exc:
+            return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
+        result = self._actuator(prepared.session.pid).perform(
+            verbs.send_keys(prepared.node.handle, keys,
+                            cadence=prepared.cadence),
+            expect_before=verbs.unblocked(prepared.node.handle),
+            expect_after=after,
+        )
+        return self._reported(
+            result, prepared, locator,
+            verified=("effect" if after is not None and result.ok
+                      else "delivery_only"),
+            expected=described,
+            keys=keys,
+        )
+
+    def _expectation(self, session, expect: dict | None):
+        """Turn a caller\'s `expect` into a condition, re-resolved each time.
+
+        Re-resolving rather than holding a handle is the point: the element
+        that proves an action worked may not exist until the action has
+        worked. A handle captured beforehand would be stale or absent
+        exactly when the check matters.
+
+        The locator is parsed *here*, before anything is sent, and a bad one
+        is an error rather than an unmet condition. Those look identical from
+        the outside and mean opposite things: one says the application did
+        not do what you expected, the other says you mistyped. Reporting the
+        second as the first sends a caller looking at their target when the
+        problem is their query -- and since a malformed locator can never
+        hold, the action would fail every time and look like a target that
+        never responds.
+        """
+        if not expect:
+            return None, None
+
+        from .actuate import Condition
+        from .backends.windows.text import read_window_text
+
+        where = expect.get("locator")
+        wanted = expect.get("text")
+        if not where:
+            return None, None
+        Locator.parse(where)  # raises ValueError, caught by the caller
+
+        def holds() -> bool:
+            found = self._resolve(session.pid, where,
+                                  expect.get("all_windows", False))
+            if not found:
+                return False
+            if wanted is None:
+                return True
+            return any((read_window_text(n.handle) or "") == wanted
+                       for n in found)
+
+        described = (
+            f"{where} exists" if wanted is None
+            else f"{where} reads {wanted!r}"
+        )
+        return Condition(holds, described), described

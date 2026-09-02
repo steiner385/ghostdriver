@@ -30,7 +30,8 @@ def click(hwnd: int) -> list[Attempt]:
 
 
 def set_text(hwnd: int, text: str, *,
-             cadence: Cadence = ROBOT) -> list[Attempt]:
+             cadence: Cadence = ROBOT,
+             allow_pattern: bool = True) -> list[Attempt]:
     """Replace a control's text.
 
     **Typing is the only way this sets text, and the ladder is short.** The
@@ -42,19 +43,25 @@ def set_text(hwnd: int, text: str, *,
     same path a person's keystrokes would, so whatever the toolkit does on
     input happens.
 
-    **Tier 1 carries that hazard too, which is why it is conditional.**
+    **Tier 1 carries that hazard too, so it runs only when it is checked.**
     Measured: the HWND-to-UIA bridge synthesises a Value pattern for
     anything derived from a native EDIT, and `SetValue` on it splits display
-    from bound value exactly as `WM_SETTEXT` did. It stays first at robot
-    cadence because on a target that publishes a *real* Value pattern that
-    is the surface to use, and because the ladder recovers on its own when a
-    postcondition names the committed value rather than the display.
+    from bound value exactly as `WM_SETTEXT` did. Nothing distinguishes that
+    from a real Value pattern at the point of calling it -- both answer, and
+    only one commits.
 
-    At any other cadence it is dropped entirely. A caller asking for human
+    So `allow_pattern` is the caller saying a failure here would be caught:
+    a postcondition that names the *committed* value, at which point tier 1
+    delivering nothing useful simply falls through to typing, and a target
+    that publishes a real pattern is driven through the surface it supports.
+    Without such a postcondition it is a coin flip whose losing side is
+    silent, and the caller should pass False.
+
+    A non-robot cadence drops it regardless. A caller asking for human
     pacing is saying this target watches its input, and a pattern call
     produces *no input events at all* -- it is the most detectable thing
-    available here. Offering it first would defeat the request silently,
-    which is the one failure mode a cadence must not have.
+    available here. Offering it would defeat the request silently, which is
+    the one failure mode a cadence must not have.
 
     Without a postcondition nothing is claimed either way:
     `postcondition_verified` stays unset, which is the result saying it does
@@ -64,7 +71,7 @@ def set_text(hwnd: int, text: str, *,
         Tier.WINDOW_MESSAGE,
         lambda: win_input.set_text_by_typing(hwnd, text, cadence=cadence),
     )
-    if not cadence.is_robot:
+    if not cadence.is_robot or not allow_pattern:
         return [typed]
     return [
         Attempt(Tier.UIA_PATTERN,

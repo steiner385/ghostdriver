@@ -21,11 +21,18 @@ pytest.importorskip("mcp", reason="protocol layer is the [server] extra")
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-EXPECTED_TOOLS = {
+READ_TOOLS = {
     "list_targets", "attach", "release", "grant_targets",
     "describe", "find", "read", "capture", "wait_for",
     "probe", "surfaces", "modals", "restore",
 }
+
+#: Reachable only from a session opened at the interactive tier. Registered
+#: unconditionally -- the tier check happens per call, against the session,
+#: because a server cannot know at startup which tier a caller will open.
+ACTUATION_TOOLS = {"click", "type_text", "set_value", "send_keys"}
+
+EXPECTED_TOOLS = READ_TOOLS | ACTUATION_TOOLS
 
 
 async def _drive_uia(pid: int):

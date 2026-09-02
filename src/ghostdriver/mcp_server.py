@@ -55,8 +55,29 @@ Four things about this class of target are worth knowing before you plan:
 4. A control that did not answer is not the same as a control that is
    empty. `read` distinguishes them; treat a null value as unknown.
 
-This server is read-only. Nothing here clicks, types or changes application
-state.\
+Actuation is available only to a session opened at the `interactive` tier,
+and only for a target the operator approved. Four things about it:
+
+5. Actuation refuses a locator that matches more than one element. Scope it
+   with within=... rather than hoping.
+
+6. Delivering input is not the same as the input having an effect, and on
+   this class of target they come apart routinely. `expect` is how you say
+   what should be true afterwards; without it, a result claims only that
+   the message went out.
+
+7. `set_value` always reads the field back, because a control can silently
+   accept only part of a long value. A field displaying what you typed is
+   still not proof the application accepted it -- for a data-bound field,
+   name where the committed value appears.
+
+8. Every action reports what else changed around it: a dialog that
+   appeared, the application becoming held, the target coming to the front.
+   Read it even on success. If an action fails and something appeared next
+   to it, that may be the application objecting -- retrying at
+   cadence=fast_human is the experiment that tells input sensitivity apart
+   from an ordinary validation failure. Ask the operator before retrying
+   anything that submits.\
 """
 
 SessionId = Annotated[str, Field(description="From `attach`.")]
@@ -113,6 +134,13 @@ def build_server(sessions: SessionManager | None = None) -> Any:
                             idempotentHint=True, openWorldHint=True)
     CHANGES_SCREEN = ToolAnnotations(readOnlyHint=False, destructiveHint=False,
                                      idempotentHint=True, openWorldHint=True)
+    # Actuation. Not idempotent: clicking twice is two clicks, and a client
+    # that retried on a timeout would submit twice. destructiveHint stays
+    # False because these are ordinary interactions rather than deletions --
+    # what must never be actuated is the profile denylist\'s job, and it is
+    # enforced on the resolved caption before anything is sent.
+    ACTUATES = ToolAnnotations(readOnlyHint=False, destructiveHint=False,
+                               idempotentHint=False, openWorldHint=True)
 
     @server.tool(annotations=READS, description=(
         "Every process that owns windows, with how many top-level windows "
@@ -329,6 +357,97 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     ))
     def restore(session_id: SessionId) -> dict[str, Any]:
         return box.restore(session_id)
+
+    ExpectArg = Annotated[dict | None, Field(description=(
+        "How to tell that this worked, as {locator, text}. Checked after the "
+        "action, and re-resolved at that point -- so it can name something "
+        "that does not exist until the action succeeds. Without it the "
+        "result reports only that the input was delivered."
+    ))]
+    CadenceArg = Annotated[str | None, Field(description=(
+        "How fast to type: 'robot' (queue speed) or 'fast_human' (~80ms a "
+        "character, uneven). Defaults to whatever the target's profile "
+        "declares, else robot. Use fast_human where an application rejects "
+        "machine-speed input; it makes a long field take seconds."
+    ))]
+
+    @server.tool(annotations=ACTUATES, description=(
+        "Click one control. The locator must match exactly one element -- "
+        "ambiguity is refused rather than guessed at. Refuses to act while "
+        "a modal dialog holds the application, and reports anything else "
+        "that changed around the click, such as a dialog it raised."
+    ))
+    def click(
+        session_id: SessionId,
+        locator: LocatorArg,
+        all_windows: AllWindows = False,
+        expect: ExpectArg = None,
+    ) -> dict[str, Any]:
+        return box.click(session_id, locator, all_windows=all_windows,
+                         expect=expect)
+
+    @server.tool(annotations=ACTUATES, description=(
+        "Replace a field's contents by typing them. Always reads the field "
+        "back and fails if what it displays is not what was asked for -- a "
+        "control can silently take only part of a long value. If the field "
+        "reformats input (a date mask), pass expect_text with the value it "
+        "should end up showing. Displaying a value is not the same as the "
+        "application having accepted it: pass expect naming where the "
+        "committed value appears to check that too."
+    ))
+    def set_value(
+        session_id: SessionId,
+        locator: LocatorArg,
+        text: Annotated[str, Field(description="The value to put in.")],
+        all_windows: AllWindows = False,
+        expect_text: Annotated[str | None, Field(description=(
+            "What the field should display afterwards, when that differs "
+            "from what was typed. For masked or reformatting fields."
+        ))] = None,
+        expect: ExpectArg = None,
+        cadence: CadenceArg = None,
+    ) -> dict[str, Any]:
+        return box.set_value(session_id, locator, text,
+                             all_windows=all_windows, expect_text=expect_text,
+                             expect=expect, cadence=cadence)
+
+    @server.tool(annotations=ACTUATES, description=(
+        "Type at the caret without clearing first. Use `set_value` to "
+        "replace a field; use this to append, or to type into something "
+        "that is not a field -- a grid cell in edit mode, a search box that "
+        "filters as it goes."
+    ))
+    def type_text(
+        session_id: SessionId,
+        locator: LocatorArg,
+        text: Annotated[str, Field(description="The characters to type.")],
+        all_windows: AllWindows = False,
+        cadence: CadenceArg = None,
+        expect: ExpectArg = None,
+    ) -> dict[str, Any]:
+        return box.type_text(session_id, locator, text,
+                             all_windows=all_windows, cadence=cadence,
+                             expect=expect)
+
+    @server.tool(annotations=ACTUATES, description=(
+        "Send named keys to a control: enter, tab, escape, backspace, "
+        "delete, or single characters. On this class of target these often "
+        "reach what the mouse cannot -- committing a grid row, or "
+        "dismissing a dialog whose buttons ignore clicks."
+    ))
+    def send_keys(
+        session_id: SessionId,
+        locator: LocatorArg,
+        keys: Annotated[list[str], Field(description=(
+            "In order, e.g. ['tab', 'enter']."
+        ))],
+        all_windows: AllWindows = False,
+        cadence: CadenceArg = None,
+        expect: ExpectArg = None,
+    ) -> dict[str, Any]:
+        return box.send_keys(session_id, locator, keys,
+                             all_windows=all_windows, cadence=cadence,
+                             expect=expect)
 
     return server
 
