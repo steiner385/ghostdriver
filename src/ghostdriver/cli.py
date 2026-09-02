@@ -31,6 +31,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--all", action="store_true", help="Include hidden windows"
     )
     describe.add_argument(
+        "--all-windows",
+        action="store_true",
+        help=(
+            "Describe every top-level window of the process, not just the "
+            "main one. --max-nodes is then a budget for the whole command, "
+            "spent main window first"
+        ),
+    )
+    describe.add_argument(
         "--collapse-threshold",
         type=int,
         default=3,
@@ -173,33 +182,138 @@ def cmd_describe(
     max_nodes: int,
     show_all: bool,
     collapse_threshold: int = 3,
+    all_windows: bool = False,
 ) -> int:
-    tree = _main_tree(pid)
-    if tree is None:
+    """Summarize the target's window tree, or every one of its windows.
+
+    `max_nodes` is a budget for the whole command, not for each window.
+    Spending it per window would make the output grow with however many
+    windows a process happens to own -- 185 on a measured target -- which
+    defeats the one thing this command exists to guarantee. The main window
+    is described first and takes what it needs; the rest share what is
+    left, and any window that could not be reached is counted rather than
+    dropped in silence.
+    """
+    from .backends.windows.modality import top_level_state
+    from .modality import find_modal_blocks
+
+    trees = _trees(pid, all_windows)
+    if trees is None:
         return 2
-    summary = summarize(
-        tree,
-        max_depth=depth,
-        visible_only=not show_all,
-        max_nodes=max_nodes,
-        collapse_threshold=collapse_threshold,
-    )
-    print(summary.text)
+
+    # Said first. An agent orienting itself on an unfamiliar screen needs to
+    # know the window is disabled before it reads a single control, or it
+    # will plan against a UI that cannot answer it.
+    blocked_handles: dict[int, str] = {}
+    blocks, unexplained = find_modal_blocks(top_level_state(pid))
+    for block in blocks:
+        print(f"BLOCKED: {block.describe()}")
+        blocked_handles[block.dialog.handle] = "dialog holding another window"
+    for item in unexplained:
+        print(
+            f"BLOCKED: {item.blocked.text or item.blocked.class_name} is "
+            "disabled with no visible dialog to account for it"
+        )
+    if blocks or unexplained:
+        print()
+
+    remaining = max_nodes
+    described = 0
+    omitted = 0
+    totals = {"nodes": 0, "elided": 0, "below_depth": 0}
+    truncated = False
+    locators: list[str] = []
+
+    not_visible = 0
+    for index, tree in enumerate(trees):
+        if all_windows and not show_all and not tree.visible:
+            # summarize() always emits the root, so without this every
+            # hidden pooled form in the process earns a heading and a line
+            # -- 183 of them on a measured target. The single-window
+            # default is exempt: a minimized target has no visible window
+            # at all, and describing it is exactly what is wanted then.
+            not_visible += 1
+            continue
+        if remaining <= 0:
+            omitted += 1
+            continue
+
+        summary = summarize(
+            tree,
+            max_depth=depth,
+            visible_only=not show_all,
+            max_nodes=remaining,
+            collapse_threshold=collapse_threshold,
+        )
+        if not summary.node_count:
+            # Nothing survived the visibility filter. Not worth a heading.
+            continue
+
+        if all_windows:
+            role = "main window" if index == 0 else "other top-level window"
+            if tree.handle in blocked_handles:
+                role = blocked_handles[tree.handle]
+            caption = f' "{tree.text}"' if tree.text else ""
+            if described:
+                print()
+            print(
+                f"=== {tree.class_name}{caption}  [{role}]  "
+                f"visible={tree.visible}"
+            )
+        print(summary.text)
+
+        described += 1
+        remaining -= summary.node_count
+        totals["nodes"] += summary.node_count
+        totals["elided"] += summary.elided_nodes
+        totals["below_depth"] += summary.depth_elided_nodes
+        truncated = truncated or summary.truncated
+        for locator in summary.suggested_locators:
+            if locator not in locators:
+                locators.append(locator)
+
+    if not described:
+        print("nothing to describe: no window has visible content")
+        if not show_all:
+            print("  add --all to include hidden windows")
+        return 0
+
+    print()
+    scope = f"{described} window(s), " if all_windows else ""
     print(
-        f"\n{summary.node_count} nodes shown, "
-        f"truncated={summary.truncated}, elided={summary.elided_nodes}, "
-        f"below-depth={summary.depth_elided_nodes}"
+        f"{scope}{totals['nodes']} nodes shown, "
+        f"truncated={truncated}, elided={totals['elided']}, "
+        f"below-depth={totals['below_depth']}"
     )
-    if summary.depth_elided_nodes:
+    if totals["below_depth"]:
         # Named separately from `elided` because the remedy differs:
         # this is --depth, not --collapse-threshold.
         print(
-            f"  {summary.depth_elided_nodes} nodes lie below --depth "
+            f"  {totals['below_depth']} nodes lie below --depth "
             f"{depth}; raise it to see them"
         )
-    if summary.suggested_locators:
-        print("\nSuggested locators:")
-        for locator in summary.suggested_locators[:30]:
+    if omitted:
+        print(
+            f"  {omitted} further window(s) not described: the "
+            f"--max-nodes budget of {max_nodes} was spent"
+        )
+    if not_visible:
+        print(
+            f"  {not_visible} window(s) skipped as not visible; add --all "
+            "to include them"
+        )
+    if not all_windows:
+        # The same trap `find` warns about. A dialog is a separate
+        # top-level window, so the screen an operator is looking at may not
+        # be the one described here.
+        print(
+            "  only the main window was described; add --all-windows for "
+            "dialogs, menus and dropdowns"
+        )
+    if locators:
+        print()
+        print("Suggested locators:")
+        for locator in locators[:30]:
             print(f"  {locator}")
     return 0
 
@@ -482,7 +596,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "describe":
         return cmd_describe(
             args.pid, args.depth, args.max_nodes, args.all,
-            args.collapse_threshold,
+            args.collapse_threshold, args.all_windows,
         )
     if args.command == "find":
         return cmd_find(args.pid, args.locator, args.all_windows)
