@@ -91,6 +91,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    modals = sub.add_parser(
+        "modals",
+        help=(
+            "Report whether the target is held by a modal dialog, and by "
+            "which one"
+        ),
+    )
+    modals.add_argument("--pid", type=int, required=True)
+
     restore = sub.add_parser(
         "restore",
         help=(
@@ -310,6 +319,24 @@ def cmd_surfaces(
     ]
     digest = map_digest(regions)
 
+    # Said first, and unconditionally. Which mechanism drives a region is
+    # academic while the window is disabled: every one of them will fail,
+    # and the caller needs to deal with the dialog before anything else.
+    from .backends.windows.modality import top_level_state
+    from .modality import find_modal_blocks
+
+    blocks, unexplained = find_modal_blocks(top_level_state(pid))
+    for block in blocks:
+        print(f"BLOCKED: {block.describe()} -- deal with it before driving "
+              "anything else")
+    for item in unexplained:
+        print(
+            f"BLOCKED: {item.blocked.text or item.blocked.class_name!r} is "
+            "disabled with no visible dialog to account for it"
+        )
+    if blocks or unexplained:
+        print()
+
     counts = summarize_kinds(regions)
     print("regions by kind: " + ", ".join(f"{k}={v}" for k, v in counts.items()))
     print(f"shape digest   : {digest}")
@@ -342,6 +369,47 @@ def cmd_surfaces(
         )
         return 4
     return 0
+
+
+def cmd_modals(pid: int) -> int:
+    """Report blocking state.
+
+    Exits 5 when the target is held. A caller that retries a click into a
+    disabled window will retry forever, so this is worth an exit code
+    rather than a line of prose.
+    """
+    from .backends.windows.modality import top_level_state
+    from .modality import find_modal_blocks
+
+    state = top_level_state(pid)
+    if not state:
+        print(f"error: pid {pid} has no windows on this desktop", file=sys.stderr)
+        return 2
+
+    blocks, unexplained = find_modal_blocks(state)
+    if not blocks and not unexplained:
+        print(f"not blocked: {len(state)} top-level window(s), none disabled")
+        return 0
+
+    for block in blocks:
+        print(f"BLOCKED: {block.describe()}")
+        print(
+            f"  dialog 0x{block.dialog.handle:08X} "
+            f"{block.dialog.class_name}  "
+            f"holds 0x{block.blocked.handle:08X} {block.blocked.class_name}"
+        )
+    for item in unexplained:
+        print(
+            f"BLOCKED: 0x{item.blocked.handle:08X} "
+            f"{item.blocked.class_name} "
+            f"{item.blocked.text!r} is disabled, and no visible dialog "
+            "accounts for it"
+        )
+        print(
+            "  a dialog may be off-screen, on another desktop, or owned by "
+            "a thread that has stopped pumping"
+        )
+    return 5
 
 
 def cmd_restore(pid: int) -> int:
@@ -424,6 +492,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_probe(args.pid, args.out)
     if args.command == "restore":
         return cmd_restore(args.pid)
+    if args.command == "modals":
+        return cmd_modals(args.pid)
     if args.command == "surfaces":
         return cmd_surfaces(
             args.pid, args.all, args.changed_from, args.all_windows

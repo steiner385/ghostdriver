@@ -480,6 +480,122 @@ time.sleep(600)
 """
 
 
+# A target holding itself open with a modal dialog.
+#
+# Modality is not a property of the dialog's appearance; it is that the
+# dialog's owner has been disabled. Every control in the owner then refuses
+# input, which from outside is indistinguishable from a hung application.
+# Reproducing it needs no message box and no toolkit: an owned top-level
+# window plus EnableWindow(owner, FALSE) is exactly what showing a modal
+# dialog does.
+_WIN32_MODAL_APP = r"""
+import ctypes
+import os
+from ctypes import wintypes
+
+user32 = ctypes.WinDLL("user32", use_last_error=True)
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+LRESULT = ctypes.c_ssize_t
+WNDPROC = ctypes.WINFUNCTYPE(
+    LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
+)
+
+
+class WNDCLASSW(ctypes.Structure):
+    _fields_ = [
+        ("style", wintypes.UINT),
+        ("lpfnWndProc", WNDPROC),
+        ("cbClsExtra", ctypes.c_int),
+        ("cbWndExtra", ctypes.c_int),
+        ("hInstance", wintypes.HINSTANCE),
+        ("hIcon", wintypes.HANDLE),
+        ("hCursor", wintypes.HANDLE),
+        ("hbrBackground", wintypes.HBRUSH),
+        ("lpszMenuName", wintypes.LPCWSTR),
+        ("lpszClassName", wintypes.LPCWSTR),
+    ]
+
+
+kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+user32.DefWindowProcW.argtypes = [
+    wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
+]
+user32.DefWindowProcW.restype = LRESULT
+user32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASSW)]
+user32.RegisterClassW.restype = wintypes.ATOM
+user32.CreateWindowExW.argtypes = [
+    wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
+    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID,
+]
+user32.CreateWindowExW.restype = wintypes.HWND
+user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.EnableWindow.argtypes = [wintypes.HWND, wintypes.BOOL]
+user32.EnableWindow.restype = wintypes.BOOL
+user32.GetMessageW.argtypes = [
+    ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT
+]
+user32.GetMessageW.restype = ctypes.c_int
+user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
+user32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
+user32.DispatchMessageW.restype = LRESULT
+
+WS_OVERLAPPEDWINDOW = 0x00CF0000
+WS_VISIBLE = 0x10000000
+WS_EX_NOACTIVATE = 0x08000000
+WS_EX_TOOLWINDOW = 0x00000080
+SW_SHOWNOACTIVATE = 4
+OFFSCREEN = -32000
+
+MAIN_CLASS = "GhostdriverModalMainClass"
+DIALOG_CLASS = "GhostdriverModalDialogClass"
+
+PROC = WNDPROC(lambda h, m, w, l: user32.DefWindowProcW(h, m, w, l))
+instance = kernel32.GetModuleHandleW(None)
+
+for name in (MAIN_CLASS, DIALOG_CLASS):
+    cls = WNDCLASSW()
+    cls.lpfnWndProc = PROC
+    cls.hInstance = instance
+    cls.hbrBackground = 6
+    cls.lpszClassName = name
+    if not user32.RegisterClassW(ctypes.byref(cls)):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+main = user32.CreateWindowExW(
+    WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+    MAIN_CLASS, "GhostdriverModalMain", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+    OFFSCREEN, OFFSCREEN, 400, 300, None, None, instance, None,
+)
+if not main:
+    raise ctypes.WinError(ctypes.get_last_error())
+
+# Owned, not child: top-level, and what a dialog is.
+dialog = user32.CreateWindowExW(
+    WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+    DIALOG_CLASS, "Confirm Delete Record", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+    OFFSCREEN, OFFSCREEN, 240, 140, main, None, instance, None,
+)
+if not dialog:
+    raise ctypes.WinError(ctypes.get_last_error())
+
+user32.ShowWindow(wintypes.HWND(main), SW_SHOWNOACTIVATE)
+user32.ShowWindow(wintypes.HWND(dialog), SW_SHOWNOACTIVATE)
+
+# The whole point. This, not the dialog's appearance, is modality.
+user32.EnableWindow(wintypes.HWND(main), False)
+
+print(f"{os.getpid()} {main} {dialog}", flush=True)
+
+message = wintypes.MSG()
+while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
+    user32.TranslateMessage(ctypes.byref(message))
+    user32.DispatchMessageW(ctypes.byref(message))
+"""
+
+
 def main_tree(pid: int):
     """The target's largest window tree, matching how the tool selects it.
 
@@ -614,6 +730,40 @@ def silent_target():
         else:
             raise RuntimeError("target did not create a window in time")
         yield pid, hwnd
+    finally:
+        if pid is not None and pid != proc.pid:
+            try:
+                psutil.Process(pid).terminate()
+            except psutil.Error:
+                pass
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+@pytest.fixture
+def modal_target():
+    """A target held open by a modal dialog; yields (pid, main, dialog)."""
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _WIN32_MODAL_APP],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    pid = None
+    try:
+        announced = proc.stdout.readline().split()
+        if len(announced) != 3:
+            raise RuntimeError("target exited before announcing its windows")
+        pid, main, dialog = (int(x) for x in announced)
+
+        deadline = time.time() + 10
+        from ghostdriver.backends.windows.enumerate import top_level_windows
+        while time.time() < deadline:
+            if dialog in top_level_windows(pid):
+                break
+            time.sleep(0.1)
+        else:
+            raise RuntimeError("target did not create its dialog in time")
+        yield pid, main, dialog
     finally:
         if pid is not None and pid != proc.pid:
             try:

@@ -22,6 +22,9 @@ SMTO_ABORTIFHUNG = 0x0002
 
 GW_CHILD = 5
 GW_HWNDNEXT = 2
+#: The window that owns this one. Distinct from a parent: an owned window is
+#: top-level, appears in EnumWindows, and is what a modal dialog is.
+GW_OWNER = 4
 
 # Window-manager state, read and (only by the `restore` command) written.
 #
@@ -100,6 +103,16 @@ kernel32.CloseHandle.restype = wintypes.BOOL
 
 kernel32.IsWow64Process.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
 kernel32.IsWow64Process.restype = wintypes.BOOL
+
+
+def owner_window(hwnd: int) -> int:
+    """The window that owns `hwnd`, or 0.
+
+    Ownership is the relationship a modal dialog has to the window it
+    blocks, and it is not visible in a parent/child walk: an owned window
+    is itself top-level.
+    """
+    return user32.GetWindow(wintypes.HWND(hwnd), GW_OWNER) or 0
 
 
 def window_style(hwnd: int) -> int:
