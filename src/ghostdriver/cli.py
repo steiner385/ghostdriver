@@ -404,8 +404,18 @@ def cmd_probe(pid: int, out: str | None) -> int:
         return 2
     payload = json.dumps(document.to_dict(), indent=2)
     if out:
-        document.save(out)
+        try:
+            outcome = document.save(out)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
         print(f"profile written to {out}")
+        # Said out loud, because the previous behaviour was to silently
+        # take the curated policy with it and the person re-probing is
+        # exactly the person who would not think to check.
+        if outcome["preserved"]:
+            print("kept from the existing file: "
+                  + ", ".join(outcome["preserved"]))
         print(f"matched_profile={document.matched_profile} "
               f"toolkit={document.toolkit.get('inferred')} "
               f"uia={document.uia.get('verdict')} "

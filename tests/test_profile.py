@@ -217,3 +217,191 @@ def test_a_document_records_why_it_classified_as_it_did():
     assert emitted["blocked_by"] == [
         "'Tip of the Day' is holding 'ProjectLibre'"
     ]
+
+
+# --- a re-probe must not take the curated policy with it -----------------
+
+def curated(tmp_path, **extra):
+    """A profile someone has edited, as they actually arrive."""
+    import json
+
+    document = {
+        "_comment": ["Hand-written notes that this code has no field for."],
+        "profile_id": "app-1.0-32",
+        "matched_profile": "L1",
+        "window_count": 12,
+        "denylist": ["*delete*", "*submit*"],
+        "environment_allowlist": ["https://staging.example.internal/*"],
+        "input_sensitivity": [
+            {"cadence": "fast_human", "source": "declared", "surface": "web",
+             "evidence": "hosted content counts input events"},
+        ],
+        "grid_strategy": "capture-and-read",
+        **extra,
+    }
+    path = tmp_path / "profile.json"
+    path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+    return path
+
+
+def reprobe(profile_id="app-1.0-32", **extra):
+    return ProfileDocument(profile_id=profile_id, matched_profile="L1",
+                           window_count=57, **extra)
+
+
+def test_a_reprobe_keeps_the_denylist(tmp_path):
+    """The original known cost of D3, now paid off."""
+    import json
+
+    path = curated(tmp_path)
+    reprobe().save(path)
+
+    after = json.loads(path.read_text())
+    assert after["denylist"] == ["*delete*", "*submit*"]
+    assert after["environment_allowlist"] == [
+        "https://staging.example.internal/*"
+    ]
+
+
+def test_a_reprobe_keeps_what_a_session_measured(tmp_path):
+    """The reason this stopped being an acceptable cost.
+
+    A denylist can be retyped from memory. An input-sensitivity note was
+    *measured* -- and measuring it again means tripping the target at
+    machine speed, which is the thing the note exists to prevent.
+    """
+    import json
+
+    path = curated(tmp_path)
+    reprobe().save(path)
+
+    notes = json.loads(path.read_text())["input_sensitivity"]
+    assert len(notes) == 1
+    assert notes[0]["cadence"] == "fast_human"
+    assert notes[0]["evidence"] == "hosted content counts input events"
+
+
+def test_a_reprobe_keeps_keys_this_code_does_not_model(tmp_path):
+    """These documents are hand-edited. An operator's comments are not ours
+    to drop because we have no field for them."""
+    import json
+
+    path = curated(tmp_path, operator_note="ask Dana before changing this")
+    reprobe().save(path)
+
+    after = json.loads(path.read_text())
+    assert after["_comment"] == [
+        "Hand-written notes that this code has no field for."
+    ]
+    assert after["operator_note"] == "ask Dana before changing this"
+
+
+def test_a_reprobe_does_replace_what_it_measured(tmp_path):
+    """The other half: preserving everything would make re-probing
+    pointless."""
+    import json
+
+    path = curated(tmp_path)
+    reprobe().save(path)
+
+    assert json.loads(path.read_text())["window_count"] == 57
+
+
+def test_the_result_says_what_it_preserved(tmp_path):
+    """So the person running it can see the curation survived, rather than
+    opening the file to check."""
+    outcome = reprobe().save(curated(tmp_path))
+
+    assert outcome["merged"] is True
+    assert "denylist" in outcome["preserved"]
+    assert "input_sensitivity" in outcome["preserved"]
+    assert "_comment" in outcome["preserved"]
+    assert "window_count" not in outcome["preserved"], "that one was replaced"
+
+
+def test_probing_over_a_different_application_is_refused(tmp_path):
+    """The path is usually typed by hand, and silently rewriting one
+    application's profile with another's is not recoverable."""
+    import json
+    import pytest as _pytest
+
+    path = curated(tmp_path)
+
+    with _pytest.raises(ValueError, match="describes"):
+        reprobe(profile_id="other-app-2.0-64").save(path)
+
+    assert json.loads(path.read_text())["profile_id"] == "app-1.0-32"
+
+
+def test_it_can_be_forced_when_that_is_what_is_meant(tmp_path):
+    import json
+
+    path = curated(tmp_path)
+    reprobe(profile_id="other-app-2.0-64").save(path, force=True)
+
+    assert json.loads(path.read_text())["profile_id"] == "other-app-2.0-64"
+    assert json.loads(path.read_text())["denylist"] == ["*delete*", "*submit*"]
+
+
+def test_a_first_probe_writes_the_whole_template(tmp_path):
+    """With no file there, the empty curated fields are the point: they show
+    an operator what there is to fill in."""
+    import json
+
+    path = tmp_path / "new.json"
+    outcome = reprobe().save(path)
+
+    document = json.loads(path.read_text())
+    assert outcome["merged"] is False
+    assert document["denylist"] == []
+    assert "input_sensitivity" in document
+
+
+def test_an_unreadable_existing_profile_stops_the_write(tmp_path):
+    """Overwriting it would destroy whatever is in there, and a file that
+    will not parse is exactly the one worth keeping to look at."""
+    import pytest as _pytest
+
+    path = tmp_path / "broken.json"
+    path.write_text("{not json at all", encoding="utf-8")
+
+    with _pytest.raises(ValueError, match="could not be read"):
+        reprobe().save(path)
+
+    assert path.read_text() == "{not json at all"
+
+
+def test_the_write_leaves_no_debris(tmp_path):
+    path = curated(tmp_path)
+    reprobe().save(path)
+
+    assert not list(path.parent.glob("*.tmp"))
+
+
+def test_a_hand_written_policy_profile_loads(tmp_path):
+    """One that never came from a probe: no profile_id, no measurements,
+    just policy. The example this project ships is exactly this shape, and
+    it could not be read at all."""
+    import json
+
+    path = tmp_path / "policy.json"
+    path.write_text(json.dumps({
+        "_comment": "policy only",
+        "denylist": ["*delete*"],
+    }), encoding="utf-8")
+
+    document = ProfileDocument.load(path)
+
+    assert document.denylist == ["*delete*"]
+    assert document.profile_id == ""
+    assert document.matched_profile == "unknown"
+
+
+def test_the_shipped_example_loads():
+    """It is the thing operators copy. If it does not parse, the
+    documentation is wrong in the most expensive possible way."""
+    document = ProfileDocument.load("docs/example-profile.json")
+
+    assert document.matched_profile == "L1"
+    assert document.denylist
+    assert document.input_sensitivity

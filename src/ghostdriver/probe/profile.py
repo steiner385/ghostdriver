@@ -7,8 +7,9 @@ so a partial profile is never mistaken for a complete one.
 """
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
+from typing import ClassVar
 
 from ..model.window import WindowNode
 
@@ -101,8 +102,13 @@ def match_profile(
 
 @dataclass
 class ProfileDocument:
-    profile_id: str
-    matched_profile: str
+    #: Both default, because a profile document is not always a probe's
+    #: output. An operator may write one that carries policy alone -- a
+    #: denylist and some notes -- and never run a probe against it. The
+    #: example this project ships is exactly that, and requiring these made
+    #: it unreadable.
+    profile_id: str = ""
+    matched_profile: str = "unknown"
     executable: dict = field(default_factory=dict)
     toolkit: dict = field(default_factory=dict)
     integrity_level: str | None = None
@@ -171,11 +177,88 @@ class ProfileDocument:
             "environment_allowlist": self.environment_allowlist,
         }
 
-    def save(self, path: str | Path) -> None:
-        Path(path).write_text(
-            json.dumps(self.to_dict(), indent=2), encoding="utf-8"
-        )
+    #: What a probe measures. Everything else in a profile document belongs
+    #: to whoever curated it, and a re-probe must not touch it.
+    OBSERVED: ClassVar[tuple[str, ...]] = (
+        "profile_id", "matched_profile", "executable", "toolkit",
+        "integrity_level", "dpi", "command_line", "window_count",
+        "unresponsive_count", "classification_reason", "hosting_note",
+        "blocked_by", "class_census", "uia", "msaa",
+    )
+
+    def save(self, path: str | Path, *, force: bool = False) -> dict:
+        """Write this profile, keeping anything curated that is already there.
+
+        A re-probe used to overwrite the file wholesale and take the curated
+        policy with it. That was recorded as a known cost when the only
+        curated fields were a denylist someone could retype; it stopped
+        being acceptable once the file started carrying notes a session had
+        *measured* and could not simply reproduce.
+
+        So only the observed fields are replaced. Curated fields keep their
+        values, and keys this code does not model at all are passed through
+        untouched -- these documents are hand-edited, and an operator's
+        comments and notes are not ours to drop because we have no field for
+        them.
+
+        Refuses a file describing a different target unless `force`. The
+        alternative is silently rewriting one application's profile with
+        another's, and the path is usually typed by hand.
+
+        Written whole and moved into place: an interrupted write that
+        truncated a profile would leave every later session unable to
+        attach.
+        """
+        location = Path(path)
+        observed = {k: v for k, v in self.to_dict().items()
+                    if k in self.OBSERVED}
+        existing: dict = {}
+        preserved: list[str] = []
+
+        if location.exists():
+            try:
+                existing = json.loads(location.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError(
+                    f"{location} exists but could not be read as a profile "
+                    f"({exc}); move it aside rather than losing what is in it"
+                ) from exc
+            if not isinstance(existing, dict):
+                raise ValueError(f"{location} is not a profile document")
+            was = existing.get("profile_id")
+            if was and was != self.profile_id and not force:
+                raise ValueError(
+                    f"{location} describes {was!r}, not {self.profile_id!r}. "
+                    "Re-probing over it would replace one application's "
+                    "profile with another's; pass force to do it anyway"
+                )
+            preserved = sorted(k for k in existing if k not in observed)
+
+        # Three layers, and the order carries the whole policy. This
+        # document's own defaults go down first, so a new file arrives as a
+        # full template -- the empty curated fields are what show an
+        # operator there is something to fill in -- and so a profile written
+        # before a field existed gains it. Then whatever is already on disk,
+        # which is how curation and unmodelled keys survive. Then the
+        # observed fields, which are the only ones a probe is entitled to
+        # replace.
+        document = {**self.to_dict(), **existing, **observed}
+        temporary = location.with_suffix(location.suffix + ".tmp")
+        temporary.write_text(json.dumps(document, indent=2) + "\n",
+                             encoding="utf-8")
+        temporary.replace(location)
+        return {"path": str(location), "preserved": preserved,
+                "merged": bool(existing)}
 
     @classmethod
     def load(cls, path: str | Path) -> "ProfileDocument":
-        return cls(**json.loads(Path(path).read_text(encoding="utf-8")))
+        """Read a profile, ignoring keys this code does not model.
+
+        These files are hand-edited and carry comments and operator notes.
+        Passing every key straight to the constructor meant a document with
+        one extra line could not be read at all -- including the example
+        this project ships, which has a `_comment` block at the top.
+        """
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in raw.items() if k in known})
