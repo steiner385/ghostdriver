@@ -566,6 +566,31 @@ def build_server(sessions: SessionManager | None = None) -> Any:
                                timeout_s=timeout_s, all_windows=all_windows,
                                confirmed=confirmed)
 
+    @server.tool(annotations=ACTUATES, description=(
+        "Learn how this target's controls actuate, by actuating them. "
+        "Requires a session at the `full` tier and a `safe_controls` list "
+        "in the target's profile document -- it never chooses its own "
+        "targets, and `only` can narrow that list but never add to it. "
+        "Each listed control carries what should be true afterwards; "
+        "anything that cannot be verified is reported rather than recorded, "
+        "because a tier that cannot be shown to have worked is not a tier "
+        "that works. Writes what it learned into the profile, touching "
+        "nothing else in it."
+    ))
+    def probe_phase2(
+        session_id: SessionId,
+        only: Annotated[list[str] | None, Field(description=(
+            "Run just these locators. Each must already appear in the "
+            "profile's safe_controls."
+        ))] = None,
+        settle_ms: Annotated[int, Field(description=(
+            "How long to watch for the application pulling itself to the "
+            "front after each control. A real target can take over a "
+            "second."
+        ))] = 1500,
+    ) -> dict[str, Any]:
+        return box.probe_phase2(session_id, only=only, settle_ms=settle_ms)
+
     return server
 
 

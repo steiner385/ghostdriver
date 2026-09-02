@@ -144,6 +144,12 @@ class ProfileDocument:
     #: had a chance to learn anything.
     input_sensitivity: list[dict] = field(default_factory=list)
 
+    #: Controls an operator has said phase 2 may actuate, each with what
+    #: should be true afterwards. Curated only: the probe never adds to this,
+    #: because a probe that could extend its own permission to act would not
+    #: be constrained by it at all.
+    safe_controls: list[dict] = field(default_factory=list)
+
     # Populated by supervised phase-2 learning (Iteration 4) or by operator
     # curation. Empty here because nothing read-only can determine them.
     actuation_map: dict = field(default_factory=dict)
@@ -170,6 +176,7 @@ class ProfileDocument:
             "uia": self.uia,
             "msaa": self.msaa,
             "input_sensitivity": self.input_sensitivity,
+            "safe_controls": self.safe_controls,
             "actuation_map": self.actuation_map,
             "grid_strategy": self.grid_strategy,
             "focus_behavior": self.focus_behavior,
@@ -262,3 +269,34 @@ class ProfileDocument:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         known = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in raw.items() if k in known})
+
+
+def merge_learned(path, *, actuation_map: dict, focus_behavior: dict) -> bool:
+    """Write what phase 2 learned into a profile, touching nothing else.
+
+    The same read-modify-write as `save`, and for the same reason: these
+    documents are hand-curated. Phase 2 owns exactly two fields and must not
+    be able to disturb a third -- least of all `safe_controls`, which is the
+    list granting it permission to act in the first place.
+    """
+    import json
+    from pathlib import Path
+
+    location = Path(path)
+    document = json.loads(location.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError(f"{location} is not a profile document")
+
+    existing = document.get("actuation_map")
+    document["actuation_map"] = {
+        **(existing if isinstance(existing, dict) else {}),
+        **actuation_map,
+    }
+    if focus_behavior:
+        document["focus_behavior"] = focus_behavior
+
+    temporary = location.with_suffix(location.suffix + ".tmp")
+    temporary.write_text(json.dumps(document, indent=2) + "\n",
+                         encoding="utf-8")
+    temporary.replace(location)
+    return True

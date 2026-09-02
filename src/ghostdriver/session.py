@@ -47,6 +47,8 @@ class Profile:
     matched_profile: str = "unknown"
     denylist: tuple[str, ...] = ()
     sensitivity: Sensitivity = field(default_factory=Sensitivity)
+    #: What phase 2 is permitted to actuate. Curated only.
+    safe_controls: tuple[dict, ...] = ()
 
     @classmethod
     def load(cls, path: str | Path) -> "Profile":
@@ -79,6 +81,7 @@ class Profile:
             matched_profile=document.get("matched_profile", "unknown"),
             denylist=tuple(document.get("denylist") or ()),
             sensitivity=sensitivity,
+            safe_controls=tuple(document.get("safe_controls") or ()),
         )
 
     @classmethod

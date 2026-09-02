@@ -36,7 +36,12 @@ ACTUATION_TOOLS = {"click", "type_text", "set_value", "send_keys"}
 #: expected to carry the non-idempotent annotation the others do.
 CURATION_TOOLS = {"record_input_sensitivity"}
 
-EXPECTED_TOOLS = READ_TOOLS | ACTUATION_TOOLS | CURATION_TOOLS
+#: The `full` tier, which nothing grants by default. It actuates
+#: controls an operator listed, to learn how they respond.
+LEARNING_TOOLS = {"probe_phase2"}
+
+EXPECTED_TOOLS = (READ_TOOLS | ACTUATION_TOOLS
+                  | CURATION_TOOLS | LEARNING_TOOLS)
 
 
 async def _drive_uia(pid: int):
