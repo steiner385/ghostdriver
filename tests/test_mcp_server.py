@@ -216,3 +216,80 @@ def test_read_tools_are_annotated_read_only(server):
     # restore changes what is on screen, even though it changes no
     # application state, so it is deliberately not marked read-only.
     assert tools["restore"].annotations.read_only_hint is False
+
+
+# --- capture has to arrive as something a model can look at --------------
+
+def granted(pid):
+    """A server whose session manager this test can reach, with `pid`
+    approved and attached."""
+    from ghostdriver.mcp_server import build_server
+    from ghostdriver.policy import ConsentSource
+
+    sessions = SessionManager()
+    sessions.record_grant(pid, allowed=True, source=ConsentSource.ELICITED)
+    server = build_server(sessions)
+    session = call(server, "attach", pid=pid)["session_id"]
+    return server, session
+
+
+def captured(pid):
+    server, session = granted(pid)
+    return asyncio.run(server.call_tool("capture", {"session_id": session}))
+
+
+@on_windows
+def test_capture_returns_an_image_block_not_base64_in_json(win32_target):
+    """The defect this replaced, and it was expensive in both directions.
+
+    Returned inside the JSON payload, the PNG was a string nothing could
+    see: measured on a real 3840x1200 window, 12.4MB of base64, around
+    three million tokens. The same picture as an image block is a couple of
+    thousand and legible -- which is the entire reason the tool exists.
+    """
+    result = captured(win32_target)
+
+    kinds = [b.type for b in result.content]
+    assert "image" in kinds, kinds
+    image = next(b for b in result.content if b.type == "image")
+    assert image.mime_type == "image/png"
+    assert image.data.startswith("iVBOR"), "a PNG, in the block's own field"
+
+
+@on_windows
+def test_the_pixels_are_not_repeated_in_the_text_payload(win32_target):
+    """Sending them twice would give back the cost the image block saves."""
+    result = captured(win32_target)
+
+    text = " ".join(b.text for b in result.content if b.type == "text")
+    assert "base64" not in text
+    assert len(text) < 500, "metadata only"
+
+
+@on_windows
+def test_the_dimensions_still_arrive_as_data(win32_target):
+    """Worth having as structured output even though the pixels are not."""
+    result = captured(win32_target)
+
+    assert result.structured_content["ok"] is True
+    assert result.structured_content["width"] > 0
+    assert "base64" not in result.structured_content
+
+
+def test_a_failed_capture_still_explains_itself(server):
+    """No image to send, and the reason must not be lost in the change."""
+    result = asyncio.run(server.call_tool(
+        "capture", {"session_id": "no-such-session"}))
+
+    assert [b.type for b in result.content] == ["text"]
+    assert result.structured_content["ok"] is False
+    assert result.structured_content["error"]["message"]
+
+
+def test_capture_warns_against_using_pixels_as_proof(server):
+    """The rule the whole design rests on: an action only claims success
+    against something exactly checked, and reading pixels is a guess."""
+    description = listed(server)["capture"].description
+
+    assert "do not use it to confirm" in description
+    assert "expect" in description

@@ -336,7 +336,11 @@ def test_restore_is_a_no_op_when_nothing_is_minimized(box, win32_target):
     session = attached(box, win32_target)
     result = box.restore(session)
 
-    assert result["ok"] and result["restored"] == []
+    assert result["ok"], result.get("error")
+    # Reported, not just asserted: this failed once in a full run and could
+    # not be reproduced, and "assert [] == [...]" says nothing about which
+    # window was found minimized or what state it was in.
+    assert result["restored"] == [], result
     assert "nothing was minimized" in result["note"]
 
 

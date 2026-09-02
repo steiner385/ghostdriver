@@ -129,8 +129,11 @@ class HumanDone(BaseModel):
 
 def build_server(sessions: SessionManager | None = None) -> Any:
     """Construct the server. Importable without starting anything."""
+    import json
+
     from mcp.server.mcpserver import Context, MCPServer
-    from mcp.types import ToolAnnotations
+    from mcp.types import (CallToolResult, ImageContent, TextContent,
+                           ToolAnnotations)
 
     box = Toolbox(sessions=sessions or SessionManager())
     server = MCPServer(
@@ -295,10 +298,15 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         return box.read(session_id, locator, all_windows=all_windows)
 
     @server.tool(annotations=READS, description=(
-        "PNG of the target's window, or of one element or region. The only "
-        "way to read owner-drawn regions such as grids, which expose no "
-        "text through any accessibility surface. Does not bring the window "
-        "to the front."
+        "A picture of the target window, or of one element or region, "
+        "returned as an image you can look at. The only way into "
+        "owner-drawn regions such as grids, which expose no text through "
+        "any accessibility surface. Does not bring the window to the front. "
+        "Read what you see to decide what to do next -- but do not use it "
+        "to confirm a value was saved. Reading pixels is a guess, however "
+        "good a one, and this server is built so an action only claims "
+        "success against something exactly checked: verify with `read`, or "
+        "with an `expect` naming where the committed value appears."
     ))
     def capture(
         session_id: SessionId,
@@ -309,8 +317,33 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "Screen rectangle {left, top, right, bottom}, as returned by "
             "`find` or `surfaces`."
         ))] = None,
-    ) -> dict[str, Any]:
-        return box.capture(session_id, locator=locator, region=region)
+    ) -> CallToolResult:
+        result = box.capture(session_id, locator=locator, region=region)
+        if not result.get("ok"):
+            return CallToolResult(
+                content=[TextContent(
+                    type="text",
+                    text=json.dumps(result, indent=2),
+                )],
+                structured_content=result,
+            )
+
+        # The PNG goes back as an image block, so a model can look at it.
+        # Returned inside the JSON as base64 it was unreadable *and*
+        # enormous: measured on a real 3840x1200 window, 12.4MB of base64,
+        # around three million tokens of a string nothing could see. The
+        # same picture as an image block is a couple of thousand tokens and
+        # legible, which is the entire reason this tool exists.
+        image = result.pop("base64")
+        return CallToolResult(
+            content=[
+                ImageContent(type="image", data=image, mimeType="image/png"),
+                TextContent(type="text", text=json.dumps(result, indent=2)),
+            ],
+            # Without the pixels: the dimensions are worth having as data,
+            # the image is not worth having twice.
+            structured_content=result,
+        )
 
     @server.tool(annotations=READS, description=(
         "Poll until a condition holds. Conditions: present, absent, "

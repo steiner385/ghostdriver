@@ -879,10 +879,12 @@ findable by searching the history for the name.
   identified by anything other than its caption: an unlabelled toolbar
   button, or a grid cell. Those are exactly the controls a person would most
   want to forbid.
-- **`capture` has no OCR behind it.** It returns pixels. Reading an
-  owner-drawn grid from those pixels is Iteration 5 per the spec, and the
-  spec is right that clipboard and export routes should be probed before
-  anything is built on OCR.
+- **Nothing gives *exact* text out of an owner-drawn region.** The model can
+  read a capture, which is enough to decide what to do next, but not enough
+  to verify a value (D46). The routes that would give exact text -- the
+  control's own clipboard copy, an export command, a hidden accessible
+  surface -- are unprobed. That is the gap worth closing, and it is a
+  different gap from the one OCR was imagined to fill.
 
 ---
 
@@ -1078,7 +1080,7 @@ Both stay open until there is a target that demonstrably inspects them,
 because neither can be validated against anything else. That is the same
 standard the cadence work was held to.
 
-### D45. The capture flake is undiagnosed, and now self-explaining
+### D45. Two intermittent failures are undiagnosed, and now self-explaining
 
 **Not a fix. A record of what was tried.**
 
@@ -1087,9 +1089,63 @@ reproduced since: roughly 1,170 backend captures and 190 through the tool,
 under four threads standing fixture applications up and tearing them down to
 recreate the desktop-resource pressure of a full run. All fine.
 
-Since the fault will not come back on demand, the useful work is making the
-next occurrence pay for itself. `GetWindowDC`, `CreateCompatibleBitmap`,
+`test_restore_is_a_no_op_when_nothing_is_minimized` behaves the same way. It
+reproduced once in about twenty runs of its own module and not again in
+twelve more, nor in 58 targeted rounds under deliberate load with the window
+state printed each time — which never showed anything minimized.
+
+Test order is *not* randomised. `pytest-randomly` is not installed, and
+`-p no:randomly` silently does nothing, so an earlier belief that these were
+order-dependent was wrong. They are timing-dependent, which at least rules
+out "some previous test left state behind".
+
+Since neither fault comes back on demand, the useful work is making the next
+occurrence pay for itself. `GetWindowDC`, `CreateCompatibleBitmap`,
 `PrintWindow`/`BitBlt` and `GetDIBits` can all fail for reasons outside this
 process, and their messages said nothing about which. They now carry the
-OS's own error. "could not obtain a device context" becomes error 8, out of
-memory, or 1400, invalid window handle — which is most of a diagnosis.
+OS's own error: "could not obtain a device context" becomes error 8, out of
+memory, or 1400, invalid window handle — which is most of a diagnosis. The
+restore assertion prints the whole result rather than `[] == [...]`, so the
+next occurrence names the window it found and the state it was in.
+
+Recorded rather than quietly retried. A retry would make both disappear from
+the output and take the evidence with them.
+
+### D46. The model reads the pixels; OCR is not built
+
+**Decision.** `capture` returns an image block a multimodal caller can look
+at. No OCR, now or planned. Pixels are for deciding, never for verifying.
+
+**Why not OCR.** The caller on the other end of this server reads images. It
+beats OCR at the thing that actually matters here -- an owner-drawn grid
+needs rows, columns and headers, and OCR returns a text blob with the
+geometry thrown away. It also costs nothing to install, on a tool whose
+premise is "a profile, not a driver".
+
+**The defect found while answering the question**, which is why the answer
+had to be checked rather than assumed. `capture` declared `-> dict`, so the
+PNG went back as base64 *inside the JSON*: a `TextContent` block, no
+`ImageContent`. The model received a string it could not see. Measured on a
+real 3840x1200 window: 12.4MB of base64, roughly three million tokens of
+noise. The same picture as an image block is around two thousand tokens and
+legible. Every capture call was quietly spending enormous context for
+nothing, and no amount of OCR reasoning would have surfaced it -- only
+looking at what a client actually receives.
+
+The dimensions still go back as structured content; the pixels are not sent
+twice.
+
+**Where neither is allowed.** Pixels must not become postconditions. The
+whole actuator exists to stop an action claiming success it cannot
+distinguish from a no-op, and a read of an image is probabilistic however
+good it is -- `PART-0001` and `PART-0OO1` are one glyph apart. OCR would be
+no better; it would be worse, and more confident. So the tool description
+says plainly: read a capture to decide what to do, verify with `read` or
+with an `expect` naming where the committed value appears.
+
+**What that leaves open.** Exact text out of an owner-drawn region is still
+unsolved, and it is a real gap -- it is what a caller needs to *verify* a
+grid. The routes that could provide it are the control's own clipboard copy,
+an export command, or an accessible surface that only appears once the
+region has focus. The spec is right that those should be probed before
+anything is built on pixels, and none of them has been.
