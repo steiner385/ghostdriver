@@ -338,6 +338,80 @@ Both were verified once, deliberately, with the operator informed.
 
 ---
 
+### D19. `WM_SETTEXT` is sent, not posted
+
+**Decision.** Every actuation primitive posts, except `WM_SETTEXT`, which is
+sent under a hard timeout.
+
+**Reasoning.** Not a preference — a correctness requirement discovered by the
+integration gate. `WM_SETTEXT` carries a pointer in its lParam, and the
+system marshals a pointer across a process boundary only for a *sent*
+message. Posted, the target receives an address in the sender's address
+space: `PostMessage` returns success and the control does not change.
+
+Worth recording because of how it hid. In-process it works, so the fixture's
+own tests passed. It failed the first time a driver in one process aimed it
+at a control in another, which is the only configuration that matters. A
+unit test could not have found this.
+
+`SMTO_ABORTIFHUNG` with a 500ms budget keeps the exception from reintroducing
+the blocking call the rest of the module exists to avoid.
+
+### D20. Actuation checks the ancestor chain, not the control
+
+**Decision.** `blocking_ancestor` walks from the control to the root, and
+`verbs.unblocked` is the precondition built on it.
+
+**Reasoning.** Measured: with a modal up, the top-level reports disabled and
+its buttons report **enabled**. `IsWindowEnabled` answers for one window and
+no further — a modal disables the top-level, and the children are only
+unreachable *through* it. A driver that asks the control alone sees nothing
+wrong.
+
+That matters more than it would for real input, because posted messages do
+not respect modality at all. The system drops a person's click before the
+control sees it; a posted message is delivered straight to the window
+procedure. Whether the control then acts is up to the control — well-behaved
+classes check, and the fixture checks for that reason — so the observable
+outcome varies by target, and a driver relying on it is relying on an
+accident.
+
+The check is made at act time rather than read from a tree, because a modal
+that appears between reconnaissance and actuation is the case worth catching.
+
+### D21. Tier 1 has the same silent-split hazard as the fast path
+
+**Finding, not a decision.** The HWND-to-UIA bridge synthesises a Value
+pattern for anything derived from a native EDIT. `SetValue` on it writes the
+control's text without the toolkit's keyboard path running — so a
+data-bound field displays one value while the application holds another,
+exactly as `WM_SETTEXT` does. One rung higher than the fast path, and not
+opt-in.
+
+Tier 1 stays first anyway: on a target that publishes a *real* Value pattern
+that is the surface to use, and the ladder recovers on its own when a
+postcondition names the committed value rather than the display. What this
+changes is the documentation and the emphasis — an unverified `set_text` is
+not a safe `set_text`, and the result says so by leaving
+`postcondition_verified` unset rather than claiming success.
+
+This is the concrete answer to the `set_text` question the spec left open.
+The default ladder is UIA, then typing; `WM_SETTEXT` is offered only to a
+caller who asks for `fast_path`.
+
+### D22. "The cursor did not move" is skipped, not failed, on a busy desk
+
+**Decision.** The cursor assertion samples twice before asserting and skips
+if the cursor is already moving.
+
+**Reasoning.** The claim can only be made about a cursor nobody else is
+moving, and this suite runs on a desktop with a person on it. Without the
+guard, a hand on the mouse reports a correctly-behaving tool as broken —
+which is worse than not asserting, because it trains whoever runs it to
+ignore the result. Two samples separate the cases: the tool either moves the
+cursor at the moment it acts or never, while a hand keeps moving. The
+foreground assertion needs no such guard and is made unconditionally.
+
 ## Open, for whoever picks this up
 
 - **The denylist is enforced but unexercised.** It matches captions and

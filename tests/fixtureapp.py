@@ -71,6 +71,7 @@ SW_SHOWNORMAL = 1
 GWL_WNDPROC = -4
 GWL_STYLE = -16
 COLOR_BTNFACE = 15
+GA_PARENT = 1
 OFFSCREEN = -32000
 
 #: Sent to the main window to ask which page is showing. Exists so a test
@@ -104,6 +105,8 @@ for fn, argtypes, restype in (
     ("FillRect", [wintypes.HDC, ctypes.POINTER(wintypes.RECT),
                   wintypes.HBRUSH], ctypes.c_int),
     ("GetSysColorBrush", [ctypes.c_int], wintypes.HBRUSH),
+    ("IsWindowEnabled", [wintypes.HWND], wintypes.BOOL),
+    ("GetAncestor", [wintypes.HWND, wintypes.UINT], wintypes.HWND),
 ):
     f = getattr(user32, fn)
     f.argtypes, f.restype = argtypes, restype
@@ -226,6 +229,14 @@ def _button_proc(hwnd, msg, wparam, lparam):
                        len(caption))
         user32.EndPaint(wintypes.HWND(hwnd), ctypes.byref(ps))
         return 0
+    if msg in (WM_LBUTTONDOWN, WM_LBUTTONUP) and _blocked(hwnd):
+        # A modal disables the top-level, and the system then drops real
+        # input before a control sees it. A *posted* message arrives anyway,
+        # so a control that acted on it would let a driver operate an
+        # application the user cannot touch. Standard controls check; this
+        # one checks, because a fixture that did not would quietly bless a
+        # driver that skips the check too.
+        return 0
     if msg == WM_LBUTTONDOWN:
         _STATE[("pressed", hwnd)] = True
         user32.InvalidateRect(wintypes.HWND(hwnd), None, True)
@@ -237,6 +248,24 @@ def _button_proc(hwnd, msg, wparam, lparam):
             _on_click(hwnd)
         return 0
     return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+
+def _blocked(hwnd: int) -> bool:
+    """Is any window between this one and the desktop disabled?
+
+    `IsWindowEnabled` answers for one window: with the modal up, the shell
+    reports disabled and its buttons report enabled. The chain is what
+    carries the answer.
+    """
+    seen = set()
+    current = hwnd
+    while current and current not in seen:
+        seen.add(current)
+        if not user32.IsWindowEnabled(wintypes.HWND(current)):
+            return True
+        parent = user32.GetAncestor(wintypes.HWND(current), GA_PARENT)
+        current = int(parent) if parent else 0
+    return False
 
 
 def _on_click(hwnd: int) -> None:
