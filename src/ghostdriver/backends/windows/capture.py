@@ -82,6 +82,30 @@ gdi32.BitBlt.argtypes = [
 gdi32.BitBlt.restype = wintypes.BOOL
 
 
+def _why() -> str:
+    """The OS's own account of the last failure, if it has one.
+
+    Added after a capture failed once in a full suite run and could not be
+    reproduced -- roughly fourteen hundred attempts across both the backend
+    and the tool, under the same concurrent load, all of them fine. When a
+    fault will not come back, the next best thing is to make sure the next
+    occurrence explains itself rather than costing another search.
+
+    These three calls can fail for reasons entirely outside this process:
+    desktop resource pressure, a target rendering on another thread, a
+    window torn down between the check and the call. "could not obtain a
+    device context" says none of that; error 8 (not enough memory) or 1400
+    (invalid window handle) says most of it.
+    """
+    code = ctypes.get_last_error()
+    if not code:
+        return ""
+    try:
+        return f" (win32 error {code}: {ctypes.WinError(code).strerror})"
+    except Exception:
+        return f" (win32 error {code})"
+
+
 class CaptureError(RuntimeError):
     """A capture that could not be taken, with the reason it could not."""
 
@@ -166,14 +190,19 @@ def capture_window(
 
     window_dc = user32.GetWindowDC(wintypes.HWND(hwnd))
     if not window_dc:
-        raise CaptureError("could not obtain a device context for the window")
+        raise CaptureError(
+            "could not obtain a device context for the window" + _why()
+        )
 
     memory_dc = bitmap = previous = None
     try:
         memory_dc = gdi32.CreateCompatibleDC(window_dc)
         bitmap = gdi32.CreateCompatibleBitmap(window_dc, width, height)
         if not memory_dc or not bitmap:
-            raise CaptureError("could not allocate a bitmap for the capture")
+            raise CaptureError(
+                "could not allocate a bitmap for the capture"
+                f" ({width}x{height})" + _why()
+            )
         previous = gdi32.SelectObject(memory_dc, bitmap)
 
         if not user32.PrintWindow(
@@ -187,7 +216,7 @@ def capture_window(
             ):
                 raise CaptureError(
                     "the window rendered neither through PrintWindow nor a "
-                    "device-context copy"
+                    "device-context copy" + _why()
                 )
 
         info = BITMAPINFO()
@@ -205,7 +234,9 @@ def capture_window(
             memory_dc, bitmap, 0, height, buffer,
             ctypes.byref(info), DIB_RGB_COLORS,
         ):
-            raise CaptureError("could not read the captured bitmap's pixels")
+            raise CaptureError(
+                "could not read the captured bitmap's pixels" + _why()
+            )
 
         pixels = buffer.raw
         c_left, c_top, c_right, c_bottom = crop

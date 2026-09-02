@@ -121,7 +121,25 @@ class Grant:
 #: UNC paths: a file share a target reads a certificate from is not the
 #: environment it is driving, and showing it as one is noise in the question
 #: a person is being asked.
-_URL = re.compile(r"\b([a-z][a-z0-9+.-]*)://([^\s\"']+)", re.IGNORECASE)
+#:
+#: Stopping at a comma and a semicolon as well as whitespace, because
+#: list-valued switches are common and a policy allowlist run together
+#: produced a single "endpoint" whose host was eleven hosts joined by
+#: commas. Measured across 147 window-owning processes on one machine.
+_URL = re.compile(r"\b([a-z][a-z0-9+.-]*)://([^\s\"',;]+)", re.IGNORECASE)
+
+#: Schemes that name a server a target talks to. Everything else is some
+#: other kind of URL entirely -- `chrome-extension://` identifies a loaded
+#: extension, `file://` a local path, `ms-appx://` a packaged resource --
+#: and none of them answers "which environment is this pointed at". Showing
+#: one as if it did is worse than showing nothing, because this line is what
+#: a person reads when deciding whether to allow automation.
+NETWORK_SCHEMES: frozenset[str] = frozenset({"http", "https", "ws", "wss"})
+
+#: How many endpoints to name before summarising. A browser process can
+#: carry a dozen; a consent prompt that runs off the line is one nobody
+#: reads.
+MAX_DESCRIBED = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,32 +158,61 @@ class Endpoint:
         return f"{self.scheme}://{self.host}{port}{self.path}".rstrip("/").lower()
 
 
-def extract_endpoints(command_line: list[str]) -> list[Endpoint]:
-    """Every URL-shaped argument in `command_line`, in order.
+def _plausible_host(host: str) -> bool:
+    """Whether this looks like somewhere a target could actually connect.
 
-    Best effort by design. A target that names its server some other way —
-    a DSN, a bare host:port, a config file — yields nothing here, and the
+    Cheap structural checks, not validation. What they exclude is the
+    wreckage of a mis-parse -- an empty authority, a wildcard pattern out of
+    a policy list -- rather than any host that merely looks unusual.
+    """
+    if not host or host.startswith(("*", "[")):
+        return False
+    return all(c.isalnum() or c in ".-_" for c in host)
+
+
+def extract_endpoints(command_line: list[str]) -> list[Endpoint]:
+    """Network endpoints named in `command_line`, in order, without repeats.
+
+    Best effort by design. A target that names its server some other way --
+    a DSN, a bare host:port, a config file -- yields nothing here, and the
     person deciding simply sees no endpoint rather than a wrong one.
+
+    "Rather than a wrong one" is the part that had to be earned. Measured
+    across 147 window-owning processes: 10 yielded something, and most of
+    those somethings were not endpoints at all -- extension identifiers, a
+    crash-reporting URL, a policy allowlist mangled into one host. Under R1
+    this line informs a person's consent decision, so a confident wrong
+    answer costs more than a blank.
     """
     found: list[Endpoint] = []
+    seen: set[str] = set()
     for argument in command_line:
         for match in _URL.finditer(argument):
             scheme, rest = match.group(1).lower(), match.group(2)
+            if scheme not in NETWORK_SCHEMES:
+                continue
             authority, _, path = rest.partition("/")
             host, _, port_text = authority.partition(":")
+            if not _plausible_host(host):
+                continue
             try:
                 port = int(port_text) if port_text else None
             except ValueError:
                 port = None
-            found.append(
-                Endpoint(
-                    raw=match.group(0),
-                    scheme=scheme,
-                    host=host.lower(),
-                    port=port,
-                    path=f"/{path}" if path else "",
-                )
+            endpoint = Endpoint(
+                raw=match.group(0),
+                scheme=scheme,
+                host=host.lower(),
+                port=port,
+                path=f"/{path}" if path else "",
             )
+            # The same server named twice in one command line is one
+            # server. Repeating it pads the consent line without adding
+            # anything to decide on.
+            if endpoint.normalized in seen:
+                continue
+            seen.add(endpoint.normalized)
+            found.append(endpoint)
     return found
 
 
@@ -176,11 +223,14 @@ def describe_target(name: str, pid: int, endpoints: list[Endpoint]) -> str:
     automation, so it says the two things that decide the answer: which
     application, and which environment.
     """
-    where = (
-        ", ".join(e.normalized for e in endpoints)
-        if endpoints
-        else "no endpoint found in its command line"
-    )
+    if not endpoints:
+        where = "no endpoint found in its command line"
+    else:
+        shown = [e.normalized for e in endpoints[:MAX_DESCRIBED]]
+        extra = len(endpoints) - len(shown)
+        where = ", ".join(shown)
+        if extra:
+            where += f", and {extra} more"
     return f"{name} (pid {pid}) -- {where}"
 
 

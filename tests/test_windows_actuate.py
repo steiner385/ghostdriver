@@ -894,3 +894,49 @@ def test_a_target_that_grabs_the_foreground_is_detected_not_caused():
     finally:
         stop(proc, handles)
         time.sleep(0.2)
+
+
+# --- what a posted keystroke looks like from the inside ------------------
+
+def test_a_typed_character_carries_a_real_scan_code():
+    """Keyboard messages carry the scan code of the key pressed. Everything
+    here used to send zero, which is not a value any keyboard produces --
+    a free tell for a target that inspects lParam."""
+    from ghostdriver.backends.windows.input import _key_lparam, _scan_code
+
+    scan = _scan_code("a")
+    assert scan > 0, "'a' has a key on any Latin layout"
+    assert (_key_lparam(scan) >> 16) & 0xFF == scan
+    assert _key_lparam(scan) & 0xFFFF == 1, "repeat count"
+
+
+def test_a_released_key_says_it_was_down():
+    """The previous-state and transition bits are what distinguish a
+    release from "a key changed somehow"."""
+    from ghostdriver.backends.windows.input import _key_lparam
+
+    released = _key_lparam(30, released=True)
+
+    assert (released >> 30) & 1 == 1, "previous state: down"
+    assert (released >> 31) & 1 == 1, "transition: being released"
+    assert _key_lparam(30) >> 30 == 0, "and a press says neither"
+
+
+def test_a_character_with_no_key_on_this_layout_reports_no_scan_code():
+    """The honest answer. There is no scan code for a character nobody can
+    type here, and inventing one would be worse than admitting it."""
+    from ghostdriver.backends.windows.input import _scan_code
+
+    assert _scan_code("中") == 0
+
+
+def test_shaping_the_message_did_not_change_what_arrives(app):
+    """The bits are for a target that inspects them. Anything that reads
+    the character must see exactly what it saw before."""
+    from ghostdriver.backends.windows.input import set_text_by_typing
+
+    field = find(app["pid"], "GhostFixtureBoundEdit")[0]
+    assert set_text_by_typing(field.handle, "SHAPED")
+    time.sleep(0.4)
+
+    assert reads(app["bound_mirror"])() == "committed:SHAPED"

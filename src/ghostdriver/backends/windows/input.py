@@ -32,6 +32,22 @@ person types at. Where a target looks, `cadence` puts human gaps between
 them; see `ghostdriver.cadence`. The messages are identical either way --
 only the timing changes.
 
+**And shaped as far as a posted message can be.** Keyboard messages carry
+the hardware scan code of the key pressed, and a release carries the
+previous-state and transition bits; everything here used to send zero and
+one, which is not what any keyboard produces. Measured against what Windows
+itself puts in the field, and now matched.
+
+Two parts of the gap remain, both deliberately. A real keystroke arrives as
+`WM_KEYDOWN` then `WM_CHAR` then `WM_KEYUP`; posting the triple ourselves
+double-types, because the target's own `TranslateMessage` synthesises the
+`WM_CHAR` from the `WM_KEYDOWN` -- and letting it do so makes uppercase and
+symbols depend on a shift state that cannot be set from outside the target's
+thread. And `GetAsyncKeyState` never moves for a posted message at all,
+which no amount of care at this tier can change. Both are left until there
+is a target that demonstrably inspects them, because neither can be
+validated against anything else.
+
 Nothing here moves the cursor or touches the foreground.
 """
 
@@ -79,6 +95,45 @@ user32.PostMessageW.restype = wintypes.BOOL
 user32.GetClientRect.argtypes = [wintypes.HWND,
                                  ctypes.POINTER(wintypes.RECT)]
 user32.GetClientRect.restype = wintypes.BOOL
+
+
+MAPVK_VK_TO_VSC = 0
+
+user32.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
+user32.MapVirtualKeyW.restype = wintypes.UINT
+user32.VkKeyScanW.argtypes = [wintypes.WCHAR]
+user32.VkKeyScanW.restype = ctypes.c_short
+
+
+def _scan_code(character: str) -> int:
+    """The scan code a keyboard would produce for `character`.
+
+    Real keyboard messages carry the hardware scan code of the key pressed.
+    Everything posted here carried zero, which is not a value any keyboard
+    produces -- a free tell for any target that looks, measured against what
+    Windows itself puts in the field.
+
+    Zero when the character has no key on the current layout. That is the
+    honest answer: there is no scan code for a character nobody can type,
+    and inventing one would be worse than admitting it.
+    """
+    vk = user32.VkKeyScanW(character)
+    if vk == -1:
+        return 0
+    return user32.MapVirtualKeyW(vk & 0xFF, MAPVK_VK_TO_VSC)
+
+
+def _key_lparam(scan: int, *, released: bool = False) -> int:
+    """The lParam a keyboard message carries.
+
+    Repeat count 1, the scan code, and on a release the previous-state and
+    transition bits set -- which is what says "this key was down and is now
+    coming up" rather than "a key changed somehow".
+    """
+    value = (scan << 16) | 1
+    if released:
+        value |= (1 << 30) | (1 << 31)
+    return value
 
 
 def _lparam_for_point(x: int, y: int) -> int:
@@ -153,7 +208,8 @@ def set_text_by_typing(
         if pause:
             sleep(pause)
         ok = user32.PostMessageW(
-            wintypes.HWND(hwnd), WM_CHAR, ord(character), 1
+            wintypes.HWND(hwnd), WM_CHAR, ord(character),
+            _key_lparam(_scan_code(character)),
         ) and ok
     return bool(ok)
 
@@ -185,13 +241,17 @@ def send_keys(
         lowered = key.lower()
         if lowered in NAMED_KEYS:
             code = NAMED_KEYS[lowered]
+            scan = user32.MapVirtualKeyW(code, MAPVK_VK_TO_VSC)
             ok = user32.PostMessageW(
-                wintypes.HWND(hwnd), WM_KEYDOWN, code, 1) and ok
+                wintypes.HWND(hwnd), WM_KEYDOWN, code,
+                _key_lparam(scan)) and ok
             ok = user32.PostMessageW(
-                wintypes.HWND(hwnd), WM_KEYUP, code, 1) and ok
+                wintypes.HWND(hwnd), WM_KEYUP, code,
+                _key_lparam(scan, released=True)) and ok
         elif len(key) == 1:
             ok = user32.PostMessageW(
-                wintypes.HWND(hwnd), WM_CHAR, ord(key), 1) and ok
+                wintypes.HWND(hwnd), WM_CHAR, ord(key),
+                _key_lparam(_scan_code(key))) and ok
         else:
             return False
     return bool(ok)

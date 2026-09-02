@@ -873,16 +873,12 @@ findable by searching the history for the name.
 
 ## Open, for whoever picks this up
 
-- **The denylist is enforced but unexercised.** It matches captions and
-  refuses, and is unit-tested, but nothing calls it end to end because no
-  action verb exists yet. Iteration 3 is where it first does something.
-- **A re-probe overwrites curated policy** (D3). Foreseen, not yet
-  mitigated. The fix, if it bites, is for `probe` to merge rather than
-  replace.
-- **The endpoint-extraction assumption is n=1** (D5). One real target, whose
-  client happens to put its endpoint in the command line as a URL. A target
-  that identifies its server another way extracts nothing and is refused as
-  `indeterminate` — safe, but unhelpful.
+- **The denylist matches captions and nothing else.** It is now exercised
+  end to end -- an actuation resolves, the caption is checked, and a match
+  refuses before anything is sent. What it cannot express is a control
+  identified by anything other than its caption: an unlabelled toolbar
+  button, or a grid cell. Those are exactly the controls a person would most
+  want to forbid.
 - **`capture` has no OCR behind it.** It returns pixels. Reading an
   owner-drawn grid from those pixels is Iteration 5 per the spec, and the
   spec is right that clipboard and export routes should be probed before
@@ -998,3 +994,102 @@ cannot be read with window messages, so it still belongs on that list. A
 test asserting otherwise was wrong and was corrected. What changed is that
 the list now names the mechanism for each entry rather than leaving a caller
 to infer it from a conflated label.
+
+### D42. A re-probe merges; the loader tolerates what it does not model
+
+**Closes the known cost recorded in D3.**
+
+**Why now.** D3 accepted the overwrite because the only curated field was a
+denylist someone could retype. That stopped being true once the file carried
+input-sensitivity notes: those were *measured*, and measuring one again means
+tripping the target at machine speed, which is the thing the note exists to
+prevent.
+
+**What it does.** `save` writes three layers, and the order is the policy.
+This document's defaults first, so a new file is still a full template — the
+empty curated fields are what show an operator there is something to fill in
+— and so a profile written before a field existed gains it. Then whatever is
+on disk, which is how curation and keys this code does not model survive.
+Then the observed fields, the only ones a probe is entitled to replace.
+
+It refuses a file describing a different application unless forced: the path
+is usually typed by hand, and that overwrite is not recoverable. It writes
+through a temporary file, because an interrupted probe that truncated a
+profile would leave every later session unable to attach.
+
+**Found on the way.** `ProfileDocument.load` passed every key straight to the
+constructor, so a document with one extra line could not be read at all —
+including the example this project ships, which opens with a `_comment`
+block. The merge would have made that latent bug live, since preserved
+unmodelled keys are exactly what the loader choked on. It now ignores keys it
+does not model, and `profile_id` and `matched_profile` default, because a
+hand-written policy-only profile has neither.
+
+### D43. Endpoint extraction had a precision problem, not a coverage one
+
+**Supersedes the recorded concern that the assumption was n=1.**
+
+**Measured** across 147 window-owning processes on one machine: 10 yielded
+something, and most of those were not endpoints. Extension identifiers
+(`chrome-extension://…`), a crash-reporting URL, and a policy allowlist
+mangled into a single "endpoint" whose host was eleven hosts joined by
+commas.
+
+That inverts the concern. The worry was that a target naming its server some
+other way would yield nothing. The real fault was yielding something wrong —
+and under R1 this line is what a person reads when deciding whether to allow
+automation, so a confident wrong answer costs more than a blank.
+
+**What changed.** Only network schemes count; a URL ends at a comma or
+semicolon as well as at whitespace, so list-valued switches split; hosts that
+are obviously mis-parses are dropped; repeats collapse; and `describe_target`
+names three and summarises the rest, because a consent prompt that runs off
+the line is one nobody reads. Ten hits became seven, the false ones gone and
+the genuine gateways still found.
+
+### D44. Posted keystrokes carry a real scan code
+
+**Decision.** `WM_CHAR`, `WM_KEYDOWN` and `WM_KEYUP` carry the scan code of
+the key that would produce them, and a release carries the previous-state and
+transition bits.
+
+**Reasoning.** Measured against what Windows itself puts in the field: a real
+press of `a` carries `0x001E0001` and its release `0xC01E0001`. This module
+sent `0x00000001` for everything — repeat count 1, scan code **zero**, which
+is not a value any keyboard produces. A free tell for any target that
+inspects lParam, and a one-line fix with nothing behavioural riding on it.
+Zero is still sent for a character with no key on the current layout, which
+is the honest answer rather than an invented one.
+
+**What is deliberately still missing**, with the measurement behind it:
+
+- **The message triple.** A real keystroke is `WM_KEYDOWN`, `WM_CHAR`,
+  `WM_KEYUP`. Posting all three double-types, because the target's own
+  `TranslateMessage` synthesises the `WM_CHAR` from the `WM_KEYDOWN` — and
+  letting it do so makes uppercase and symbols depend on a shift state that
+  cannot be set from outside the target's thread. Needs a hybrid and a real
+  test matrix.
+- **Physical key state.** `GetAsyncKeyState` does not move for a posted
+  message and cannot be made to. A target checking it can only be satisfied
+  at tier 4, which needs the foreground — so for that target, unattended and
+  undetected cannot both be had, and the operator has to choose.
+
+Both stay open until there is a target that demonstrably inspects them,
+because neither can be validated against anything else. That is the same
+standard the cadence work was held to.
+
+### D45. The capture flake is undiagnosed, and now self-explaining
+
+**Not a fix. A record of what was tried.**
+
+`test_capture_returns_a_png` failed once in a full-suite run and has not
+reproduced since: roughly 1,170 backend captures and 190 through the tool,
+under four threads standing fixture applications up and tearing them down to
+recreate the desktop-resource pressure of a full run. All fine.
+
+Since the fault will not come back on demand, the useful work is making the
+next occurrence pay for itself. `GetWindowDC`, `CreateCompatibleBitmap`,
+`PrintWindow`/`BitBlt` and `GetDIBits` can all fail for reasons outside this
+process, and their messages said nothing about which. They now carry the
+OS's own error. "could not obtain a device context" becomes error 8, out of
+memory, or 1400, invalid window handle — which is most of a diagnosis.
