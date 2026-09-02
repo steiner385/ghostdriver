@@ -14,10 +14,27 @@ about a single region and has to be cheap enough to ask repeatedly.
 from ...surface import RegionEvidence
 from ...model.window import WindowNode
 
-#: Depth to walk beneath a region. An embedded document announces itself
-#: within a couple of levels, and the point here is presence of structure,
-#: not an inventory of it.
-PROBE_DEPTH = 4
+#: Depth to walk beneath a region.
+#:
+#: This was 4, and 4 was wrong. An embedded browser engine wraps its
+#: document in its own view hierarchy -- root view, non-client view, frame
+#: view, browser view -- before any page content appears. Measured against a
+#: live embedded engine rendering a real page:
+#:
+#:     depth 1-5    10 elements cumulative   engine chrome
+#:     depth 6      25 cumulative            content begins
+#:     depth 7      40 cumulative
+#:     depth 11    159 cumulative
+#:
+#: At depth 4 the probe saw 7 elements, *below* the classifier's scrollbar
+#: budget, so a region full of readable, actuatable content looked as
+#: opaque as an owner-drawn grid. The class signature happened to catch it
+#: anyway, which is precisely why the shallow probe went unnoticed.
+#:
+#: 8 clears the chrome of a real engine with margin. The cost is bounded:
+#: a genuinely opaque region has nothing to walk and terminates immediately
+#: whatever this is set to, and PROBE_ELEMENTS caps the rest.
+PROBE_DEPTH = 8
 
 #: Stop after this many. Enough to clear the scrollbar budget the classifier
 #: uses by a wide margin, cheap enough to run per region.

@@ -259,3 +259,37 @@ def test_the_digest_changes_when_a_new_kind_appears():
     before = _regions(("Panel", SurfaceKind.NATIVE))
     after = before + _regions(("Host", SurfaceKind.WEB))
     assert map_digest(before) != map_digest(after)
+
+
+# --- the probe has to reach past an engine's own chrome ------------------
+
+#: Depth at which a real embedded browser engine's document content began,
+#: beneath its root view, non-client view, frame view and browser view.
+#: Measured live; anything shallower sees only the engine's own furniture.
+ENGINE_CHROME_DEPTH = 5
+
+
+def test_the_probe_reaches_past_an_engines_wrapper_views():
+    """A shallow probe reports a full document as opaque.
+
+    Measured against a live embedded engine rendering a real page: depths
+    1-5 are the engine's own view hierarchy, 10 elements in total, and
+    content only starts at depth 6. At the original probe depth of 4 the
+    walk saw 7 elements -- below the scrollbar budget -- so a region full
+    of readable, actuatable content was indistinguishable from an
+    owner-drawn grid. The browser-class signature caught it anyway, which
+    is exactly why the shallow probe went unnoticed for as long as it did.
+    """
+    from ghostdriver.backends.windows.region import PROBE_DEPTH
+
+    assert PROBE_DEPTH > ENGINE_CHROME_DEPTH, (
+        "the probe must reach past an engine's wrapper views, or regions "
+        "with real content classify as opaque"
+    )
+
+
+def test_the_element_cap_clears_the_chrome_budget():
+    """Otherwise the cap, not the evidence, decides the classification."""
+    from ghostdriver.backends.windows.region import PROBE_ELEMENTS
+
+    assert PROBE_ELEMENTS > CHROME_ELEMENT_BUDGET * 2
