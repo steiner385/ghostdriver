@@ -22,6 +22,14 @@ runs. That belongs here rather than in the discipline of whoever writes the
 test, because the person writing the test is the person who most wants it to
 pass.
 
+**Evidence, separate from the verdict.** An action reports what else
+happened while it ran -- a dialog that appeared, the application becoming
+held, the target taking the foreground. None of it changes `ok`. A dialog
+may be the application rejecting what was sent or the confirmation the
+action was meant to raise, and a result that guessed would be wrong in
+whichever direction it guessed. The caller has the context to tell them
+apart; this makes sure the caller has the observation too.
+
 Pure orchestration: the primitives are injected, so the ladder, the
 fallback and the condition logic are all testable without a desktop.
 """
@@ -31,6 +39,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Callable
 
+from .disturbance import Snapshot, compare
 from .model.result import ActionResult, ErrorKind
 
 
@@ -98,6 +107,11 @@ class Actuator:
     sleep: Callable[[float], None] = time.sleep
     now: Callable[[], float] = time.monotonic
     tiers: tuple[Tier, ...] = DEFAULT_TIERS
+    #: Takes a snapshot of everything worth comparing before and after. None
+    #: means no watching -- the pure-logic tests pass nothing, and an action
+    #: with no observer simply reports no disturbances rather than
+    #: pretending it saw none.
+    observe: Callable[[], Snapshot] | None = None
     #: Recorded so a caller can see what was skipped and why, rather than
     #: wondering why a tier it expected never ran.
     _skipped: list[str] = field(default_factory=list, repr=False)
@@ -110,6 +124,7 @@ class Actuator:
         expect_after: Condition | None = None,
     ) -> ActionResult:
         started = self.now()
+        before = self._look()
 
         if expect_before is not None and not expect_before.holds():
             # Not a failure of the action -- the action did not happen. A
@@ -119,6 +134,7 @@ class Actuator:
                 ok=False,
                 precondition_verified=False,
                 elapsed_ms=self._elapsed(started),
+                disturbances=self._changes(before),
                 error={
                     "kind": ErrorKind.NOT_ACTIONABLE.value,
                     "message": (
@@ -138,6 +154,7 @@ class Actuator:
                     True if expect_before is not None else None
                 ),
                 elapsed_ms=self._elapsed(started),
+                disturbances=self._changes(before),
                 error={
                     "kind": ErrorKind.TIER_EXHAUSTED.value,
                     "message": (
@@ -169,6 +186,7 @@ class Actuator:
                         True if expect_before is not None else None
                     ),
                     elapsed_ms=self._elapsed(started),
+                    disturbances=self._changes(before),
                 )
 
             self.sleep(self.settle_seconds)
@@ -182,6 +200,7 @@ class Actuator:
                     ),
                     postcondition_verified=True,
                     elapsed_ms=self._elapsed(started),
+                    disturbances=self._changes(before),
                 )
             # The message was delivered and nothing changed. That is the
             # signature of a tier the target ignores -- a semantic message
@@ -189,12 +208,14 @@ class Actuator:
             # the ladder rather than reporting a success nobody can see.
 
         failed_after = expect_after is not None
+        changes = self._changes(before)
         return ActionResult(
             ok=False,
             tiers_attempted=attempted,
             precondition_verified=True if expect_before is not None else None,
             postcondition_verified=False if failed_after else None,
             elapsed_ms=self._elapsed(started),
+            disturbances=changes,
             error={
                 "kind": (
                     ErrorKind.POSTCONDITION_FAILED.value if failed_after
@@ -210,6 +231,32 @@ class Actuator:
                 ),
             },
         )
+
+    def _look(self) -> Snapshot | None:
+        """The observation, or nothing if it could not be taken.
+
+        Guarded on both sides. Instrumentation must never be able to stop an
+        action from running, and an observer that throws on the way in would
+        do exactly that.
+        """
+        if self.observe is None:
+            return None
+        try:
+            return self.observe()
+        except Exception:
+            return None
+
+    def _changes(self, before: Snapshot | None) -> list[dict]:
+        """What moved while the action ran.
+
+        Failures here are swallowed on purpose: the observer is instrumen-
+        tation, and an action that actually happened must not be reported as
+        having crashed because the report about it could not be gathered.
+        """
+        after = self._look()
+        if before is None or after is None:
+            return []
+        return [d.to_dict() for d in compare(before, after)]
 
     def _elapsed(self, started: float) -> int:
         return int((self.now() - started) * 1000)

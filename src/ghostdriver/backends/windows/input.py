@@ -16,29 +16,38 @@ success and changes nothing; the input pair actuates.
 **Posted, not sent.** Real input arrives on the queue, and a target that is
 busy or showing a modal must not block the caller. `SendMessage` into a hung
 window blocks the sender too, which is how an automation run stops dead.
+There is no longer any exception: `WM_SETTEXT` was the one call here that
+had to be sent, and it is gone.
 
-The one exception is `WM_SETTEXT`, and it is not a preference. Its lParam is
-a pointer, and the system marshals a pointer across a process boundary only
-for a *sent* message. Posted, the target receives an address in our address
-space and reads whatever happens to be there -- `PostMessage` returns success
-and the control does not change. Measured cross-process against the fixture,
-which is where it surfaced: in-process it appeared to work. So that one call
-is sent, under the same hard timeout every other cross-process read here
-uses.
+**Nothing sets text programmatically.** `WM_SETTEXT` was removed rather than
+kept as a fast path. Measured, it bought about twelve milliseconds on a
+twenty-character field -- against a settle of two hundred and fifty -- while
+costing a silent split between what a control displays and what the
+application accepted. It also produces no input events at all, which is the
+most detectable thing this module could do on a target that watches for
+automation. A rung that can only tie or lose is not worth the hazard.
+
+**Typing is paced.** Posted characters land about 0.6ms apart, a rate no
+person types at. Where a target looks, `cadence` puts human gaps between
+them; see `ghostdriver.cadence`. The messages are identical either way --
+only the timing changes.
 
 Nothing here moves the cursor or touches the foreground.
 """
 
 import ctypes
+import random
+import time
 from ctypes import wintypes
+from typing import Callable
 
+from ...cadence import ROBOT, Cadence
 from . import winapi
 
 user32 = winapi.user32
 
 WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
-WM_SETTEXT = 0x000C
 WM_CHAR = 0x0102
 WM_KEYDOWN = 0x0100
 WM_KEYUP = 0x0101
@@ -47,12 +56,6 @@ EM_SETSEL = 0x00B1
 WM_CLEAR = 0x0303
 
 MK_LBUTTON = 0x0001
-
-#: How long to wait for a target to accept a `WM_SETTEXT`. Longer than a
-#: read, because this one asks the target to change something and a busy
-#: application is not the same as a hung one; short enough that a hung one
-#: costs a fifth of a second rather than the run.
-SET_TEXT_TIMEOUT_MS = 500
 
 VK_RETURN = 0x0D
 VK_TAB = 0x09
@@ -111,59 +114,74 @@ def click(hwnd: int) -> bool:
     return bool(down and up)
 
 
-def set_text_by_message(hwnd: int, text: str) -> bool:
-    """Replace a control's text with `WM_SETTEXT`.
-
-    The fast path, and the unsafe one. It replaces what the control
-    *displays* without the toolkit's keyboard path ever running, so a
-    data-bound field can end up showing one value while the application
-    still holds another. Verified against the fixture, which reproduces
-    exactly that. Never the default; offered because it is enormously
-    faster for the many controls where nothing is bound behind them.
-    """
-    buffer = ctypes.create_unicode_buffer(text)
-    # Sent, not posted, because the pointer below is only marshalled across
-    # the process boundary for a sent message -- see the module docstring.
-    # The timeout is what keeps that from being the blocking call the rest
-    # of this module avoids.
-    result = winapi.send_message_timeout(
-        hwnd, WM_SETTEXT, 0, ctypes.cast(buffer, ctypes.c_void_p).value,
-        timeout_ms=SET_TEXT_TIMEOUT_MS,
-    )
-    return result is not None
-
-
-def set_text_by_typing(hwnd: int, text: str) -> bool:
+def set_text_by_typing(
+    hwnd: int,
+    text: str,
+    *,
+    cadence: Cadence = ROBOT,
+    sleep: Callable[[float], None] = time.sleep,
+    rng: random.Random | None = None,
+) -> bool:
     """Replace a control's text one character at a time.
 
-    Slower, and correct more often. Every character travels the toolkit's
-    own keyboard path, so whatever a toolkit does on keystrokes -- validate,
-    reformat, commit to a bound field -- happens exactly as it would for a
-    person. That is why this is the default.
+    The only way this module sets text, and correct more often than any
+    programmatic alternative. Every character travels the toolkit's own
+    keyboard path, so whatever a toolkit does on keystrokes -- validate,
+    reformat, commit to a bound field, refuse past a length limit -- happens
+    exactly as it would for a person.
+
+    That last one is worth stating plainly, because it looks like a bug and
+    is not: a single-line field without ES_AUTOHSCROLL stops accepting
+    keystrokes at its visible width, so a long value arrives truncated.
+    Measured at about twenty characters on a field whose declared limit is
+    thirty thousand. Being subject to the control's input handling is the
+    same property that makes a bound value commit; a driver that widened the
+    field to get the whole string in would be changing the target to make
+    its own action succeed. Read the value back instead.
 
     Clearing first through the control's own selection messages rather than
     by sending backspaces: a field with a length limit or an input mask can
     swallow backspaces in ways that leave residue.
+
+    `cadence` spaces the characters. The default sends them as fast as the
+    queue takes them, which is roughly 0.6ms apart and unmistakably not a
+    person.
     """
     ok = user32.PostMessageW(wintypes.HWND(hwnd), EM_SETSEL, 0, -1)
     ok = user32.PostMessageW(wintypes.HWND(hwnd), WM_CLEAR, 0, 0) and ok
-    for character in text:
+    for character, pause in zip(text, cadence.delays(text, rng)):
+        if pause:
+            sleep(pause)
         ok = user32.PostMessageW(
             wintypes.HWND(hwnd), WM_CHAR, ord(character), 1
         ) and ok
     return bool(ok)
 
 
-def send_keys(hwnd: int, keys: list[str]) -> bool:
+def send_keys(
+    hwnd: int,
+    keys: list[str],
+    *,
+    cadence: Cadence = ROBOT,
+    sleep: Callable[[float], None] = time.sleep,
+    rng: random.Random | None = None,
+) -> bool:
     """Send a sequence of keystrokes.
 
     A named key goes as a down/up pair, because its meaning lives in the
     virtual-key code and a toolkit acts on the keydown. A single character
     goes as `WM_CHAR`, because that is what the system would synthesise for
     it and what a text control listens for.
+
+    Paced like typing, and for the same reason: a burst of keystrokes at
+    queue speed is as much of a tell as a burst of characters. The gaps are
+    computed over the number of keys, so a named key counts as one keystroke
+    rather than as the length of its name.
     """
     ok = True
-    for key in keys:
+    for key, pause in zip(keys, cadence.delays("k" * len(keys), rng)):
+        if pause:
+            sleep(pause)
         lowered = key.lower()
         if lowered in NAMED_KEYS:
             code = NAMED_KEYS[lowered]

@@ -35,6 +35,11 @@ class ActionResult:
     Immutable once constructed. `ok` is forced False when a declared
     postcondition did not verify. An action that cannot distinguish success
     from a no-op must not claim success (spec section 4.4).
+
+    `disturbances` never affects `ok`. A dialog appearing may be the
+    application rejecting what was typed, or the confirmation the action was
+    supposed to raise; the tool cannot tell, and a result that guessed would
+    be wrong in whichever direction it guessed.
     """
 
     ok: bool
@@ -44,6 +49,12 @@ class ActionResult:
     postcondition_verified: bool | None = None
     elapsed_ms: int = 0
     error: dict | None = None
+    #: What else happened while the action ran -- a dialog that appeared,
+    #: the application becoming held, the target taking the foreground.
+    #: Evidence, never a verdict: the postcondition says whether the action
+    #: worked, and this says what the postcondition was never going to
+    #: mention. Empty when nothing was watched or nothing changed.
+    disturbances: list[dict] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.postcondition_verified is False:

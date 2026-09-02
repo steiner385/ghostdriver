@@ -2,7 +2,8 @@
 
 from ctypes import wintypes
 
-from ...modality import TopLevel
+from ...disturbance import Snapshot
+from ...modality import TopLevel, find_modal_blocks
 from . import winapi
 from .enumerate import top_level_windows
 from .text import read_window_text
@@ -62,3 +63,31 @@ def blocking_ancestor(hwnd: int) -> int | None:
         parent = winapi.user32.GetAncestor(wintypes.HWND(current), GA_PARENT)
         current = int(parent) if parent else 0
     return None
+
+def snapshot(pid: int) -> Snapshot:
+    """What an action is compared against, for `Actuator.observe`.
+
+    Top-level windows only. A full tree walk before and after every action
+    would cost more than the action itself, and every question worth asking
+    here -- did a dialog appear, is the application held, did it come to the
+    front -- is answerable from this much.
+
+    A target that has stopped owning windows is reported as gone rather than
+    as an empty desktop, because those mean very different things to a
+    caller: one is a session that timed out, the other is a bug in this
+    function.
+    """
+    try:
+        state = top_level_state(pid)
+    except Exception:
+        return Snapshot(alive=False)
+    if not state:
+        return Snapshot(alive=False)
+
+    blocks, _ = find_modal_blocks(state)
+    return Snapshot(
+        windows={w.handle: w.text for w in state if w.visible},
+        blocked_by=tuple(b.dialog.text or "(untitled)" for b in blocks),
+        foreground=winapi.foreground_window(),
+        alive=True,
+    )

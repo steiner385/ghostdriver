@@ -5,10 +5,12 @@ ordered by the actuator rather than here. Nothing in this module decides
 whether an action worked; it decides what to try.
 
 The ordering within a verb is the interesting part, and `set_text` is where
-it matters most.
+it matters most -- including one rung that is present or absent depending on
+the cadence asked for.
 """
 
 from ...actuate import Attempt, Condition, Tier
+from ...cadence import ROBOT, Cadence
 from . import input as win_input
 from . import modality
 
@@ -27,64 +29,63 @@ def click(hwnd: int) -> list[Attempt]:
     ]
 
 
-def set_text(hwnd: int, text: str, *, fast_path: bool = False) -> list[Attempt]:
+def set_text(hwnd: int, text: str, *,
+             cadence: Cadence = ROBOT) -> list[Attempt]:
     """Replace a control's text.
 
-    **The typed sequence is the tier-3 default, and `WM_SETTEXT` is not.**
-    The spec recorded this as unverified; the fixture settles it. `WM_SETTEXT`
-    replaces what a control displays without the toolkit's keyboard path ever
-    running, so a data-bound field ends up showing one value while the
-    application still holds another -- and a caller who reads the display
-    back cannot tell. Typing traverses the same path a person's keystrokes
-    would, so whatever the toolkit does on input happens.
+    **Typing is the only way this sets text, and the ladder is short.** The
+    spec left this open; the fixture settled it. A programmatic write --
+    `WM_SETTEXT`, or a Value pattern -- replaces what a control *displays*
+    without the toolkit's keyboard path ever running, so a data-bound field
+    ends up showing one value while the application still holds another, and
+    a caller who reads the display back cannot tell. Typing traverses the
+    same path a person's keystrokes would, so whatever the toolkit does on
+    input happens.
 
-    `fast_path` offers `WM_SETTEXT` *ahead* of typing for the many controls
-    with nothing bound behind them, where it is far quicker. It is opt-in
-    because the failure it risks is silent, and a silent wrong value in a
-    field is worse than a slow correct one. Even then it is not the only
-    rung: if a postcondition checks the committed value, the fast path
-    delivers, fails verification and gives way to typing on its own.
+    **Tier 1 carries that hazard too, which is why it is conditional.**
+    Measured: the HWND-to-UIA bridge synthesises a Value pattern for
+    anything derived from a native EDIT, and `SetValue` on it splits display
+    from bound value exactly as `WM_SETTEXT` did. It stays first at robot
+    cadence because on a target that publishes a *real* Value pattern that
+    is the surface to use, and because the ladder recovers on its own when a
+    postcondition names the committed value rather than the display.
 
-    **Tier 1 carries the same hazard, and it is not opt-in.** Measured
-    against the fixture: the HWND-to-UIA bridge synthesises a Value pattern
-    for anything derived from a native EDIT, and `SetValue` on it changes
-    the display without the keyboard path running, exactly as `WM_SETTEXT`
-    does -- so a superclassed field ends up displaying one value while the
-    application holds another. It stays first because on a target that
-    publishes a real Value pattern that is the surface to use, and because
-    the ladder recovers: with a postcondition on the committed value, tier 1
-    delivers, fails verification, and typing runs behind it. Without one,
-    nothing is claimed -- `postcondition_verified` stays unset, which is the
-    result saying it does not know.
+    At any other cadence it is dropped entirely. A caller asking for human
+    pacing is saying this target watches its input, and a pattern call
+    produces *no input events at all* -- it is the most detectable thing
+    available here. Offering it first would defeat the request silently,
+    which is the one failure mode a cadence must not have.
+
+    Without a postcondition nothing is claimed either way:
+    `postcondition_verified` stays unset, which is the result saying it does
+    not know.
     """
-    typed = Attempt(Tier.WINDOW_MESSAGE,
-                    lambda: win_input.set_text_by_typing(hwnd, text))
-    if not fast_path:
-        return [
-            Attempt(Tier.UIA_PATTERN,
-                    lambda: win_input.set_value_via_uia(hwnd, text)),
-            typed,
-        ]
-    # Both live at tier 3, and the actuator runs a tier's attempts in the
-    # order given, so the fast path simply goes first.
+    typed = Attempt(
+        Tier.WINDOW_MESSAGE,
+        lambda: win_input.set_text_by_typing(hwnd, text, cadence=cadence),
+    )
+    if not cadence.is_robot:
+        return [typed]
     return [
         Attempt(Tier.UIA_PATTERN,
                 lambda: win_input.set_value_via_uia(hwnd, text)),
-        Attempt(Tier.WINDOW_MESSAGE,
-                lambda: win_input.set_text_by_message(hwnd, text)),
         typed,
     ]
 
 
-def send_keys(hwnd: int, keys: list[str]) -> list[Attempt]:
+def send_keys(hwnd: int, keys: list[str], *,
+              cadence: Cadence = ROBOT) -> list[Attempt]:
     """Send raw keystrokes.
 
     No tier 1: there is no accessibility pattern for "press these keys", and
     pretending otherwise would put a rung on the ladder that always
-    declines.
+    declines. Which also means cadence is the only thing that varies here.
     """
     return [
-        Attempt(Tier.WINDOW_MESSAGE, lambda: win_input.send_keys(hwnd, keys)),
+        Attempt(
+            Tier.WINDOW_MESSAGE,
+            lambda: win_input.send_keys(hwnd, keys, cadence=cadence),
+        ),
     ]
 
 

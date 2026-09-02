@@ -26,7 +26,7 @@ from tests.conftest import on_windows
 pytestmark = on_windows
 
 
-def start(*args):
+def start_app(*args):
     """The fixture process, and its announced handles."""
     proc = subprocess.Popen(
         [sys.executable, "-m", "tests.fixtureapp", *args],
@@ -61,7 +61,7 @@ def app():
     These tests click things and commit values, so each one gets a target
     whose state nothing else has touched.
     """
-    proc, handles = start()
+    proc, handles = start_app()
     try:
         yield handles
     finally:
@@ -236,15 +236,15 @@ def test_typing_is_the_default_and_commits_the_bound_value(app):
     assert committed() == "committed:TYPED-VALUE"
 
 
-def test_the_fast_path_delivers_without_committing_and_gives_way(app):
+def test_tier_1_delivers_without_committing_and_gives_way(app):
     """The failure that makes typing the default, and the ladder recovering
     from it.
 
-    `WM_SETTEXT` changes what the field displays while the application never
-    sees a keystroke, so the bound value does not move. The postcondition
-    asks about the committed value rather than the display, the fast path
-    fails verification, and typing runs behind it -- which is the fall-
-    through doing the exact job it exists for, on a real target.
+    The bridge-synthesised Value pattern writes the control's text while the
+    application never sees a keystroke, so the bound value does not move.
+    The postcondition asks about the committed value rather than the
+    display, tier 1 fails verification, and typing runs behind it -- the
+    fall-through doing the exact job it exists for, on a real target.
     """
     from ghostdriver.actuate import Actuator, Condition
     from ghostdriver.backends.windows import verbs
@@ -253,25 +253,27 @@ def test_the_fast_path_delivers_without_committing_and_gives_way(app):
     committed = reads(app["bound_mirror"])
 
     result = Actuator().perform(
-        verbs.set_text(field.handle, "FASTPATH", fast_path=True),
-        expect_after=Condition(lambda: "FASTPATH" in committed(),
+        verbs.set_text(field.handle, "RESCUED"),
+        expect_after=Condition(lambda: "RESCUED" in committed(),
                                "the bound value was committed"),
     )
 
     assert result.ok, result.error
-    assert committed() == "committed:FASTPATH", "typing rescued it"
+    assert result.tiers_attempted == [1, 3], "tier 1 was tried and gave way"
+    assert result.tier_used == 3
+    assert committed() == "committed:RESCUED", "typing rescued it"
 
 
 def test_reading_the_display_back_would_have_reported_a_false_pass(app):
     """Why a postcondition has to name the thing that matters.
 
-    The same fast path, verified against the display, reports success --
+    The same tier-1 write, verified against the display, reports success --
     while the application still holds the old value. This is the false pass
     the design exists to prevent, and nothing but choosing the right
     expectation prevents it.
     """
     from ghostdriver.actuate import Actuator, Attempt, Condition, Tier
-    from ghostdriver.backends.windows.input import set_text_by_message
+    from ghostdriver.backends.windows.input import set_value_via_uia
 
     field = find(app["pid"], "GhostFixtureBoundEdit")[0]
     display = reads(field.handle)
@@ -279,8 +281,8 @@ def test_reading_the_display_back_would_have_reported_a_false_pass(app):
     before = committed()
 
     result = Actuator().perform(
-        [Attempt(Tier.WINDOW_MESSAGE,
-                 lambda: set_text_by_message(field.handle, "DISPLAY-ONLY"))],
+        [Attempt(Tier.UIA_PATTERN,
+                 lambda: set_value_via_uia(field.handle, "DISPLAY-ONLY"))],
         expect_after=Condition(lambda: display() == "DISPLAY-ONLY",
                                "the field shows the new text"),
     )
@@ -314,13 +316,15 @@ def test_a_field_with_nothing_bound_behind_it_is_answered_at_tier_1(app):
     assert result.tiers_attempted == [1]
 
 
-def test_tier_1_carries_the_same_hazard_as_the_fast_path(app):
+def test_a_programmatic_write_does_not_commit_a_bound_value(app):
     """The finding that makes the postcondition non-optional here.
 
     A bridge-synthesised Value pattern is not the toolkit's own surface: it
     writes the control's text and the keyboard path never runs, so the
-    binding does not move. Measured, and asserted rather than assumed --
-    the same silent split as `WM_SETTEXT`, one rung higher and not opt-in.
+    binding does not move. Measured, and asserted rather than assumed. This
+    is why `WM_SETTEXT` was deleted rather than kept as a fast path: the
+    hazard was never specific to it, and the ladder now has exactly one rung
+    that can commit a value.
     """
     from ghostdriver.backends.windows.input import set_value_via_uia
 
@@ -357,6 +361,230 @@ def test_send_keys_reaches_the_binding_the_same_way_typing_does(app):
     assert result.ok, result.error
 
 
+# --- disturbances: what else happened -----------------------------------
+
+def watching(pid):
+    """An actuator that reports what moved around its action."""
+    from ghostdriver.actuate import Actuator
+    from ghostdriver.backends.windows.modality import snapshot
+
+    return Actuator(observe=lambda: snapshot(pid))
+
+
+def test_a_quiet_action_reports_no_disturbances(app):
+    """Silence has to mean something, so an ordinary click must not
+    manufacture noise."""
+    from ghostdriver.actuate import Condition
+    from ghostdriver.backends.windows import verbs
+
+    button = find(app["pid"], "GhostFixtureCommandButton", "Expand All")[0]
+    status = reads(app["status"])
+    before = status()
+
+    result = watching(app["pid"]).perform(
+        verbs.click(button.handle),
+        expect_after=Condition(lambda: status() != before, "status changed"),
+    )
+
+    assert result.ok, result.error
+    assert result.disturbances == []
+
+
+def test_a_dialog_that_appears_during_an_action_is_reported():
+    """The case this exists for.
+
+    The action succeeds on its own terms -- its postcondition holds -- and a
+    modal appears while it runs. Nothing the postcondition declares would
+    ever mention it, so without this the caller sees a clean success and
+    walks into a held application on the next call.
+
+    The action is deliberately a slow one. A human-paced field takes over a
+    second to type, which puts the fixture's timed modal squarely inside it
+    rather than racing a settle.
+    """
+    from ghostdriver.actuate import Condition
+    from ghostdriver.backends.windows import verbs
+    from ghostdriver.cadence import FAST_HUMAN
+    from ghostdriver.disturbance import Change
+
+    proc, handles = start_app("--modal-after", "1200")
+    try:
+        field = find(handles["pid"], "GhostFixturePlainEdit")[0]
+        display = reads(field.handle)
+
+        result = watching(handles["pid"]).perform(
+            verbs.set_text(field.handle, "TYPED SLOWLY", cadence=FAST_HUMAN),
+            expect_after=Condition(lambda: display() == "TYPED SLOWLY",
+                                   "the field shows the new text"),
+        )
+
+        assert result.ok, result.error
+        assert result.postcondition_verified is True, "the action worked"
+
+        reported = {d["change"] for d in result.disturbances}
+        assert reported & {Change.BLOCKED.value,
+                           Change.WINDOW_APPEARED.value}, result.disturbances
+        assert any("Confirm Delete Record" in d["detail"]
+                   for d in result.disturbances), result.disturbances
+    finally:
+        stop(proc, handles)
+
+
+def test_a_failed_action_carries_its_evidence(app):
+    """A bare failure sends a caller guessing; a failure with what changed
+    around it is something they can act on."""
+    from ghostdriver.actuate import Condition
+    from ghostdriver.backends.windows import verbs
+
+    button = find(app["pid"], "GhostFixtureCommandButton", "Apply")[0]
+
+    result = watching(app["pid"]).perform(
+        verbs.click(button.handle),
+        expect_after=Condition(lambda: False, "something that never happens"),
+    )
+
+    assert not result.ok
+    assert result.disturbances == [], "nothing moved, and it says so"
+
+
+def test_an_observer_that_fails_does_not_fail_the_action(app):
+    """Instrumentation must not be able to report a real action as a crash."""
+    from ghostdriver.actuate import Actuator
+    from ghostdriver.backends.windows import verbs
+
+    def broken():
+        raise OSError("the observer is having a bad day")
+
+    button = find(app["pid"], "GhostFixtureCommandButton", "Expand All")[0]
+    result = Actuator(observe=broken).perform(verbs.click(button.handle))
+
+    assert result.ok
+    assert result.disturbances == []
+
+
+def test_a_target_that_went_away_is_reported_as_gone():
+    """A session that times out and closes looks exactly like this, and it
+    is the one disturbance a caller can do nothing else about."""
+    from ghostdriver.backends.windows import verbs
+    from ghostdriver.disturbance import Change
+
+    proc, handles = start_app()
+    button = find(handles["pid"], "GhostFixtureCommandButton",
+                  "Expand All")[0]
+    observer = watching(handles["pid"])
+
+    stop(proc, handles)
+    time.sleep(0.4)
+
+    result = observer.perform(verbs.click(button.handle))
+
+    assert [d["change"] for d in result.disturbances] == [
+        Change.TARGET_GONE.value
+    ]
+
+
+# --- cadence -------------------------------------------------------------
+
+def test_human_cadence_actually_spaces_the_keystrokes(app):
+    """The pacing is arithmetic in `test_cadence.py`; this is the part that
+    can only be checked against a live target.
+
+    The primitive rather than the actuator, deliberately. Timing the two
+    cadences through the ladder compares a robot run that pays the settle
+    twice -- tier 1 delivers, fails, typing follows -- against a human run
+    that pays it once, and the difference measured would be mostly settle.
+    Here nothing but the gaps varies.
+    """
+    from ghostdriver.backends.windows.input import set_text_by_typing
+    from ghostdriver.cadence import FAST_HUMAN, ROBOT
+
+    field = find(app["pid"], "GhostFixturePlainEdit")[0]
+    value = "ABCDEFGHIJ"  # ten characters, so nine gaps
+
+    started = time.perf_counter()
+    assert set_text_by_typing(field.handle, value, cadence=ROBOT)
+    robot_ms = (time.perf_counter() - started) * 1000
+
+    started = time.perf_counter()
+    assert set_text_by_typing(field.handle, value, cadence=FAST_HUMAN)
+    human_ms = (time.perf_counter() - started) * 1000
+
+    assert robot_ms < 50, f"queue speed, got {robot_ms:.0f}ms"
+    # Nine gaps averaging 80ms, jitter either side. Bounded on both sides:
+    # too fast means the pacing never happened, too slow means something
+    # other than the cadence is sleeping.
+    assert 450 < human_ms < 1200, f"got {human_ms:.0f}ms"
+    assert human_ms > robot_ms * 10
+
+
+def test_a_human_cadence_drops_the_tier_that_sends_no_input(app):
+    """The rung that would defeat the request, silently.
+
+    A caller asking for human pacing is saying this target watches its
+    input. A pattern call produces no input events at all, so offering it
+    first would satisfy the action and defeat the reason for asking.
+    """
+    from ghostdriver.actuate import Actuator, Condition
+    from ghostdriver.backends.windows import verbs
+    from ghostdriver.cadence import FAST_HUMAN, ROBOT
+
+    field = find(app["pid"], "GhostFixturePlainEdit")[0]
+    display = reads(field.handle)
+
+    robot = Actuator().perform(
+        verbs.set_text(field.handle, "VIA-PATTERN", cadence=ROBOT),
+        expect_after=Condition(lambda: display() == "VIA-PATTERN", "shown"),
+    )
+    assert robot.tiers_attempted == [1], "unbound, so tier 1 answers it"
+
+    human = Actuator().perform(
+        verbs.set_text(field.handle, "VIA-KEYS", cadence=FAST_HUMAN),
+        expect_after=Condition(lambda: display() == "VIA-KEYS", "shown"),
+    )
+    assert human.ok, human.error
+    assert human.tiers_attempted == [3], "typed, and only typed"
+
+
+def test_send_keys_is_paced_too(app):
+    """A burst of keystrokes at queue speed is as much of a tell as a burst
+    of characters."""
+    from ghostdriver.actuate import Actuator
+    from ghostdriver.backends.windows import verbs
+    from ghostdriver.cadence import FAST_HUMAN
+
+    field = find(app["pid"], "GhostFixtureBoundEdit")[0]
+    keys = ["a", "b", "c", "d", "e", "f"]
+
+    started = time.perf_counter()
+    result = Actuator().perform(
+        verbs.send_keys(field.handle, keys, cadence=FAST_HUMAN)
+    )
+    elapsed_ms = (time.perf_counter() - started) * 1000
+
+    assert result.ok
+    assert elapsed_ms > 250, f"five gaps at ~80ms, got {elapsed_ms:.0f}ms"
+
+
+def test_pacing_does_not_change_what_arrives(app):
+    """The messages are identical either way; only the timing differs. If a
+    cadence changed the result, it would be a second code path rather than
+    the same one at a different speed."""
+    from ghostdriver.backends.windows.input import set_text_by_typing
+    from ghostdriver.cadence import FAST_HUMAN, ROBOT
+
+    field = find(app["pid"], "GhostFixtureBoundEdit")[0]
+
+    assert set_text_by_typing(field.handle, "SAME", cadence=ROBOT)
+    time.sleep(0.4)
+    fast = reads(app["bound_mirror"])()
+
+    assert set_text_by_typing(field.handle, "SAME", cadence=FAST_HUMAN)
+    time.sleep(0.4)
+    paced = reads(app["bound_mirror"])()
+
+    assert fast == paced == "committed:SAME"
+
+
 # --- induced failure: a modal mid-run (spec section 10, item 7) ----------
 
 def test_a_modal_blocks_actuation_and_names_what_is_holding_the_app():
@@ -373,7 +601,7 @@ def test_a_modal_blocks_actuation_and_names_what_is_holding_the_app():
     from ghostdriver.model.result import ErrorKind
     from ghostdriver.modality import find_modal_blocks
 
-    proc, handles = start("--modal-after", "300")
+    proc, handles = start_app("--modal-after", "300")
     try:
         time.sleep(0.6)
         blocks, _ = find_modal_blocks(top_level_state(handles["pid"]))
@@ -409,7 +637,7 @@ def test_the_control_itself_reports_enabled_while_the_shell_is_held():
     from ghostdriver.backends.windows import winapi
     from ghostdriver.backends.windows.modality import blocking_ancestor
 
-    proc, handles = start("--modal-after", "300")
+    proc, handles = start_app("--modal-after", "300")
     try:
         time.sleep(0.6)
         button = find(handles["pid"], "GhostFixtureCommandButton",
@@ -437,7 +665,7 @@ def test_without_the_precondition_a_posted_click_is_still_refused():
     from ghostdriver.backends.windows import verbs
     from ghostdriver.model.result import ErrorKind
 
-    proc, handles = start("--modal-after", "300")
+    proc, handles = start_app("--modal-after", "300")
     try:
         time.sleep(0.6)
         button = find(handles["pid"], "GhostFixtureCommandButton",
@@ -468,7 +696,7 @@ def test_the_precondition_holds_again_once_the_modal_is_dismissed():
     from ghostdriver.backends.windows import verbs
     from ghostdriver.backends.windows.input import click as post_click
 
-    proc, handles = start("--modal-after", "300")
+    proc, handles = start_app("--modal-after", "300")
     try:
         time.sleep(0.6)
         button = find(handles["pid"], "GhostFixtureCommandButton",
@@ -504,7 +732,7 @@ def test_the_read_model_reports_a_blocked_control_as_unactionable():
     from ghostdriver.model.window import select_main_tree
     from ghostdriver.tools import _element
 
-    proc, handles = start("--modal-after", "300")
+    proc, handles = start_app("--modal-after", "300")
     try:
         time.sleep(0.6)
         tree = select_main_tree(enumerate_process(handles["pid"]))
@@ -528,7 +756,7 @@ def test_waiting_for_enabled_does_not_return_on_a_blocked_control():
     from ghostdriver.model.window import select_main_tree
     from ghostdriver.wait import Condition, holds
 
-    proc, handles = start("--modal-after", "300")
+    proc, handles = start_app("--modal-after", "300")
     try:
         time.sleep(0.6)
         tree = select_main_tree(enumerate_process(handles["pid"]))
@@ -561,19 +789,19 @@ def test_typing_stops_where_the_control_stops_accepting_it(app):
     """The other half of the `set_text` trade, measured.
 
     A single-line field without ES_AUTOHSCROLL stops accepting keystrokes at
-    the visible width -- around twenty characters here -- while `WM_SETTEXT`
-    writes the whole string, because the programmatic path is not subject to
-    the control's input handling. So the two paths are wrong in opposite
-    directions: the fast path sets a value the application never accepted,
-    and typing sets only as much as the control would take.
+    the visible width -- around twenty characters here -- while a
+    programmatic write puts in all eighty, because it is not subject to the
+    control's input handling at all. So the two are wrong in opposite
+    directions: the programmatic path sets a value the application never
+    accepted, and typing sets only as much as the control would take.
 
     Left as it is, deliberately. Typing is faithful precisely *because* it
     is subject to whatever the control does to input, and a driver that
     widened the field or raised its limit to get the whole string in would
     be changing the target to make its own test pass.
     """
-    from ghostdriver.backends.windows.input import (set_text_by_message,
-                                                    set_text_by_typing)
+    from ghostdriver.backends.windows.input import (set_text_by_typing,
+                                                    set_value_via_uia)
 
     field = find(app["pid"], "GhostFixtureBoundEdit")[0]
     display = reads(field.handle)
@@ -585,7 +813,7 @@ def test_typing_stops_where_the_control_stops_accepting_it(app):
     assert typed and long_value.startswith(typed), "a prefix, silently"
     assert len(typed) < len(long_value)
 
-    assert set_text_by_message(field.handle, long_value)
+    assert set_value_via_uia(field.handle, long_value)
     time.sleep(0.3)
     assert display() == long_value, "the programmatic path is not limited"
 
@@ -644,7 +872,7 @@ def test_a_target_that_grabs_the_foreground_is_detected_not_caused():
     from ghostdriver.backends.windows import verbs
     from ghostdriver.backends.windows.winapi import foreground_window
 
-    proc, handles = start("--onscreen", "--grab-foreground-after", "200")
+    proc, handles = start_app("--onscreen", "--grab-foreground-after", "200")
     try:
         before_fg = foreground_window()
         before_cursor = cursor()
