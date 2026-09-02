@@ -26,7 +26,13 @@ SIGNATURES: list[tuple[str, tuple[str, ...]]] = [
     ("delphi-vcl", ("vcl*.bpl", "rtl*.bpl", "borlndmm.dll", "midas.dll")),
     ("powerbuilder", ("pbvm*.dll", "libpb*.dll")),
     ("vb6", ("msvbvm60.dll", "msvbvm50.dll")),
-    ("mfc", ("mfc*.dll",)),
+    # Version-numbered deliberately. `mfc*.dll` also matches `mfcore.dll`,
+    # which is Windows Media Foundation Core and no relation -- and Media
+    # Foundation is loaded by anything that touches audio or video, so the
+    # loose pattern mislabelled a large share of ordinary applications as
+    # MFC, at medium confidence. Every real MFC runtime carries its version
+    # (mfc140.dll, mfc42u.dll).
+    ("mfc", ("mfc[0-9]*.dll",)),
     ("dotnet", ("mscoree.dll", "clr.dll", "coreclr.dll")),
     ("java", ("jvm.dll", "awt.dll", "jawt.dll")),
     ("qt", ("qt5core.dll", "qt6core.dll")),

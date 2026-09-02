@@ -170,3 +170,23 @@ def test_no_evidence_at_all_stays_unknown():
 
     assert result.toolkit == "unknown"
     assert result.source == "none"
+
+
+def test_media_foundation_is_not_mistaken_for_mfc():
+    """`mfc*.dll` matched `mfcore.dll`, which is Media Foundation Core.
+
+    Found by sweeping live applications: Explorer came back as MFC at
+    medium confidence on the strength of it. Media Foundation is loaded by
+    anything touching audio or video, so the loose pattern mislabelled a
+    large share of ordinary programs.
+    """
+    for innocent in ("mfcore.dll", "mfplat.dll", "mfreadwrite.dll", "mf.dll"):
+        result = infer_toolkit([rf"C:\Windows\System32\{innocent}"])
+        assert result.toolkit != "mfc", innocent
+
+
+def test_real_mfc_runtimes_are_still_matched():
+    """The narrowed pattern has to keep catching what it was written for."""
+    for genuine in ("mfc140.dll", "mfc140u.dll", "mfc42.dll", "mfc42u.dll"):
+        result = infer_toolkit([rf"C:\app\{genuine}"])
+        assert result.toolkit == "mfc", genuine
