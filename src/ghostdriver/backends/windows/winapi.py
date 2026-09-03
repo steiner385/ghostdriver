@@ -42,6 +42,12 @@ WS_MINIMIZE = 0x20000000
 # non-interfering driver must not cause.
 SW_SHOWNOACTIVATE = 4
 
+# Minimizes a window *without* activating whatever is behind it. Plain
+# SW_MINIMIZE activates the next window in Z-order, which on a shared
+# desktop is whatever the person was using -- the watchdog putting the
+# target away must not shuffle their windows to do it.
+SW_SHOWMINNOACTIVE = 7
+
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
 WNDENUMPROC = ctypes.WINFUNCTYPE(
@@ -141,6 +147,11 @@ def foreground_window() -> int:
 def show_no_activate(hwnd: int) -> None:
     """Restore `hwnd` from minimized without giving it the foreground."""
     user32.ShowWindow(wintypes.HWND(hwnd), SW_SHOWNOACTIVATE)
+
+
+def minimize_no_activate(hwnd: int) -> None:
+    """Minimize `hwnd` without activating whatever sits behind it."""
+    user32.ShowWindow(wintypes.HWND(hwnd), SW_SHOWMINNOACTIVE)
 
 
 def window_pid(hwnd: int) -> int:

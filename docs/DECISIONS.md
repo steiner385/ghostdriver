@@ -871,6 +871,55 @@ Rewriting published commits was judged not worth it for a private repository
 against a partial remedy; if that judgement changes, the two commits are
 findable by searching the history for the name.
 
+### D49. The `minimized` isolation strategy and its watchdog
+
+**Decision.** A session may run under `minimized`: the target is kept
+minimized, and if a window of it comes on screen the watchdog captures that
+window and puts the target back, emitting an event. Policy lives in
+`ghostdriver.isolation` (pure, injected clock); sampling, capture and the
+no-activate minimize live in the Windows backend.
+
+**The watchdog is the feature** (spec 7.2). A background application that
+suddenly shows a window is almost always raising a modal -- an error, a
+confirmation, a timeout -- and that is information no assertion would have
+caught. The screenshot is the product; re-minimizing is housekeeping.
+
+Four things only a real window taught, each a wrong model corrected:
+
+- **Quiet is "nothing on screen", not "minimized and not foreground".**
+  Minimizing without activating anything else leaves the minimized window
+  still owning the foreground handle, so a put-away target reads as
+  foreground. The first model never saw quiet and never established a
+  baseline.
+- **On screen is asked of every top-level window, not the main one.** The
+  escape that matters is a modal raised as a *new* window while the main
+  window stays minimized; watching only the main window's flag would miss
+  exactly the case the strategy exists for.
+- **The capture must photograph the on-screen window, not the main handle.**
+  The main window is minimized when the modal appears; capturing it would
+  fail. The backend finds the visible window and shoots that.
+- **A grab via `SetForegroundWindow` was the wrong fixture scenario.**
+  Measured: a background process calling it on its own minimized window does
+  not un-minimize it -- Windows restricts the call -- so nothing comes on
+  screen. The realistic escape is a raised window, which the fixture's
+  `--modal-after` produces.
+
+**An escape reports how long since the target was last seen quiet, and that
+is not the action-to-grab latency.** Under continuous polling it is about
+one poll interval. The grab *delay* an operator wants for `focus_behavior`
+is measured sparsely from a known action, which is phase 2's job. The field
+was documented to over-claim that; corrected.
+
+**Losing gracefully.** A modal the watchdog cannot dismiss keeps the target
+on screen. Rather than re-minimizing every poll forever, the watchdog caps
+its actions in a window and then only observes, reporting that it stood
+down. Both "can't establish quiet" and "keeps fighting back" take that path.
+
+**Gate.** The whole of iteration 4 is met: a view-only control on a real
+Profile L1 target actuated through the full stack (D48), and the watchdog
+catches and re-minimizes a real self-raised window, cursor undisturbed. The
+grab-delay half of `focus_behavior` is phase 2's, measured there.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised
