@@ -310,7 +310,10 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "name=) resolve on the accessibility surface, where tab items, "
         "toolbar buttons and menu entries live without a window of their "
         "own -- e.g. type=TabItem, or type=MenuItem index=1 "
-        "within=(class=ToolbarWindow32) for an unlabelled button."
+        "within=(class=ToolbarWindow32) for an unlabelled button. A context "
+        "menu (class #32768, all_windows=true) lists its items from the "
+        "menu itself: type=MenuItem name=\"Copy row values\", or index=N "
+        "for an owner-drawn item that publishes no caption."
     ))
     def find(session_id: SessionId, locator: LocatorArg,
              all_windows: AllWindows = False) -> dict[str, Any]:
@@ -324,6 +327,16 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     def read(session_id: SessionId, locator: LocatorArg,
              all_windows: AllWindows = False) -> dict[str, Any]:
         return box.read(session_id, locator, all_windows=all_windows)
+
+    @server.tool(annotations=READS, description=(
+        "The text on the clipboard: the result of a target's own Copy "
+        "command, such as a grid's 'Copy row values' -- on an owner-drawn "
+        "grid, the one exact read there is. Interactive tier, because the "
+        "clipboard is the person's too: read it straight after the copy "
+        "you triggered."
+    ))
+    def read_clipboard(session_id: SessionId) -> dict[str, Any]:
+        return box.read_clipboard(session_id)
 
     @server.tool(annotations=READS, description=(
         "A picture of the target window, or of one element or region, "
@@ -345,8 +358,12 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "Screen rectangle {left, top, right, bottom}, as returned by "
             "`find` or `surfaces`."
         ))] = None,
+        save_as: Annotated[str | None, Field(description=(
+            "Also keep the PNG on disk under the operator directory's "
+            "captures/ folder, by this file name; the result says where."
+        ))] = None,
     ) -> CallToolResult:
-        result = box.capture(session_id, locator=locator, region=region)
+        result = box.capture(session_id, locator=locator, region=region, save_as=save_as)
         if not result.get("ok"):
             return CallToolResult(
                 content=[TextContent(
@@ -383,7 +400,10 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         session_id: SessionId,
         locator: LocatorArg,
         condition: Annotated[str, Field(description="Default present.")] = "present",
-        timeout_s: Annotated[float, Field(description="Seconds.")] = 10.0,
+        timeout_s: Annotated[float, Field(description=(
+            "Seconds; default 10, up to 300. A screen that takes forty "
+            "seconds to fill is one sixty-second wait, not four short ones."
+        ))] = 10.0,
         all_windows: AllWindows = False,
     ) -> dict[str, Any]:
         return box.wait_for(session_id, locator, condition=condition,
@@ -453,8 +473,10 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "Click one control: a window, or an element that is not one -- a "
         "tab item, a toolbar button -- named by type=/name= (see find). An "
         "element is driven through the pattern it publishes, else by a "
-        "click posted to its host window at its own rectangle. The locator "
-        "must match exactly one element -- "
+        "click posted to its host window at its own rectangle; `at` aims "
+        "the click at a point inside it (a grid row, a column header, a "
+        "tree expander) and `button`/`count` make it a right- or double-"
+        "click. The locator must match exactly one element -- "
         "ambiguity is refused rather than guessed at. Refuses to act while "
         "a modal dialog holds the application, and reports anything else "
         "that changed around the click, such as a dialog it raised."

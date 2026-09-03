@@ -5,6 +5,7 @@ recycled by the OS and go void when a process exits, so resolution always
 happens against a freshly enumerated tree (spec section 4.2).
 """
 
+import re
 import shlex
 from dataclasses import asdict, dataclass
 
@@ -96,6 +97,14 @@ class Locator:
             raise ValueError("within=() is empty; name the ancestor")
         return expr[:start] + expr[index + 1:], cls.parse(inner)
 
+    #: `key=/a regex with spaces/`, unquoted. A slash-delimited value is one
+    #: token to a person writing it, so it is one token here (D65).
+    _REGEX_VALUE = re.compile(r"(?<![\w\"'])([a-z_]+)=(/(?:\\.|[^/\\])*/)")
+
+    @classmethod
+    def _quote_regexes(cls, expr: str) -> str:
+        return cls._REGEX_VALUE.sub(lambda m: f'{m.group(1)}="{m.group(2)}"', expr)
+
     @classmethod
     def parse(cls, expr: str) -> "Locator":
         """Parse `class=X text="y" visible=false index=0`.
@@ -118,7 +127,7 @@ class Locator:
         fields: dict[str, object] = {}
         if scope is not None:
             fields["within"] = scope
-        for token in shlex.split(expr):
+        for token in shlex.split(cls._quote_regexes(expr)):
             if "=" not in token:
                 raise ValueError(
                     f"malformed locator token: {token!r}. A value containing "

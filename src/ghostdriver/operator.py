@@ -109,6 +109,10 @@ class OperatorDir:
     def reports(self) -> Path:
         return self.root / "reports"
 
+    @property
+    def captures(self) -> Path:
+        return self.root / "captures"
+
     def ensure(self) -> None:
         for folder in (self.profiles, self.workflows, self.reports):
             folder.mkdir(parents=True, exist_ok=True)
@@ -159,3 +163,22 @@ def profile_location(name_or_path: str) -> str:
         except OperatorDirError:
             pass  # a misconfigured directory falls back to the literal path
     return name_or_path
+
+
+def save_capture(name: str, png: bytes) -> Path:
+    """Keep a capture under the operator directory's captures/ folder.
+
+    A bare file name, never a path: the folder is the operator's and the
+    name is all a caller chooses. Returns where it went (D65).
+    """
+    if not name or any(sep in name for sep in ("/", "\\")) or name in (".", ".."):
+        raise ValueError("save_as is a file name, not a path; the file goes under "
+                         "the operator directory's captures/ folder")
+    if not os.environ.get(ENV_VAR):
+        raise ValueError(f"saving needs an operator directory ({ENV_VAR}); the "
+                         "image is still returned inline")
+    folder = OperatorDir.resolve().captures
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / (name if name.lower().endswith(".png") else f"{name}.png")
+    path.write_bytes(png)
+    return path

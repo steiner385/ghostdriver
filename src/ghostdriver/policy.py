@@ -60,6 +60,11 @@ TIER_TOOLS: dict[Tier, frozenset[str]] = {
     }),
     Tier.INTERACTIVE: frozenset({
         "click", "type_text", "set_value", "send_keys",
+        # Reads the system clipboard: the result of a target's own Copy
+        # command, which on some targets is the only exact read a grid has.
+        # Interactive rather than read-only because the clipboard is the
+        # person's as much as the target's.
+        "read_clipboard",
         # Curation rather than actuation, but it belongs to this tier: the
         # evidence it writes can only be produced by a session that acted.
         "record_input_sensitivity",
@@ -91,6 +96,16 @@ def tools_for(tier: Tier) -> frozenset[str]:
 
 def permits(tier: Tier, tool: str) -> bool:
     return tool in tools_for(tier)
+
+
+def tier_for(tool: str) -> Tier | None:
+    """The lowest tier at which `tool` is permitted; None for no such tool.
+    A refusal that names it is one round trip shorter than one that does
+    not (D65)."""
+    for tier in (Tier.READ_ONLY, Tier.INTERACTIVE, Tier.FULL):
+        if tool in TIER_TOOLS[tier]:
+            return tier
+    return None
 
 
 # --- consent -------------------------------------------------------------
@@ -127,13 +142,17 @@ class Grant:
     #: was restricted after it opened needs to say by which decision, and
     #: one server can be serving several chats at once (D64).
     at: float = field(default_factory=time.time)
+    #: Read back from the consent store: made in an earlier server run about
+    #: a process that is still running (R1a).
+    restored: bool = False
 
     def describe(self) -> str:
         verdict = "allowed" if self.allowed else "restricted"
         detail = f" ({self.note})" if self.note else ""
         via = (f"via pid {self.inherited_from}, its parent" if self.inherited_from
                else f"via {self.source.value}")
-        return f"pid {self.pid} {verdict} {via}{detail}"
+        kept = " [kept from an earlier server run]" if self.restored else ""
+        return f"pid {self.pid} {verdict} {via}{detail}{kept}"
 
     def when(self) -> str:
         return time.strftime("%H:%M:%S", time.localtime(self.at))

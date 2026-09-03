@@ -110,6 +110,18 @@ delivered. `send_keys` takes the editing actions `select-all`, `paste`,
 control, since a posted keystroke carries no modifier state. `capture`
 renders the window that holds what you named, and says its frame.
 
+**Consent lasts as long as the application.** With an operator directory
+configured, a decision about a target is kept for as long as that process
+runs -- across relaunches of the operator app and redeploys of this server
+-- in `consent/` under the directory, fingerprinted by process start time.
+A restriction is kept the same way. Without an operator directory a
+decision lives for one server run.
+
+**Context menus are readable.** A popup menu's items come from the menu
+itself: `find` lists them with rectangles and captions, an owner-drawn
+item by position, and `click` takes either. `read_clipboard` reads back
+what a target's own Copy command put there.
+
 **One server, several chats.** The operator app runs one server process
 for every chat, so approvals and restrictions are shared across them. A
 restriction recorded in one chat stops that target's sessions in all of

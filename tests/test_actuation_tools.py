@@ -456,7 +456,7 @@ def test_a_mistyped_expectation_says_so_instead_of_failing_the_action(box, app):
     result = box.click(
         session, 'class=GhostFixtureCommandButton text="Expand All"',
         # An unquoted regex: shlex splits it and `last=Apply/` is not a key.
-        expect={"locator": 'class=Static text=/clicks=1 last=Apply/'},
+        expect={"locator": 'class=Static text=clicks=1 last=Apply'},
     )
 
     assert not result["ok"]

@@ -118,3 +118,40 @@ def describe(event: dict) -> str:
     if event.get("error_message"):
         extra += f"  -- {event['error_message'][:160]}"
     return f"{when} {session} {tool:<24} {outcome:<22} {elapsed or 0:>6}ms  {shown[:200]}{extra}"
+
+
+def lost_session_hint(session_id: str) -> str | None:
+    """What the trace knows about a session id nobody has open.
+
+    A server restart takes its sessions with it and the next call is the
+    first anyone hears of it. The trace outlives the server, so the call
+    can at least be told which run opened the session, against what, and
+    how to open another one (D65).
+    """
+    from .operator import ENV_VAR, OperatorDir, OperatorDirError
+
+    if not os.environ.get(ENV_VAR):
+        return None
+    try:
+        logs = OperatorDir.resolve().root / "logs"
+    except OperatorDirError:
+        return None
+    files = sorted(logs.glob("ghostdriver-*.jsonl"), key=lambda f: f.stat().st_mtime,
+                   reverse=True)
+    for path in files:
+        for event in read(path, session_id=session_id):
+            if event.get("tool") != "attach" or not event.get("ok"):
+                continue
+            args = event.get("args") or {}
+            when = time.strftime("%H:%M:%S", time.localtime(event.get("at", 0)))
+            pid, tier = args.get("pid"), args.get("tier")
+            if path.name.endswith(f"-{os.getpid()}.jsonl"):
+                return (f"session {session_id!r} was opened at {when} by this server "
+                        f"run against pid {pid} and is no longer open: released, or "
+                        "its target gone")
+            return (f"session {session_id!r} was opened at {when} by an earlier "
+                    f"server run (trace {path.name}) against pid {pid} at tier "
+                    f"{tier!r}; that server is gone and its sessions with it. "
+                    f"attach(pid={pid}, tier={tier!r}) opens a new one; the "
+                    "approval is kept while that process lives")
+    return None

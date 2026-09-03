@@ -1813,6 +1813,88 @@ target can read the two grids' blocks side by side.
 emptying the grid.** Target knowledge; recorded in the operator's notes
 for that target, not here.
 
+### D65. The third field report: consent that lasts as long as the application, menus read from the menu, the clipboard read back
+
+**Context.** Around a hundred and twenty calls against the target in one
+session, two session losses, one hand-off to a person that turned out
+not to be needed. Eight items; taken in cost order, and one of them
+revises a rule.
+
+**R1a: a decision about a target is kept for as long as that process
+runs.** R1 said approvals die with the session, meaning the server run.
+In the field the server run is shorter than the work: the operator app
+relaunches, this server is redeployed, and each time the person was
+asked again about an application that had not changed, and a session
+found out only on its next call. What the person approved was *that
+application, running*. So, when an operator directory is configured,
+each decision is kept there -- one small file per pid, carrying the
+process start time as the fingerprint, since a pid is reused and a pid
+with the same start time is the same process -- and a new server run
+reads back every decision whose process is still the one it was about.
+Restrictions are kept the same way. Inherited decisions are not kept:
+they follow from their ancestor's, which is. Without an operator
+directory nothing changes. The trace also outlives the server, so a
+call on a session id nobody has open is now told which run opened it,
+against what, and how to open another one, rather than "attach first".
+
+**`at` was there and the session did not know.** The first session's
+server predated the aimed click; the re-attached one had it. The tool
+description now names `at`, `button` and `count` in its first
+sentences, not only in the parameter list.
+
+**Address-bar `set_value` cleared the field.** A field with an
+autocomplete or history list takes the clear and then the list takes the
+keystrokes. Not reproduced on the fixture; what changed is the failure:
+when the field reads back empty, the error says the clear took and the
+text did not, names any window that appeared while typing, and says to
+click then `type_text`, which does not clear first. Unproven text, said
+so.
+
+**Context menus were opaque.** `find` returned nothing for a `#32768`
+window's items and the session clicked "Copy row values" by an offset
+measured off a screenshot. The items of a popup menu are not windows
+and, when the application draws them itself, not on the accessibility
+surface either; but the menu handle answers for all of them. The window
+is asked for its menu (`MN_GETHMENU`), and the menu for each item's
+rectangle, state and caption. Menu items are elements now: `type=MenuItem
+name="Copy row values"` clicks the captioned one, `type=MenuItem index=1
+within=(class=#32768)` the one drawn by the application, whose caption
+stays with it (its automation id says `owner-drawn`). Separators are a
+type of their own, so indexes count the items a person sees. Proven on
+the fixture with a menu of a string item, a separator and an owner-drawn
+item. Whether the target's own menus keep a caption in the menu is the
+next session's to read off the result.
+
+**The clipboard read.** A target's own Copy command is the one exact
+read some grids have, and the tool could trigger it and not read it.
+`read_clipboard` reads text, at the interactive tier -- the clipboard is
+the person's as much as the target's -- and its result says to read
+straight after the copy and not to keep it. The backend contract gained
+`read_clipboard_text`; the Linux table has its row.
+
+**A capture can be kept; a wait can be long.** `capture` takes
+`save_as`, a bare file name, and writes under the operator directory's
+`captures/`; a path is refused, and the image is returned inline either
+way. `wait_for` accepts up to 300 seconds and says what it used: a
+screen that takes forty seconds to fill is one wait, not four.
+
+**A regex with a space is one token.** `text=/Work Order/` used to be
+split by the shell-style tokenizer and refused. A slash-delimited value
+is one token to the person writing it, so it is quoted before the split;
+the quoting hint remains for other values with spaces.
+
+**Two small ones.** A tool refused for its tier now names the tier that
+permits it and how to attach at it. And every result with rectangles
+says the display scale when there is one: this server is not DPI-aware,
+so at 125% it sees a 1920-wide screen as 1536 wide, and a screenshot
+from a DPI-aware tool is in physical pixels; the session converted by
+hand once. The number is measured from the display mode, which is not
+virtualized, and the note says which frame every offset in this tool
+uses. Making the server DPI-aware instead would put its rectangles in
+physical pixels while an unaware target still takes client coordinates
+in its own logical ones -- a conversion at every posted click, deferred
+until a target needs it.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised
@@ -1833,6 +1915,8 @@ for that target, not here.
 ## Revision, 2026-09-02
 
 ### R1. Target selection is interactive and session-scoped, not configured
+
+*R1a (D65): with an operator directory configured, a decision is kept for as long as the process it is about runs, across server runs. The session is still the unit of work; the application is the unit of consent.*
 
 **Supersedes D3, D5, D6, D7.**
 

@@ -115,7 +115,7 @@ def _result_summary(result):
             "isolation", "released", "blocked", "left_minimized", "needs_consent",
             "total", "waited_ms", "expected", "button", "modifiers", "at", "count",
             "route", "grid_strategy", "sample_lines", "written", "focus",
-            "open_sessions_stopped")
+            "open_sessions_stopped", "length", "empty", "saved_to", "timeout_s")
     return {k: result[k] for k in keep if k in result}
 
 

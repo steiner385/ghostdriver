@@ -17,6 +17,10 @@ from .core import (
 )
 from .guidance import BLOCKED_HINT
 
+#: The longest one wait_for call will wait. A screen that takes forty
+#: seconds to fill is one sixty-second wait, not four ten-second ones.
+MAX_WAIT_S = 300.0
+
 
 class DiscoveryTools(_ToolboxCore):
     """Seeing the target: its tree, single elements, text, pixels, and waiting on it."""
@@ -111,6 +115,7 @@ class DiscoveryTools(_ToolboxCore):
             "locator": locator,
             "match_count": len(matches),
             "frame": "screen",
+            **self._frame_note(),
             "elements": [_element(n) for n in matches[:MAX_ELEMENTS]],
             "searched": "every top-level window" if all_windows
                         else "the main window only",
@@ -200,6 +205,7 @@ class DiscoveryTools(_ToolboxCore):
         *,
         locator: str | None = None,
         region: dict | None = None,
+        save_as: str | None = None,
     ) -> dict:
         """A PNG of the target's window, or of one region of it."""
         try:
@@ -288,6 +294,15 @@ class DiscoveryTools(_ToolboxCore):
                       min(crop[2], right), min(crop[3], bottom))
             if inside != tuple(crop):
                 result["clipped_to_window"] = True
+        result.update(self._frame_note())
+        if save_as is not None:
+            from ..operator import save_capture
+
+            try:
+                result["saved_to"] = str(save_capture(save_as, png))
+            except (OSError, ValueError) as exc:
+                result["saved_to"] = None
+                result["save_error"] = str(exc)
         return result
 
     def wait_for(
@@ -316,6 +331,7 @@ class DiscoveryTools(_ToolboxCore):
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, str(exc), locator=locator)
 
+        timeout_s = min(float(timeout_s), MAX_WAIT_S)
         result = wait_for(
             lambda: self._resolve(session, locator, all_windows),
             wanted,
@@ -324,6 +340,7 @@ class DiscoveryTools(_ToolboxCore):
         payload = {
             "ok": result.ok,
             "locator": locator,
+            "timeout_s": timeout_s,
             "condition": result.condition.value,
             "polls": result.polls,
             "elapsed_ms": result.elapsed_ms,

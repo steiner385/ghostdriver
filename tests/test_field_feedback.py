@@ -216,12 +216,15 @@ def test_attach_says_the_target_is_minimized_and_names_restore(app):
 
 def test_an_unquoted_regex_with_spaces_is_told_how_to_quote():
     with pytest.raises(ValueError, match="must be quoted"):
-        Locator.parse("text=/.*Release Packages.*/")
+        Locator.parse("text=Release Packages")  # a slash-delimited regex is one token now (D65)
 
 
-def test_consent_required_mentions_that_a_restart_forgets(app):
-    box = Toolbox(SessionManager())
+def test_consent_required_says_how_long_an_approval_is_kept(app):
+    from ghostdriver.consent import ConsentStore
+
+    box = Toolbox(SessionManager(store=ConsentStore(None)))
 
     result = box.attach(app["pid"])
 
-    assert result["needs_consent"] and "restarted" in result["error"]["message"]
+    assert result["needs_consent"]
+    assert "kept while the target process lives" in result["error"]["message"]

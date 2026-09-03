@@ -123,6 +123,27 @@ class _ToolboxCore:
     #: environment on first use, and a no-op when nothing is configured.
     _trace: Any = None
 
+    def _frame_note(self) -> dict:
+        """The display scale, and what to do with it, for results that carry
+        rectangles. Empty at 100%, where there is nothing to convert."""
+        from ..backends import current
+
+        try:
+            scale = current().winapi.display_scale()
+        except Exception:
+            return {}
+        if scale == 1.0:
+            return {}
+        return {
+            "display_scale": scale,
+            "coordinates": (
+                f"logical pixels at 96 dpi, as this server sees the screen; a "
+                f"screenshot from a DPI-aware tool is in physical pixels, "
+                f"{scale} times larger. Rectangles here, `at` offsets and "
+                "`region` all use this frame; do not convert between them"
+            ),
+        }
+
     def _tracer(self):
         if self._trace is None:
             from ..trace import Trace

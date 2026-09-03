@@ -213,6 +213,17 @@ class ActuationTools(_ActingCore):
                 "and then pasting were both tried; a target that drops typed "
                 "characters is worth recording with record_input_sensitivity"
             )
+            if shown == "" and wanted:
+                appeared = [d.get("class") or d.get("kind") for d in result.disturbances
+                            if isinstance(d, dict)]
+                seen = f" (a window appeared while typing: {appeared[:3]})" if appeared else ""
+                reported["error"]["message"] += (
+                    ". The field is now EMPTY: the clear took and the text did "
+                    f"not{seen}. A field with an autocomplete or history list "
+                    "often behaves so, the list taking the keystrokes. Try click "
+                    "then type_text, which does not clear first, and check with "
+                    "read"
+                )
         if commit is None and result.ok:
             reported["unverified"] = (
                 "the field displays this value; whether the application "

@@ -13,6 +13,33 @@ from .guidance import BLOCKED_HINT, PIXELS_HINT
 class StatusTools(_ToolboxCore):
     """The target's state at a glance -- profile, surfaces, modals -- and putting its windows back."""
 
+    def read_clipboard(self, session_id: str) -> dict:
+        """The text on the clipboard, for the result of a target's own Copy.
+
+        "Copy row values" is the single most useful read some grids have,
+        and this tool could trigger it and not read it (D65). The clipboard
+        is the person's as much as the target's, so this is interactive
+        tier, reads text only, and says to read straight after the copy.
+        """
+        try:
+            session = self.sessions.authorize(session_id, "read_clipboard")
+        except GhostdriverError as exc:
+            return _error(exc.kind, exc.message)
+        from ..backends import current
+
+        text = session.run(lambda: current().read_clipboard_text())
+        return {
+            "ok": True,
+            "text": text,
+            "length": len(text or ""),
+            "empty": not text,
+            "caution": (
+                "the clipboard is shared with the person: what is here may be "
+                "theirs, and the target's next copy replaces it. Read it right "
+                "after the copy you triggered, and do not keep it"
+            ),
+        }
+
     def probe(self, session_id: str) -> dict:
         try:
             session = self.sessions.authorize(session_id, "probe")

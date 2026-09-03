@@ -51,6 +51,7 @@ _WHERE: dict[str, str | None] = {
     "region_evidence": "region", "resolve_hosted_app": "hosted",
     "assess_uia": "uia", "assess_msaa": "msaa",
     "verbs": None, "NAMED_KEYS": "input", "EDIT_ACTIONS": "input", "button_pair": "input",
+    "read_clipboard_text": "grid",
     "copy_route": "grid", "focus_route": "grid",
     "MinimizedWatch": "isolate", "WatchError": "isolate",
     "HiddenDesktop": "hidden_desktop", "InterferenceWatch": "interference",

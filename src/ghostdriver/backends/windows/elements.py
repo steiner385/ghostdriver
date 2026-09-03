@@ -118,6 +118,8 @@ def walk_elements(
     itself a window is returned -- a Button with a handle is as much an
     element as a TabItem without one -- with that handle as its host.
     """
+    if node.class_name == winapi.POPUP_MENU_CLASS:
+        return _menu_elements(node)
     try:
         UIA, iuia = _uia()
         root = iuia.ElementFromHandle(wintypes.HWND(node.handle))
@@ -168,12 +170,51 @@ def walk_elements(
     return out
 
 
+def _menu_elements(node: WindowNode) -> list[tuple[AccessibleElement, tuple[AccessibleElement, ...]]]:
+    """A popup menu's items, from the menu handle rather than the
+    accessibility surface, which an owner-drawn menu keeps empty (D65).
+
+    Separators are elements of their own type, so `type=MenuItem index=N`
+    counts the items a person would. An owner-drawn item has no name; its
+    automation id says so, and its position is its identity.
+    """
+    out: list[tuple[AccessibleElement, tuple[AccessibleElement, ...]]] = []
+    menu_index = 0
+    separator_index = 0
+    for item in winapi.popup_menu_items(node.handle):
+        if item["separator"]:
+            separator_index += 1
+            control_type, sibling = "Separator", separator_index
+        else:
+            menu_index += 1
+            control_type, sibling = "MenuItem", menu_index
+        out.append((AccessibleElement(
+            runtime_id=(node.handle, item["index"]),
+            control_type=control_type,
+            name=item["text"],
+            automation_id="owner-drawn" if item["owner_drawn"] else "",
+            class_name=node.class_name,
+            rect=item["rect"],
+            enabled=item["enabled"],
+            offscreen=False,
+            patterns=(),
+            host_handle=node.handle,
+            host_class=node.class_name,
+            sibling_index=sibling,
+            pid=node.pid,
+        ), ()))
+    return out
+
+
 def _live(element: AccessibleElement):
     """The COM element for `element`, found again by runtime id under its host.
 
     Re-walked rather than held: a COM pointer from an earlier walk may be
     stale, and the runtime id is the identity UIA itself uses.
     """
+    if element.class_name == winapi.POPUP_MENU_CLASS:
+        raise ElementError("a menu item has no accessibility surface; it is "
+                           "clicked at its rectangle")
     UIA, iuia = _uia()
     root = iuia.ElementFromHandle(wintypes.HWND(element.host_handle))
     if not root:

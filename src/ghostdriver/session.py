@@ -23,9 +23,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .consent import ConsentStore
 from .ledger import Ledger
 from .model.result import ErrorKind, GhostdriverError
-from .policy import ConsentSource, Grant, Tier, denied, permits
+from .policy import ConsentSource, Grant, Tier, denied, permits, tier_for
 from .sensitivity import Sensitivity
 
 
@@ -182,10 +183,17 @@ class SessionManager:
     processes.
     """
 
-    def __init__(self, parent_of: Callable[[int], int | None] = _psutil_parent) -> None:
+    def __init__(self, parent_of: Callable[[int], int | None] = _psutil_parent,
+                 store: ConsentStore | None = None) -> None:
         self._sessions: dict[str, Session] = {}
         self._grants: dict[int, Grant] = {}
         self._parent_of = parent_of
+        # Decisions kept for the life of their process, when an operator
+        # directory is configured (R1a): a server restart is not a reason
+        # to ask the person again about an application that has not changed.
+        self._store = store if store is not None else ConsentStore.from_environment()
+        for kept in self._store.load():
+            self._grants[kept.pid] = kept
         # Approval to *launch* a command, keyed by the command itself --
         # there is no pid to key on until after the launch. Separate from
         # pid grants because launching is a distinct authority from driving
@@ -215,6 +223,7 @@ class SessionManager:
         """
         grant = Grant(pid=pid, allowed=allowed, source=source, note=note)
         self._grants[pid] = grant
+        self._store.save(grant)
         return grant
 
     def grant_for(self, pid: int, *,
@@ -297,9 +306,10 @@ class SessionManager:
                 pid,
                 f"pid {pid} has not been approved for automation in this "
                 "session. Ask the operator which targets to allow, then "
-                "record the answer with grant_targets. (Approvals live for "
-                "one server run; if the server restarted since the operator "
-                "approved this target, that is why it is being asked again.)",
+                "record the answer with grant_targets. (With an operator "
+                "directory configured, approvals are kept while the target "
+                "process lives, across server restarts; without one they "
+                "live for one server run.)",
             )
         if not grant.allowed:
             note = f" ({grant.note})" if grant.note else ""
@@ -324,9 +334,13 @@ class SessionManager:
     def get(self, session_id: str) -> Session:
         session = self._sessions.get(session_id)
         if session is None:
+            from .trace import lost_session_hint
+
+            hint = lost_session_hint(session_id)
             raise GhostdriverError(
                 ErrorKind.NOT_FOUND,
-                f"no open session {session_id!r}; attach first",
+                f"no open session {session_id!r}; attach first"
+                + (f". {hint}" if hint else ""),
             )
         return session
 
@@ -346,9 +360,12 @@ class SessionManager:
         """The gate. Returns the session, or raises saying which rule failed."""
         session = self.get(session_id)
         if not permits(session.tier, tool):
+            needed = tier_for(tool)
             raise GhostdriverError(
                 ErrorKind.DENIED_BY_POLICY,
-                f"{tool!r} is not permitted at tier {session.tier.value!r}",
+                f"{tool!r} is not permitted at tier {session.tier.value!r}"
+                + (f"; it needs tier {needed.value!r} -- attach with "
+                   f"tier={needed.value!r}" if needed else ""),
             )
         # Consent can be withdrawn mid-session, and an open session must not
         # outlive it. Checked here rather than only at attach, so revoking a

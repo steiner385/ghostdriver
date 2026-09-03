@@ -35,6 +35,14 @@ from ctypes import wintypes
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 user32.GetActiveWindow.restype = wintypes.HWND
+user32.CreatePopupMenu.restype = wintypes.HMENU
+user32.AppendMenuW.argtypes = [wintypes.HMENU, wintypes.UINT, ctypes.c_size_t, wintypes.LPCWSTR]
+user32.AppendMenuW.restype = wintypes.BOOL
+user32.TrackPopupMenu.argtypes = [wintypes.HMENU, wintypes.UINT, ctypes.c_int, ctypes.c_int,
+                                  ctypes.c_int, wintypes.HWND, ctypes.c_void_p]
+user32.TrackPopupMenu.restype = wintypes.BOOL
+user32.DestroyMenu.argtypes = [wintypes.HMENU]
+user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
 user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
 user32.GetAncestor.restype = wintypes.HWND
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
@@ -83,6 +91,15 @@ I_IMAGENONE = -2
 ICC_BAR_CLASSES = 0x0004
 ICC_TAB_CLASSES = 0x0008
 TOOL_COMMANDS = {201: "tool-first", 202: "tool-second", 203: "tool-third"}
+#: The grid's context menu: a string item, a separator, an owner-drawn item
+#: whose caption lives only in the application (D65).
+MENU_COMMANDS = {301: "menu=Copy row values", 302: "menu=owner-drawn"}
+WM_MEASUREITEM = 0x002C
+WM_DRAWITEM = 0x002B
+MF_STRING = 0x0000
+MF_SEPARATOR = 0x0800
+MF_OWNERDRAW = 0x0100
+TPM_LEFTALIGN = 0x0000
 WM_COPY = 0x0301
 WM_USER = 0x0400
 
@@ -417,6 +434,39 @@ def _put_text_on_clipboard(text: str) -> None:
         user32.CloseClipboard()
 
 
+class MEASUREITEMSTRUCT(ctypes.Structure):
+    _fields_ = [("CtlType", wintypes.UINT), ("CtlID", wintypes.UINT),
+                ("itemID", wintypes.UINT), ("itemWidth", wintypes.UINT),
+                ("itemHeight", wintypes.UINT), ("itemData", ctypes.c_size_t)]
+
+
+class DRAWITEMSTRUCT(ctypes.Structure):
+    _fields_ = [("CtlType", wintypes.UINT), ("CtlID", wintypes.UINT),
+                ("itemID", wintypes.UINT), ("itemAction", wintypes.UINT),
+                ("itemState", wintypes.UINT), ("hwndItem", wintypes.HWND),
+                ("hDC", wintypes.HDC), ("rcItem", wintypes.RECT),
+                ("itemData", ctypes.c_size_t)]
+
+
+def _show_context_menu(hwnd, x, y) -> None:
+    """A right-click on the grid opens its menu: a `#32768` window whose
+    items are not windows, one of them drawn by the application (D65).
+
+    TrackPopupMenu runs its own message loop here, on the grid's thread,
+    and returns when the menu closes; the chosen command arrives at the
+    owner as WM_COMMAND. Nothing is activated: a popup menu is shown, not
+    given the foreground."""
+    menu = user32.CreatePopupMenu()
+    user32.AppendMenuW(menu, MF_STRING, 301, "Copy row values")
+    user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
+    user32.AppendMenuW(menu, MF_OWNERDRAW, 302, None)
+    point = wintypes.POINT(x, y)
+    user32.ClientToScreen(wintypes.HWND(hwnd), ctypes.byref(point))
+    user32.TrackPopupMenu(menu, TPM_LEFTALIGN, point.x, point.y, 0,
+                          wintypes.HWND(_STATE["main"]), None)
+    user32.DestroyMenu(menu)
+
+
 def _grid_proc(hwnd, msg, wparam, lparam):
     """Owner-drawn: real content, zero child windows, no text anywhere.
 
@@ -454,6 +504,8 @@ def _grid_proc(hwnd, msg, wparam, lparam):
             return 0
         _on_click(hwnd, button=BUTTON_UP.get(msg, "left"), modifiers=[],
                   caption=f"grid row={row}")
+        if msg == WM_RBUTTONUP:
+            _show_context_menu(hwnd, lparam & 0xFFFF, y)
         return 0
     if msg == WM_COPY and _STATE.get("grid_copies", True):
         # Section 10 item 3, the other half: an owner-drawn grid that will
@@ -588,6 +640,23 @@ def _main_proc(hwnd, msg, wparam, lparam):
                                            TCM_GETCURSEL, 0, 0)
             _show_page(int(selected))
             return 0
+    if msg == WM_MEASUREITEM:
+        measure = ctypes.cast(lparam, ctypes.POINTER(MEASUREITEMSTRUCT)).contents
+        measure.itemWidth, measure.itemHeight = 140, 22
+        return 1
+    if msg == WM_DRAWITEM:
+        draw = ctypes.cast(lparam, ctypes.POINTER(DRAWITEMSTRUCT)).contents
+        gdi32.SetBkMode(draw.hDC, 1)
+        text = "Refresh (owner-drawn)"
+        gdi32.TextOutW(draw.hDC, draw.rcItem.left + 8, draw.rcItem.top + 4, text, len(text))
+        return 1
+    if msg == WM_COMMAND and (wparam & 0xFFFF) in MENU_COMMANDS:
+        _STATE["clicks"] = _STATE.get("clicks", 0) + 1
+        name = MENU_COMMANDS[wparam & 0xFFFF]
+        _STATE["last_clicked"] = name
+        user32.SetWindowTextW(wintypes.HWND(_STATE["status"]),
+                              f"clicks={_STATE['clicks']} last={name}")
+        return 0
     if msg == WM_COMMAND and (wparam & 0xFFFF) in TOOL_COMMANDS:
         # A toolbar button: no window of its own, no caption. The click is
         # recorded by command name so a test can tell which one it was.

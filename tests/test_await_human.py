@@ -153,7 +153,7 @@ def test_a_mistyped_condition_says_so_rather_than_timing_out(box, app):
 
     result = box.await_human(
         session, "Sign in.",
-        until={"locator": "class=Static text=/unquoted regex here/"},
+        until={"locator": "class=Static text=unquoted regex here"},
         timeout_s=30,
     )
 

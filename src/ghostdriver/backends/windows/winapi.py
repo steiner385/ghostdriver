@@ -84,6 +84,8 @@ user32.ShowWindow.restype = wintypes.BOOL
 user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.GetWindowLongW.restype = ctypes.c_long
 
+user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+user32.GetSystemMetrics.restype = ctypes.c_int
 user32.GetForegroundWindow.argtypes = []
 user32.GetForegroundWindow.restype = wintypes.HWND
 
@@ -239,3 +241,106 @@ kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
 kernel32.Process32FirstW.restype = wintypes.BOOL
 kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
 kernel32.Process32NextW.restype = wintypes.BOOL
+
+
+class DEVMODEW(ctypes.Structure):
+    _fields_ = [
+        ("dmDeviceName", wintypes.WCHAR * 32), ("dmSpecVersion", wintypes.WORD),
+        ("dmDriverVersion", wintypes.WORD), ("dmSize", wintypes.WORD),
+        ("dmDriverExtra", wintypes.WORD), ("dmFields", wintypes.DWORD),
+        ("dmPositionX", ctypes.c_long), ("dmPositionY", ctypes.c_long),
+        ("dmDisplayOrientation", wintypes.DWORD), ("dmDisplayFixedOutput", wintypes.DWORD),
+        ("dmColor", ctypes.c_short), ("dmDuplex", ctypes.c_short),
+        ("dmYResolution", ctypes.c_short), ("dmTTOption", ctypes.c_short),
+        ("dmCollate", ctypes.c_short), ("dmFormName", wintypes.WCHAR * 32),
+        ("dmLogPixels", wintypes.WORD), ("dmBitsPerPel", wintypes.DWORD),
+        ("dmPelsWidth", wintypes.DWORD), ("dmPelsHeight", wintypes.DWORD),
+        ("dmDisplayFlags", wintypes.DWORD), ("dmDisplayFrequency", wintypes.DWORD),
+        ("dmICMMethod", wintypes.DWORD), ("dmICMIntent", wintypes.DWORD),
+        ("dmMediaType", wintypes.DWORD), ("dmDitherType", wintypes.DWORD),
+        ("dmReserved1", wintypes.DWORD), ("dmReserved2", wintypes.DWORD),
+        ("dmPanningWidth", wintypes.DWORD), ("dmPanningHeight", wintypes.DWORD),
+    ]
+
+
+user32.EnumDisplaySettingsW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD,
+                                        ctypes.POINTER(DEVMODEW)]
+user32.EnumDisplaySettingsW.restype = wintypes.BOOL
+ENUM_CURRENT_SETTINGS = 0xFFFFFFFF
+SM_CXSCREEN = 0
+
+
+def display_scale() -> float:
+    """Physical pixels per pixel of the frame this process sees, on the
+    primary display.
+
+    A process that is not DPI-aware sees a display scaled to 96 dpi -- at
+    125% a 1920-wide screen is 1536 wide -- while a screenshot from a
+    DPI-aware tool is in physical pixels. A session converted between the
+    two by hand once; the number belongs in the result (D65). The display
+    mode is not virtualized, so the ratio is readable from any process.
+    """
+    mode = DEVMODEW()
+    mode.dmSize = ctypes.sizeof(DEVMODEW)
+    logical = user32.GetSystemMetrics(SM_CXSCREEN)
+    if not logical or not user32.EnumDisplaySettingsW(None, ENUM_CURRENT_SETTINGS,
+                                                       ctypes.byref(mode)):
+        return 1.0
+    if not mode.dmPelsWidth:
+        return 1.0
+    return round(mode.dmPelsWidth / logical, 3)
+
+
+#: Asked of a `#32768` window: the HMENU it is showing.
+MN_GETHMENU = 0x01E1
+MF_BYPOSITION = 0x0400
+MF_SEPARATOR = 0x0800
+MF_OWNERDRAW = 0x0100
+MF_DISABLED_OR_GRAYED = 0x0003
+POPUP_MENU_CLASS = "#32768"
+
+user32.GetMenuItemCount.argtypes = [wintypes.HMENU]
+user32.GetMenuItemCount.restype = ctypes.c_int
+user32.GetMenuStringW.argtypes = [wintypes.HMENU, wintypes.UINT, wintypes.LPWSTR,
+                                  ctypes.c_int, wintypes.UINT]
+user32.GetMenuStringW.restype = ctypes.c_int
+user32.GetMenuState.argtypes = [wintypes.HMENU, wintypes.UINT, wintypes.UINT]
+user32.GetMenuState.restype = wintypes.UINT
+user32.GetMenuItemRect.argtypes = [wintypes.HWND, wintypes.HMENU, wintypes.UINT,
+                                   ctypes.POINTER(wintypes.RECT)]
+user32.GetMenuItemRect.restype = wintypes.BOOL
+
+
+def popup_menu_items(hwnd: int, *, timeout_ms: int = 500) -> list[dict]:
+    """The items of the popup menu window `hwnd` shows, read from the menu.
+
+    A context menu is a `#32768` window whose items are not windows and,
+    when the application draws them itself, not on the accessibility
+    surface either -- a session clicked one by an offset measured off a
+    screenshot (D65). The menu handle answers for all of them: count,
+    rectangle on screen, and the text of any item that has one. An
+    owner-drawn item has a rectangle and no text; the application keeps
+    its caption to itself.
+    """
+    handle = send_message_timeout(hwnd, MN_GETHMENU, 0, 0, timeout_ms=timeout_ms)
+    if not handle:
+        return []
+    hmenu = wintypes.HMENU(handle)
+    count = user32.GetMenuItemCount(hmenu)
+    items: list[dict] = []
+    for index in range(max(count, 0)):
+        state = user32.GetMenuState(hmenu, index, MF_BYPOSITION)
+        rect = wintypes.RECT()
+        if not user32.GetMenuItemRect(wintypes.HWND(hwnd), hmenu, index, ctypes.byref(rect)):
+            continue
+        buf = ctypes.create_unicode_buffer(256)
+        user32.GetMenuStringW(hmenu, index, buf, 256, MF_BYPOSITION)
+        items.append({
+            "index": index,
+            "text": buf.value.replace("&", ""),
+            "rect": (rect.left, rect.top, rect.right, rect.bottom),
+            "separator": bool(state & MF_SEPARATOR),
+            "owner_drawn": bool(state & MF_OWNERDRAW),
+            "enabled": not (state & MF_DISABLED_OR_GRAYED),
+        })
+    return items
