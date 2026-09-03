@@ -53,6 +53,9 @@ TIER_TOOLS: dict[Tier, frozenset[str]] = {
         # to act; this only ever asks, and the ask is shown to them as
         # written.
         "await_human",
+        # Recording a launch decision is consent bookkeeping, like
+        # grant_targets -- available at every tier.
+        "grant_launch",
     }),
     Tier.INTERACTIVE: frozenset({
         "click", "type_text", "set_value", "send_keys",
@@ -60,7 +63,13 @@ TIER_TOOLS: dict[Tier, frozenset[str]] = {
         # evidence it writes can only be produced by a session that acted.
         "record_input_sensitivity",
     }),
-    Tier.FULL: frozenset({"probe_phase2", "probe_grid"}),
+    Tier.FULL: frozenset({
+        "probe_phase2", "probe_grid",
+        # Launching a process is the widest authority the tool has, so it
+        # sits at the top tier even though the session it opens may be
+        # read-only.
+        "launch_isolated",
+    }),
 }
 
 

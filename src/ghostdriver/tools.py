@@ -21,7 +21,8 @@ Everything that can return many rows caps them and says what it capped.
 
 import base64
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+import uuid
 from typing import Any
 
 from .model.locator import Locator
@@ -98,6 +99,10 @@ class Toolbox:
     """Every tool, over one session manager."""
 
     sessions: SessionManager
+    #: Hidden desktops this toolbox launched, by session id. Held here
+    #: rather than on the platform-neutral Session so that layer stays free
+    #: of Windows objects. Torn down when the session is released.
+    _desktops: dict = field(default_factory=dict)
 
     # --- lifecycle -------------------------------------------------------
 
@@ -257,7 +262,7 @@ class Toolbox:
         # profile that quietly describes a title bar. Judged on the window
         # this session will actually read, not on the process, and it names
         # the application inside so the caller gets a pid to attach to.
-        selected = self._trees(session.pid, all_windows=False)
+        selected = self._trees(session, all_windows=False)
         if selected and is_frame_host(selected[0].class_name):
             from .backends.windows.hosted import resolve_hosted_app
 
@@ -277,19 +282,111 @@ class Toolbox:
                 summary["hosted_application_pid"] = found.pid
         # Said at attach because it changes what every later call means: a
         # target with nothing on screen answers every read with nothing.
-        summary["blocked"] = self._blocking(session.pid)
+        summary["blocked"] = self._blocking(session)
         return summary
 
     def release(self, session_id: str) -> dict:
         self.sessions.release(session_id)
+        desktop = self._desktops.pop(session_id, None)
+        if desktop is not None:
+            # Its target was launched onto a hidden desktop and is invisible;
+            # a stranded process there is especially easy to leak, so
+            # teardown terminates it and closes the desktop.
+            desktop.teardown()
         return {"ok": True, "released": session_id}
+
+    def launch_isolated(
+        self,
+        command: list[str],
+        *,
+        tier: str = "read_only",
+    ) -> dict:
+        """Launch a target onto a hidden desktop and open a session on it.
+
+        The only way to get a hidden-desktop session: the strategy is
+        launch-only, because a window's desktop is fixed when it is created
+        and a running target cannot be moved to one. So this is also the
+        tool\'s one process-launching path, and it is gated the way R1 gates
+        automation -- nothing launches until the operator has approved this
+        exact command. An unapproved command comes back needs_consent naming
+        it; the agent asks, and the operator records the answer with
+        grant_launch. Consent is on the command and lasts the session.
+
+        The guarantee is structural: the target has no foreground to steal
+        because it is not on the input desktop. That is also its cost --
+        nobody can see or interact with it, so a target needing interactive
+        login cannot use this without a SwitchDesktop that takes over the
+        operator\'s screen, which this does not do.
+        """
+        grant = self.sessions.launch_grant_for(command)
+        if grant is None:
+            return {
+                "ok": False,
+                "needs_consent": True,
+                "error": {
+                    "kind": ErrorKind.DENIED_BY_POLICY.value,
+                    "message": (
+                        "launching a process is not automatic: the operator "
+                        "must approve this exact command first. Ask them, "
+                        "then record it with grant_launch."
+                    ),
+                },
+                "command": list(command),
+            }
+        if not grant.allowed:
+            return _error(ErrorKind.DENIED_BY_POLICY,
+                          f"the operator declined to launch {command!r}"
+                          + (f" ({grant.note})" if grant.note else ""))
+
+        from .backends.windows.hidden_desktop import HiddenDesktop
+
+        desktop = HiddenDesktop(name=f"ghostdriver-{uuid.uuid4().hex[:8]}")
+        try:
+            desktop.prepare()
+            pid = desktop.launch(list(command))
+        except OSError as exc:
+            desktop.teardown()
+            return _error(ErrorKind.DENIED_BY_ENVIRONMENT,
+                          f"could not launch on a hidden desktop: {exc}")
+
+        # The launch is the consent: a pid grant is recorded from it so the
+        # per-call gate authorizes this session like any other, without a
+        # second question about a target the operator just asked to start.
+        from .policy import ConsentSource
+
+        self.sessions.record_grant(
+            pid, allowed=True, source=ConsentSource.ELICITED,
+            note=f"launched on a hidden desktop by operator request: {command!r}",
+        )
+        try:
+            session = self.sessions.attach(
+                pid, command_line=list(command), tier=Tier(tier),
+                runner=desktop.run,
+            )
+        except (GhostdriverError, ValueError) as exc:
+            desktop.teardown()
+            kind = getattr(exc, "kind", ErrorKind.DENIED_BY_POLICY)
+            return _error(kind, str(getattr(exc, "message", exc)))
+
+        self._desktops[session.session_id] = desktop
+        summary = session.summary()
+        summary["ok"] = True
+        summary["isolation"] = "hidden_desktop"
+        summary["launched_pid"] = pid
+        summary["note"] = (
+            "launched on a hidden desktop; it is invisible to you and cannot "
+            "take your foreground. Release the session to close it."
+        )
+        return summary
 
     # --- shared plumbing -------------------------------------------------
 
-    def _trees(self, pid: int, all_windows: bool) -> list[WindowNode]:
+    def _trees(self, session, all_windows: bool) -> list[WindowNode]:
         from .backends.windows.enumerate import enumerate_process
 
-        trees = enumerate_process(pid)
+        # session.run so a hidden-desktop target is enumerated on its own
+        # desktop thread; a plain call otherwise.
+        trees = session.run(lambda: enumerate_process(session.pid))
         if not trees:
             return []
         if all_windows:
@@ -297,11 +394,12 @@ class Toolbox:
         main = select_main_tree(trees)
         return [main] if main else []
 
-    def _blocking(self, pid: int) -> list[str]:
+    def _blocking(self, session) -> list[str]:
         from .backends.windows.modality import top_level_state
         from .modality import find_modal_blocks
 
-        blocks, unexplained = find_modal_blocks(top_level_state(pid))
+        state = session.run(lambda: top_level_state(session.pid))
+        blocks, unexplained = find_modal_blocks(state)
         return (
             [b.describe() for b in blocks]
             + [
@@ -312,12 +410,12 @@ class Toolbox:
         )
 
     def _resolve(
-        self, pid: int, expression: str, all_windows: bool
+        self, session, expression: str, all_windows: bool
     ) -> list[WindowNode]:
         locator = Locator.parse(expression)
         return [
             node
-            for tree in self._trees(pid, all_windows)
+            for tree in self._trees(session, all_windows)
             for node in resolve(tree, locator)
         ]
 
@@ -338,7 +436,7 @@ class Toolbox:
         except GhostdriverError as exc:
             return _error(exc.kind, exc.message)
 
-        trees = self._trees(session.pid, all_windows)
+        trees = self._trees(session, all_windows)
         if not trees:
             return _error(ErrorKind.NOT_FOUND,
                           f"pid {session.pid} has no windows on this desktop")
@@ -379,7 +477,7 @@ class Toolbox:
 
         return {
             "ok": True,
-            "blocked": self._blocking(session.pid),
+            "blocked": self._blocking(session),
             "windows": windows,
             "suggested_locators": locators[:30],
             "nodes_shown": totals["nodes"],
@@ -401,7 +499,7 @@ class Toolbox:
             return _error(exc.kind, exc.message)
 
         try:
-            matches = self._resolve(session.pid, locator, all_windows)
+            matches = self._resolve(session, locator, all_windows)
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, str(exc), locator=locator)
 
@@ -439,7 +537,7 @@ class Toolbox:
         from .backends.windows.text import read_window_text
 
         try:
-            matches = self._resolve(session.pid, locator, all_windows)
+            matches = self._resolve(session, locator, all_windows)
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, str(exc), locator=locator)
 
@@ -496,7 +594,7 @@ class Toolbox:
 
         from .backends.windows.capture import CaptureError, capture_window
 
-        trees = self._trees(session.pid, all_windows=False)
+        trees = self._trees(session, all_windows=False)
         if not trees:
             return _error(ErrorKind.NOT_FOUND,
                           f"pid {session.pid} has no windows on this desktop")
@@ -504,7 +602,7 @@ class Toolbox:
 
         if locator:
             try:
-                matches = self._resolve(session.pid, locator, True)
+                matches = self._resolve(session, locator, True)
             except ValueError as exc:
                 return _error(ErrorKind.NOT_FOUND, str(exc), locator=locator)
             if not matches:
@@ -523,7 +621,8 @@ class Toolbox:
                     region["right"], region["bottom"])
 
         try:
-            png, width, height = capture_window(target.handle, region=crop)
+            png, width, height = session.run(
+                lambda: capture_window(target.handle, region=crop))
         except CaptureError as exc:
             return _error(ErrorKind.NOT_ACTIONABLE, str(exc))
 
@@ -562,7 +661,7 @@ class Toolbox:
             return _error(ErrorKind.NOT_FOUND, str(exc), locator=locator)
 
         result = wait_for(
-            lambda: self._resolve(session.pid, locator, all_windows),
+            lambda: self._resolve(session, locator, all_windows),
             wanted,
             timeout_s=timeout_s,
         )
@@ -592,7 +691,7 @@ class Toolbox:
         from .probe.runner import run_phase1
 
         try:
-            document = run_phase1(session.pid)
+            document = session.run(lambda: run_phase1(session.pid))
         except (RuntimeError, OSError, AttributeError) as exc:
             return _error(ErrorKind.NOT_ACTIONABLE, str(exc))
         return {"ok": True, "profile": document.to_dict()}
@@ -616,7 +715,7 @@ class Toolbox:
             summarize_kinds, surface_map,
         )
 
-        trees = self._trees(session.pid, all_windows)
+        trees = self._trees(session, all_windows)
         if not trees:
             return _error(ErrorKind.NOT_FOUND,
                           f"pid {session.pid} has no windows on this desktop")
@@ -635,7 +734,7 @@ class Toolbox:
         other = needs_other_mechanism(regions)
         return {
             "ok": True,
-            "blocked": self._blocking(session.pid),
+            "blocked": self._blocking(session),
             "kinds": summarize_kinds(regions),
             # What is readable right now, and how. Separate from `kinds`
             # because it moves while the application runs and `kinds` does
@@ -666,7 +765,7 @@ class Toolbox:
         from .backends.windows.modality import top_level_state
         from .modality import find_modal_blocks
 
-        state = top_level_state(session.pid)
+        state = session.run(lambda: top_level_state(session.pid))
         blocks, unexplained = find_modal_blocks(state)
         return {
             "ok": True,
@@ -734,7 +833,7 @@ class Toolbox:
         random and the caller finds out afterwards.
         """
         try:
-            matches = self._resolve(session.pid, locator, all_windows)
+            matches = self._resolve(session, locator, all_windows)
         except ValueError as exc:
             return None, _error(ErrorKind.NOT_FOUND, str(exc), locator=locator)
         if not matches:
@@ -826,11 +925,24 @@ class Toolbox:
 
         return notes.cadence_for(surface_of(handle))
 
-    def _actuator(self, pid: int):
+    def _actuator(self, session):
         from .actuate import Actuator
         from .backends.windows.modality import snapshot
 
-        return Actuator(observe=lambda: snapshot(pid))
+        return Actuator(observe=lambda: session.run(
+            lambda: snapshot(session.pid)))
+
+    def _perform(self, session, attempts, **kw):
+        """Run an actuation where the target can be seen.
+
+        The whole perform is marshalled, not each message: verb posts, the
+        settle, the observe snapshot and any postcondition all have to run
+        on the target's desktop thread, and running perform there once puts
+        every part of it in the right place. session.run is re-entrant, so
+        the snapshot and conditions inside -- which call back through the
+        session -- execute inline rather than deadlocking.
+        """
+        return session.run(lambda: self._actuator(session).perform(attempts, **kw))
 
     def _remember(self, session_id: str, tool: str, locator: str,
                   prepared, result) -> None:
@@ -907,7 +1019,7 @@ class Toolbox:
             after, described = self._expectation(prepared.session, expect)
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
-        result = self._actuator(prepared.session.pid).perform(
+        result = self._perform(prepared.session, 
             verbs.click(prepared.node.handle),
             expect_before=verbs.unblocked(prepared.node.handle),
             expect_after=after,
@@ -987,7 +1099,7 @@ class Toolbox:
                 f"the field shows {wanted!r} and {commit.description}",
             )
 
-        result = self._actuator(prepared.session.pid).perform(
+        result = self._perform(prepared.session, 
             verbs.set_text(handle, text, cadence=prepared.cadence,
                            allow_pattern=commit is not None),
             expect_before=verbs.unblocked(handle),
@@ -1049,7 +1161,7 @@ class Toolbox:
             after, described = self._expectation(prepared.session, expect)
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
-        result = self._actuator(prepared.session.pid).perform(
+        result = self._perform(prepared.session, 
             verbs.send_keys(prepared.node.handle, list(text),
                             cadence=prepared.cadence),
             expect_before=verbs.unblocked(prepared.node.handle),
@@ -1110,7 +1222,7 @@ class Toolbox:
             after, described = self._expectation(prepared.session, expect)
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
-        result = self._actuator(prepared.session.pid).perform(
+        result = self._perform(prepared.session, 
             verbs.send_keys(prepared.node.handle, keys,
                             cadence=prepared.cadence),
             expect_before=verbs.unblocked(prepared.node.handle),
@@ -1155,7 +1267,7 @@ class Toolbox:
         Locator.parse(where)  # raises ValueError, caught by the caller
 
         def holds() -> bool:
-            found = self._resolve(session.pid, where,
+            found = self._resolve(session, where,
                                   expect.get("all_windows", False))
             if not found:
                 return False
@@ -1320,7 +1432,7 @@ class Toolbox:
         absent = bool(until.get("absent", False))
 
         def satisfied() -> bool:
-            found = self._resolve(session.pid, where, all_windows)
+            found = self._resolve(session, where, all_windows)
             if absent:
                 return not found
             if not found:
@@ -1485,7 +1597,7 @@ class Toolbox:
                                   expect_source=control.expect_source)
 
         try:
-            matches = self._resolve(session.pid, control.locator, True)
+            matches = self._resolve(session, control.locator, True)
         except ValueError as exc:
             return refused(f"locator is unusable: {exc}")
         if not matches:
@@ -1509,10 +1621,13 @@ class Toolbox:
         if expectation is None:
             return refused("its expect could not be built", node.class_name)
 
-        watcher = Actuator(observe=lambda: snapshot(session.pid))
-        before_foreground = snapshot(session.pid).foreground
+        # Marshalled through the session like every other actuation, so
+        # this learns correctly even on a hidden-desktop target.
+        before_foreground = session.run(
+            lambda: snapshot(session.pid)).foreground
         started = time.monotonic()
-        result = watcher.perform(
+        result = self._perform(
+            session,
             verbs.click(node.handle),
             expect_before=verbs.unblocked(node.handle),
             expect_after=expectation,
@@ -1525,7 +1640,7 @@ class Toolbox:
         # whole reason focus_behavior is worth learning -- so this waits
         # past the action rather than sampling once and moving on.
         taken, delay = self._watch_foreground(
-            session.pid, before_foreground, started, settle_ms
+            session, before_foreground, started, settle_ms
         )
         # Every tier sent its message and none satisfied the expectation.
         # The control was acted on -- that has to be reported even though it
@@ -1548,7 +1663,7 @@ class Toolbox:
             observed=result.disturbances,
         )
 
-    def _watch_foreground(self, pid: int, before: int, started: float,
+    def _watch_foreground(self, session, before: int, started: float,
                           settle_ms: int):
         """Whether the target came to the front, and how long after acting.
 
@@ -1561,7 +1676,7 @@ class Toolbox:
 
         deadline = started + (settle_ms / 1000.0)
         while time.monotonic() < deadline:
-            state = snapshot(pid)
+            state = session.run(lambda: snapshot(session.pid))
             if state.foreground != before and state.foreground in state.windows:
                 return True, int((time.monotonic() - started) * 1000)
             time.sleep(0.05)
@@ -1609,7 +1724,7 @@ class Toolbox:
 
         from .backends.windows.modality import blocking_ancestor
 
-        if blocking_ancestor(node.handle) is not None:
+        if session.run(lambda: blocking_ancestor(node.handle)) is not None:
             return _error(ErrorKind.NOT_ACTIONABLE,
                           "the application is held by a dialog; deal with it "
                           "before probing anything")
@@ -1623,10 +1738,13 @@ class Toolbox:
         from .backends.windows.grid import copy_route, focus_route
         from .gridstrategy import GridProbe, find_grid_strategy
 
+        # Routed through the session: the focus re-scan and the clipboard
+        # copy both have to run where the target's windows are.
         finding = find_grid_strategy(GridProbe(
-            accessible_on_focus=lambda: focus_route(node),
+            accessible_on_focus=lambda: session.run(lambda: focus_route(node)),
             clipboard_copy=(
-                (lambda: copy_route(node)) if allow_clipboard else None
+                (lambda: session.run(lambda: copy_route(node)))
+                if allow_clipboard else None
             ),
         ))
         report = {"ok": True, "locator": locator, "element": _element(node),

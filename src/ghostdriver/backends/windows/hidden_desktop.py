@@ -124,6 +124,7 @@ class HiddenDesktop:
         self._desktop = None
         self._jobs: "queue.Queue[_Job | None]" = queue.Queue()
         self._worker: threading.Thread | None = None
+        self._worker_ident: int | None = None
         self._ready = threading.Event()
         self._bind_error: str = ""
 
@@ -148,6 +149,7 @@ class HiddenDesktop:
             raise OSError(self._bind_error)
 
     def _serve(self) -> None:
+        self._worker_ident = threading.get_ident()
         if not user32.SetThreadDesktop(self._desktop):
             self._bind_error = (
                 "SetThreadDesktop failed: "
@@ -174,6 +176,12 @@ class HiddenDesktop:
         """
         if self._worker is None:
             raise RuntimeError("prepare() has not been called")
+        # Re-entrant: a call already on the worker thread runs inline. This
+        # is what lets a marshalled operation call back through the session
+        # -- a postcondition that resolves the tree, say -- without the
+        # worker waiting on itself, which would deadlock.
+        if threading.get_ident() == self._worker_ident:
+            return fn()
         result: "queue.Queue" = queue.Queue()
         self._jobs.put(_Job(fn=fn, result=result))
         status, payload = result.get()

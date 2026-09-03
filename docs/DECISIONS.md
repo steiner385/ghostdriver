@@ -1007,6 +1007,57 @@ a launch path with its own consent -- a deliberate, separate change, because
 process-launching widens the tool's authority and deserves its own scoping
 rather than riding in on this one.
 
+### D52. hidden_desktop is wired through one seam, and launch is consented
+
+**Decision.** A session carries an optional `runner`, and every
+target-touching call in the tool layer goes through `session.run`. For an
+ordinary session `run` is a plain call; for a hidden-desktop session it
+marshals onto the desktop-bound thread. One seam covers every tool, so
+`describe`, `read`, `click`, `capture`, `probe`, the actuation ladder and
+the grid probe all work against a hidden-desktop target unchanged.
+
+**Why a runner on the session, not a strategy object threaded everywhere.**
+The alternative was passing a strategy through every method and every
+backend call -- dozens of sites, each a chance to forget one and leak a call
+onto the wrong thread, where it silently sees nothing. Routing through the
+four chokepoints (`_trees`, `_blocking`, `_resolve`, and a `_perform`
+wrapper) instead means the seam is small and the failure mode is impossible
+to reach by omission: a call that does not go through a chokepoint is a
+direct backend call, and those were already the exception. `session.py`
+stays platform-neutral -- it holds a callable and knows a session may route
+its calls, not how.
+
+**Re-entrancy is load-bearing.** An actuation is marshalled as a whole, and
+inside it a postcondition resolves the tree and a snapshot is taken --
+each calling back through `session.run`. `HiddenDesktop.run` executes inline
+when already on the worker thread, so those nested calls do not wait on the
+worker they are running on. Without it every verified actuation on a hidden
+desktop would deadlock.
+
+**Launch is the tool's first process-spawning authority, and it is
+consented like everything else.** hidden_desktop is launch-only (D51), so
+`launch_isolated` is the only way to open such a session -- and launching an
+arbitrary command is the widest thing the tool can do. It is gated the way
+R1 gates automation: a launch grant, keyed by the exact command, that the
+operator records after being asked. An unapproved command returns
+`needs_consent` naming it; approving one command does not approve a
+neighbour with an extra argument. The launch itself is then the target
+consent -- a pid grant is recorded from it, so no second question is put
+about a target the operator just asked to start.
+
+**Teardown is owned by the tool layer.** The `HiddenDesktop` is held on the
+Toolbox by session id, not on the neutral Session, and `release` tears it
+down -- terminating the target and closing the desktop. A process stranded
+on a hidden desktop is invisible, so leaking one is especially bad, and
+release is where it is prevented.
+
+**What stays out of reach, and is not pretended otherwise.** A
+hidden-desktop target cannot be seen or touched by a person, so anything
+needing interactive login (the sign-in this class of target often shows on
+launch) cannot proceed there without a `SwitchDesktop` that takes over the
+operator's screen -- which this does not do. For those, `minimized` remains
+the working strategy.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

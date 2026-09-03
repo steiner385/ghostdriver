@@ -98,6 +98,23 @@ class Session:
     grant: Grant
     command_line: tuple[str, ...] = ()
     opened_at: float = field(default_factory=time.time)
+    #: How this session's backend calls reach the target. Normally None --
+    #: the call runs on the calling thread. A hidden-desktop session sets a
+    #: runner that marshals every target-touching call onto the one thread
+    #: bound to that desktop, because a desktop is bound per thread and a
+    #: call from anywhere else sees none of the target's windows. Kept as a
+    #: plain callable so this module stays platform-neutral: it knows a
+    #: session may route its calls, not how.
+    runner: object = None
+
+    def run(self, fn):
+        """Execute `fn` where this session's target can be seen.
+
+        A plain call for an ordinary session; for a hidden-desktop one, on
+        the desktop-bound thread. Everything in the tool layer that touches
+        the backend goes through here, so one seam covers every tool.
+        """
+        return self.runner(fn) if self.runner is not None else fn()
 
     def summary(self) -> dict:
         described = {
@@ -140,6 +157,12 @@ class SessionManager:
     def __init__(self) -> None:
         self._sessions: dict[str, Session] = {}
         self._grants: dict[int, Grant] = {}
+        # Approval to *launch* a command, keyed by the command itself --
+        # there is no pid to key on until after the launch. Separate from
+        # pid grants because launching is a distinct authority from driving
+        # something already running.
+        self._launch_grants: dict[tuple[str, ...], bool] = {}
+        self._launch_notes: dict[tuple[str, ...], str] = {}
         # What this server saw its own actions do. The evidence a learned
         # sensitivity note rests on, kept here rather than taken on trust
         # from whoever asks to record one.
@@ -171,6 +194,31 @@ class SessionManager:
     def grants(self) -> list[Grant]:
         return list(self._grants.values())
 
+    def record_launch_grant(self, command: list[str], *, allowed: bool,
+                            note: str = "") -> None:
+        """Record the operator's decision about launching one command.
+
+        Keyed by the exact command, because that is what a person approves:
+        not "may launch" in general, but "may launch this". A later decision
+        replaces an earlier one, as with target grants.
+        """
+        key = tuple(command)
+        self._launch_grants[key] = allowed
+        self._launch_notes[key] = note
+
+    def launch_grant_for(self, command: list[str]):
+        """The launch decision for `command`, or None if never asked.
+
+        Returns a small object with `.allowed` and `.note`, or None. None is
+        a question not yet put to anyone, distinct from a recorded refusal.
+        """
+        key = tuple(command)
+        if key not in self._launch_grants:
+            return None
+        from types import SimpleNamespace
+        return SimpleNamespace(allowed=self._launch_grants[key],
+                               note=self._launch_notes.get(key, ""))
+
     # --- sessions --------------------------------------------------------
 
     def attach(
@@ -180,6 +228,7 @@ class SessionManager:
         command_line: list[str],
         tier: Tier = Tier.READ_ONLY,
         profile: Profile | None = None,
+        runner: object = None,
     ) -> Session:
         """Open a session against `pid`, if it has been consented to.
 
@@ -211,6 +260,7 @@ class SessionManager:
             profile=profile or Profile.none(),
             grant=grant,
             command_line=tuple(command_line),
+            runner=runner,
         )
         self._sessions[session.session_id] = session
         return session

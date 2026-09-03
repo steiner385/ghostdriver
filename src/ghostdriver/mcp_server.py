@@ -615,6 +615,43 @@ def build_server(sessions: SessionManager | None = None) -> Any:
                               allow_clipboard=allow_clipboard,
                               all_windows=all_windows)
 
+    @server.tool(annotations=CHANGES_SCREEN, description=(
+        "Record the operator's decision about launching one exact command "
+        "on a hidden desktop. Use it after asking them, the way "
+        "grant_targets records a decision about a running target. Keyed by "
+        "the command; a later decision replaces an earlier one."
+    ))
+    def grant_launch(
+        command: Annotated[list[str], Field(description=(
+            "The exact command the operator approved or declined, argv-style."
+        ))],
+        allow: Annotated[bool, Field(description="True to permit launching it.")],
+        note: Annotated[str, Field(description="Optional reason, recorded.")] = "",
+    ) -> dict[str, Any]:
+        box.sessions.record_launch_grant(command, allowed=allow, note=note)
+        return {"ok": True, "command": command, "allowed": allow}
+
+    @server.tool(annotations=ACTUATES, description=(
+        "Launch a target onto a hidden desktop and open a session on it. "
+        "The target has no foreground to steal because it is not on the "
+        "input desktop -- a structural guarantee, stronger than the "
+        "minimized strategy's. It is also invisible and cannot be "
+        "interacted with by a person, so a target needing interactive "
+        "login cannot use it. Launching is the tool's widest authority and "
+        "needs the operator's approval of the exact command first (see "
+        "grant_launch); an unapproved command returns needs_consent. "
+        "Release the session to close the target and the desktop."
+    ))
+    def launch_isolated(
+        command: Annotated[list[str], Field(description=(
+            "The target to launch, argv-style: [exe, arg, ...]."
+        ))],
+        tier: Annotated[str, Field(description=(
+            "Tier of the opened session: read_only, interactive, or full."
+        ))] = "read_only",
+    ) -> dict[str, Any]:
+        return box.launch_isolated(command, tier=tier)
+
     return server
 
 

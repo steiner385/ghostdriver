@@ -40,8 +40,12 @@ CURATION_TOOLS = {"record_input_sensitivity"}
 #: controls an operator listed, to learn how they respond.
 LEARNING_TOOLS = {"probe_phase2", "probe_grid"}
 
-EXPECTED_TOOLS = (READ_TOOLS | ACTUATION_TOOLS
-                  | CURATION_TOOLS | LEARNING_TOOLS)
+#: Session-creating / consent tools for the launch path. Gated by
+#: command approval, not by a session tier.
+LAUNCH_TOOLS = {"launch_isolated", "grant_launch"}
+
+EXPECTED_TOOLS = (READ_TOOLS | ACTUATION_TOOLS | CURATION_TOOLS
+                  | LEARNING_TOOLS | LAUNCH_TOOLS)
 
 
 async def _drive_uia(pid: int):
