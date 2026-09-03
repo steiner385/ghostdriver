@@ -147,3 +147,15 @@ class OperatorDir:
         path = self.reports / f"{name}-{stamp}.json"
         path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
         return path
+
+
+def profile_location(name_or_path: str) -> str:
+    """A bare profile name is looked up in the operator directory, when one is
+    configured; a path is used as given. So a client says `profile_path=
+    "sandbox"` and never types a path that names a machine."""
+    if os.environ.get(ENV_VAR):
+        try:
+            return str(OperatorDir.resolve().profile_path(name_or_path))
+        except OperatorDirError:
+            pass  # a misconfigured directory falls back to the literal path
+    return name_or_path

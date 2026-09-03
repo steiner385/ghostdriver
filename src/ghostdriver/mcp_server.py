@@ -488,7 +488,9 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "back and fails if what it displays is not what was asked for -- a "
         "control can silently take only part of a long value. If the field "
         "reformats input (a date mask), pass expect_text with the value it "
-        "should end up showing. Displaying a value is not the same as the "
+        "should end up showing. If typing arrives with characters missing, "
+        "the value is pasted whole as the next rung (the result's `route` "
+        "says which delivered). Displaying a value is not the same as the "
         "application having accepted it: pass expect naming where the "
         "committed value appears to check that too."
     ))
@@ -528,9 +530,13 @@ def build_server(sessions: SessionManager | None = None) -> Any:
 
     @server.tool(annotations=ACTUATES, description=(
         "Send named keys to a control: enter, tab, escape, backspace, "
-        "delete, or single characters. On this class of target these often "
-        "reach what the mouse cannot -- committing a grid row, or "
-        "dismissing a dialog whose buttons ignore clicks."
+        "delete, home, end, pageup, pagedown, arrows, or single characters; "
+        "and the editing actions select-all, paste, copy, cut, undo, which "
+        "are what Ctrl+A/V/C/X/Z become inside an edit control -- a posted "
+        "keystroke carries no modifier state, so ctrl+ combinations cannot "
+        "be sent as keys. On this class of target keys often reach what the "
+        "mouse cannot: moving through a grid, committing a row, dismissing "
+        "a dialog whose buttons ignore clicks."
     ))
     def send_keys(
         session_id: SessionId,

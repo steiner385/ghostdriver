@@ -117,6 +117,8 @@ class Attempt:
     tier: Tier
     run: Callable[[], bool]
     rank: int = 0
+    #: A name for the route, where one tier has more than one.
+    name: str = ""
 
 
 @dataclass
@@ -203,6 +205,7 @@ class Actuator:
                 return ActionResult(
                     ok=True,
                     tier_used=int(attempt.tier),
+                    route_used=attempt.name or None,
                     tiers_attempted=attempted,
                     precondition_verified=(
                         True if expect_before is not None else None
@@ -215,6 +218,7 @@ class Actuator:
                 return ActionResult(
                     ok=True,
                     tier_used=int(attempt.tier),
+                    route_used=attempt.name or None,
                     tiers_attempted=attempted,
                     precondition_verified=(
                         True if expect_before is not None else None

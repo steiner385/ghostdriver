@@ -208,7 +208,9 @@ class ActuationTools(_ActingCore):
             reported["error"]["message"] += (
                 f"; the field shows {shown!r}, not {wanted!r}. If the control "
                 "reformats what it is given, pass expect_text with the value "
-                "it should end up showing"
+                "it should end up showing. If characters went missing, typing "
+                "and then pasting were both tried; a target that drops typed "
+                "characters is worth recording with record_input_sensitivity"
             )
         if commit is None and result.ok:
             reported["unverified"] = (
@@ -302,13 +304,22 @@ class ActuationTools(_ActingCore):
             if refusal is not None:
                 return refusal
 
+        editing = current_edit_actions()
         unknown = [k for k in keys
-                   if k.lower() not in NAMED_KEYS and len(k) != 1]
+                   if k.lower() not in NAMED_KEYS and k.lower() not in editing
+                   and len(k) != 1]
         if unknown:
+            combos = [k for k in unknown if "+" in k]
             return _error(
                 ErrorKind.NOT_ACTIONABLE,
-                f"unknown key name(s) {unknown}; expected a single character "
-                f"or one of {sorted(NAMED_KEYS)}",
+                f"unknown key name(s) {unknown}; expected a single character, "
+                f"one of {sorted(NAMED_KEYS)}, or an editing action "
+                f"{sorted(editing)}."
+                + (" A posted keystroke carries no modifier state, so ctrl+ and "
+                   "shift+ combinations cannot be sent; for an edit field use "
+                   "select-all, paste, copy, cut or undo, which are the messages "
+                   "those combinations become inside the control."
+                   if combos else ""),
             )
 
         try:
@@ -331,3 +342,9 @@ class ActuationTools(_ActingCore):
             expected=described,
             keys=keys,
         )
+
+
+def current_edit_actions() -> dict:
+    from ..backends import current
+
+    return dict(current().EDIT_ACTIONS)

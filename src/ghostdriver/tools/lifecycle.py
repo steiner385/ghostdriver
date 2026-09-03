@@ -5,6 +5,7 @@ import uuid
 from ..hosting import classify_process, hosted_frame_note, is_frame_host
 from ..isolation import Isolation
 from ..model.result import ErrorKind, GhostdriverError
+from ..operator import profile_location
 from ..policy import (
     ConsentSource,
     Tier,
@@ -172,7 +173,7 @@ class LifecycleTools(_ToolboxCore):
 
         try:
             profile = (
-                Profile.load(_profile_location(profile_path)) if profile_path
+                Profile.load(profile_location(profile_path)) if profile_path
                 else Profile.none()
             )
             session = self.sessions.attach(
@@ -251,6 +252,22 @@ class LifecycleTools(_ToolboxCore):
         # Said at attach because it changes what every later call means: a
         # target with nothing on screen answers every read with nothing.
         summary["blocked"] = self._blocking(session)
+        if summary["blocked"]:
+            from .guidance import BLOCKED_HINT
+            summary["blocked_hint"] = BLOCKED_HINT
+        # Said at attach, because every read of a minimized target answers
+        # about a window nobody can see, and the caller would otherwise
+        # infer it from visible=false.
+        from ..backends import current as _backend
+
+        # A minimized window still carries WS_VISIBLE, so ask both.
+        if selected and (not selected[0].visible
+                         or session.run(lambda: _backend().winapi.is_minimized(selected[0].handle))):
+            summary["minimized_or_hidden"] = True
+            summary["hint"] = (
+                "the main window is not on screen (minimized or hidden). "
+                "`restore` brings it back -- and may bring it to the front."
+            )
         return summary
 
     def release(self, session_id: str) -> dict:
@@ -368,19 +385,3 @@ class LifecycleTools(_ToolboxCore):
             "take your foreground. Release the session to close it."
         )
         return summary
-
-
-def _profile_location(name_or_path: str) -> str:
-    """A bare profile name is looked up in the operator directory, when one is
-    configured; a path is used as given. So a client says `profile_path=
-    "sandbox"` and never types a path that names a machine."""
-    import os
-
-    from ..operator import ENV_VAR, OperatorDir, OperatorDirError
-
-    if os.environ.get(ENV_VAR):
-        try:
-            return str(OperatorDir.resolve().profile_path(name_or_path))
-        except OperatorDirError:
-            pass  # a misconfigured directory falls back to the literal path
-    return name_or_path

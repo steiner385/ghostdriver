@@ -1680,6 +1680,77 @@ method no tier names. It is private now. The wrapping of every public
 method is the boundary the contract test guards, and this was the
 boundary doing its job.
 
+### D63. Field feedback from a real session, and what it changed
+
+**Context.** A session driving the primary target (Profile L1, VCL) at the
+interactive tier reported back in detail after failing to complete its
+task. The report's own through-line was right: the diagnosis layer holds
+up, and the actuation layer runs out on input-lossy, owner-drawn targets.
+Taken in cost order.
+
+**`capture` could return the wrong pixels, silently.** Naming a modal
+rendered the *main* window cropped to the modal's rectangle: the pixels
+underneath the modal, returned with confidence. `capture` always rendered
+the main window and used a locator only as a crop. It now renders the
+top-level window that holds the match -- a modal is its own top-level --
+and for a bare region, the window overlapping it most, the smaller one
+among equals, since a modal lies inside its owner's rectangle and is the
+one on top. The result says `frame: "screen"` (the frame every rectangle
+in this tool uses; `find` now says so too), names the window it rendered,
+and flags a region it had to clip. A region overlapping no window is
+refused, with the frame named. Proven on the fixture's modal, by locator
+and by a region copied from `find`.
+
+**Typed text dropped characters, and nothing could deliver the value
+whole.** An address field lost `N`, `@`, `ht` and `ch` across six
+attempts at both cadences; the read-back caught every one (kept), and
+then handed the problem back. `set_text` has a third rung: paste. The
+value goes onto the clipboard and in with one WM_PASTE, so a control that
+drops a character now and then cannot lose part of it; the clipboard's
+prior text is put back. Typing stays first -- it is the toolkit's own
+path, and paste uses the session-wide clipboard -- and the read-back
+after each rung is what makes the fall-through safe. Attempts now carry
+a name, and the result says which `route` delivered.
+
+**No modifiers on `send_keys`.** A posted keystroke carries no modifier
+state, so ctrl+ combinations cannot be sent as keys, and saying so is
+better than pretending. What Ctrl+A/V/C/X/Z become inside an edit control
+are messages, and those are sendable: `send_keys` accepts `select-all`,
+`paste`, `copy`, `cut` and `undo`, and a `ctrl+x` token is refused with
+that alternative named. Ctrl+End in a grid has no message equivalent; the
+caret keys already in `NAMED_KEYS` are the route there.
+
+**Three tools existed and were never found.** The session dismissed a
+dialog unread because nothing named `modals` at the moment it learned
+the target was held; it searched a grid by paging blind because nothing
+named `probe_grid`; it fought a dropping field without
+`record_input_sensitivity`. Errors and blocked states now name the tool
+that addresses them: every `blocked` report carries the hint to read the
+dialog with `modals` and hand it to a person with `await_human`; a
+pixels-only region in `surfaces` names `probe_grid`, `capture`, the
+point click and the caret keys; a `set_value` mismatch says typing and
+pasting were both tried and names `record_input_sensitivity`. `attach`
+says when the main window is minimized or hidden and names `restore`.
+The consent question says approvals live for one server run, so a
+restart is recognised rather than read as a fresh denial. And the
+locator parser, shown an unquoted regex with a space, says how to quote
+it.
+
+**Not done here, and why.** A `grid_seek` that pages an owner-drawn grid
+and matches a value is the right primitive for a target made of such
+grids, and the report is right that every caller will otherwise write
+that loop badly. It needs the copy route (`probe_grid`) and the caret
+keys, both of which exist, and a fixture grid with a selection model to
+prove it against; it is the next item. Persisting consent across server
+restarts would revise R1's "approvals die with the session", which is
+the operator's rule to change, not this session's; the message change
+above is what could be done without changing it. The point click on the
+target's grid reporting delivered-but-no-selection is consistent with a
+VCL grid asking for focus on mouse-down and declining when the
+application is not foreground -- the no-focus rule meeting the grid's
+own check -- and is why the keyboard, not the click, is the way to move
+through it; that is a measurement for the next session on the target.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

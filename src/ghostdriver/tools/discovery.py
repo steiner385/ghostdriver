@@ -12,7 +12,10 @@ from .core import (
     _element,
     _error,
     _ToolboxCore,
+    _top_level_holding,
+    _top_level_overlapping,
 )
+from .guidance import BLOCKED_HINT
 
 
 class DiscoveryTools(_ToolboxCore):
@@ -73,9 +76,11 @@ class DiscoveryTools(_ToolboxCore):
                 if locator not in locators:
                     locators.append(locator)
 
+        blocked = self._blocking(session)
         return {
             "ok": True,
-            "blocked": self._blocking(session),
+            "blocked": blocked,
+            **({"blocked_hint": BLOCKED_HINT} if blocked else {}),
             "windows": windows,
             "suggested_locators": locators[:30],
             "nodes_shown": totals["nodes"],
@@ -105,6 +110,7 @@ class DiscoveryTools(_ToolboxCore):
             "ok": True,
             "locator": locator,
             "match_count": len(matches),
+            "frame": "screen",
             "elements": [_element(n) for n in matches[:MAX_ELEMENTS]],
             "searched": "every top-level window" if all_windows
                         else "the main window only",
@@ -205,11 +211,17 @@ class DiscoveryTools(_ToolboxCore):
         CaptureError = current().CaptureError
         capture_window = current().capture_window
 
-        trees = self._trees(session, all_windows=False)
+        # Every top-level window of the target and its tree, because the
+        # window to *render* is the one that holds the match -- a modal is
+        # its own top-level window, and rendering the main window cropped
+        # to the modal's rectangle gives the pixels underneath the modal,
+        # confidently and wrongly. Measured in the field before this.
+        trees = self._trees(session, all_windows=True)
         if not trees:
             return _error(ErrorKind.NOT_FOUND,
                           f"pid {session.pid} has no windows on this desktop")
-        target, crop = trees[0], None
+        main = self._trees(session, all_windows=False)
+        target, crop = (main[0] if main else trees[0]), None
 
         if locator:
             try:
@@ -226,10 +238,26 @@ class DiscoveryTools(_ToolboxCore):
                     "needs exactly one. Add within= or index=.",
                     locator=locator,
                 )
-            crop = matches[0].rect
+            match = matches[0]
+            holder = _top_level_holding(trees, match.handle)
+            if holder is None:
+                return _error(ErrorKind.NOT_FOUND,
+                              f"{locator!r} matched a window no top-level window holds")
+            target, crop = holder, match.rect
         elif region:
             crop = (region["left"], region["top"],
                     region["right"], region["bottom"])
+            # The window the region lies in, by overlap: a region a caller
+            # copied from find() is in screen coordinates, and only the
+            # window it overlaps most can render it.
+            holder = _top_level_overlapping(trees, crop)
+            if holder is None:
+                return _error(
+                    ErrorKind.NOT_FOUND,
+                    f"region {crop} (screen coordinates) overlaps no window of "
+                    "the target; rects from find() and describe() are in screen "
+                    "coordinates, so pass one of those")
+            target = holder
 
         try:
             png, width, height = session.run(
@@ -237,13 +265,30 @@ class DiscoveryTools(_ToolboxCore):
         except CaptureError as exc:
             return _error(ErrorKind.NOT_ACTIONABLE, str(exc))
 
-        return {
+        left, top, right, bottom = target.rect
+        result = {
             "ok": True,
             "width": width,
             "height": height,
             "mime_type": "image/png",
+            # The frame every rectangle in this tool uses, said so a region
+            # copied out of one result is known to be valid in another.
+            "frame": "screen",
+            "rendered": {
+                "class": target.class_name,
+                "text": target.text,
+                "pid": target.pid,
+                "handle_ephemeral": f"0x{target.handle:08X}",
+                "rect": {"left": left, "top": top, "right": right, "bottom": bottom},
+            },
             "base64": base64.b64encode(png).decode("ascii"),
         }
+        if crop is not None:
+            inside = (max(crop[0], left), max(crop[1], top),
+                      min(crop[2], right), min(crop[3], bottom))
+            if inside != tuple(crop):
+                result["clipped_to_window"] = True
+        return result
 
     def wait_for(
         self,

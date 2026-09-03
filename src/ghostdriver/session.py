@@ -297,7 +297,9 @@ class SessionManager:
                 pid,
                 f"pid {pid} has not been approved for automation in this "
                 "session. Ask the operator which targets to allow, then "
-                "record the answer with grant_targets.",
+                "record the answer with grant_targets. (Approvals live for "
+                "one server run; if the server restarted since the operator "
+                "approved this target, that is why it is being asked again.)",
             )
         if not grant.allowed:
             note = f" ({grant.note})" if grant.note else ""

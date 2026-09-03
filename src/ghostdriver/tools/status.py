@@ -7,6 +7,7 @@ from .core import (
     _error,
     _ToolboxCore,
 )
+from .guidance import BLOCKED_HINT, PIXELS_HINT
 
 
 class StatusTools(_ToolboxCore):
@@ -69,6 +70,7 @@ class StatusTools(_ToolboxCore):
         return {
             "ok": True,
             "blocked": self._blocking(session),
+            "blocked_hint": BLOCKED_HINT,
             "kinds": summarize_kinds(regions),
             # What is readable right now, and how. Separate from `kinds`
             # because it moves while the application runs and `kinds` does
@@ -85,6 +87,9 @@ class StatusTools(_ToolboxCore):
                              "right": r.rect[2], "bottom": r.rect[3]},
                     "area_px": r.area,
                     "reason": r.reason,
+                    "hint": PIXELS_HINT if r.access.value == "pixels" else (
+                        "read it through element locators (type=..., name=...)"
+                        if r.access.value == "accessibility" else ""),
                 }
                 for r in sorted(other, key=lambda r: -r.area)[:MAX_ELEMENTS]
             ],

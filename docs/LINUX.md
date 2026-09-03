@@ -31,7 +31,7 @@ decision holds the measurement the Linux one must repeat.
 | `region_evidence`, `resolve_hosted_app` | UIA count under a window; frame-host resolution | AT-SPI subtree count; embedded documents are `ROLE_DOCUMENT_WEB` | D41 |
 | `assess_uia`, `assess_msaa` | pattern richness | AT-SPI interface richness (`Action`, `Value`, `Text`, `Selection` counts) | D5 |
 | `verbs` | posted `WM_LBUTTONDOWN/UP`, posted `WM_CHAR`, UIA patterns | tier 1: AT-SPI `Action.DoAction`; tier 3: `XSendEvent` of `ButtonPress/Release` and `KeyPress/Release` **to the window**, which toolkits may ignore as synthetic (the `send_event` flag) -- this is the measurement that decides whether a Linux tier 3 exists at all | D21, D30, D44, D56 |
-| `NAMED_KEYS`, `button_pair` | virtual-key table; button messages with modifier flags | X keysyms via `XStringToKeysym`; `ButtonPress` with `state` modifier mask | D44, D61 |
+| `NAMED_KEYS`, `EDIT_ACTIONS`, `button_pair` | virtual-key table; button messages with modifier flags | X keysyms via `XStringToKeysym`; `ButtonPress` with `state` modifier mask | D44, D61 |
 | `copy_route`, `focus_route` | `WM_COPY`, posted `WM_SETFOCUS` | AT-SPI `Action` named "copy", `Component.GrabFocus` (which may raise the window: measure) | D50 |
 | `MinimizedWatch`, `WatchError` | poll `WS_MINIMIZE` + foreground; `SW_SHOWMINNOACTIVE` | poll `_NET_WM_STATE_HIDDEN` + `_NET_ACTIVE_WINDOW`; iconify via `XIconifyWindow` (does not focus) | D49, D55 |
 | `HiddenDesktop` | `CreateDesktopW` + thread binding | a nested X server (`Xephyr` or `Xvfb`) with its own `DISPLAY` and its own AT-SPI bus (`at-spi-bus-launcher` per display); launch-only, as on Windows; **no thread binding needed** -- the display is an environment variable | D51, D52, D53 |

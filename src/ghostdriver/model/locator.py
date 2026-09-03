@@ -120,7 +120,10 @@ class Locator:
             fields["within"] = scope
         for token in shlex.split(expr):
             if "=" not in token:
-                raise ValueError(f"malformed locator token: {token!r}")
+                raise ValueError(
+                    f"malformed locator token: {token!r}. A value containing "
+                    "spaces must be quoted, e.g. text=\"/.*Release Packages.*/\""
+                )
             key, _, value = token.partition("=")
             if key not in cls._KEYS:
                 raise ValueError(f"unknown locator key: {key!r}")

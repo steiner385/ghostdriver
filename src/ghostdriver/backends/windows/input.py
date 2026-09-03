@@ -76,6 +76,16 @@ WM_KEYUP = 0x0101
 WM_SETFOCUS = 0x0007
 EM_SETSEL = 0x00B1
 WM_CLEAR = 0x0303
+WM_CUT = 0x0300
+WM_COPY = 0x0301
+WM_PASTE = 0x0302
+WM_UNDO = 0x0304
+
+#: Editing actions a control performs on a message, not a keystroke. The
+#: way past the modifier problem: a posted Ctrl+V carries no Ctrl, but
+#: WM_PASTE is what Ctrl+V becomes inside an edit control anyway.
+EDIT_ACTIONS = {"paste": WM_PASTE, "copy": WM_COPY, "cut": WM_CUT, "undo": WM_UNDO,
+                "select-all": EM_SETSEL}
 
 MK_LBUTTON = 0x0001
 MK_RBUTTON = 0x0002
@@ -316,7 +326,12 @@ def send_keys(
         if pause:
             sleep(pause)
         lowered = key.lower()
-        if lowered in NAMED_KEYS:
+        if lowered in EDIT_ACTIONS:
+            if lowered == "select-all":
+                ok = user32.PostMessageW(wintypes.HWND(hwnd), EM_SETSEL, 0, -1) and ok
+            else:
+                ok = user32.PostMessageW(wintypes.HWND(hwnd), EDIT_ACTIONS[lowered], 0, 0) and ok
+        elif lowered in NAMED_KEYS:
             code = NAMED_KEYS[lowered]
             scan = user32.MapVirtualKeyW(code, MAPVK_VK_TO_VSC)
             ok = user32.PostMessageW(
@@ -394,3 +409,31 @@ def set_value_via_uia(hwnd: int, text: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def paste_text(hwnd: int, text: str, *, settle_s: float = 0.15) -> bool:
+    """Replace a control's text by putting `text` on the clipboard and pasting.
+
+    Atomic where typing is not: the field receives the whole value in one
+    message, so a control that drops a character now and then -- measured
+    on an address field that lost `N`, `@`, `ht` and `ch` across six
+    attempts at two cadences -- cannot lose part of it. It uses the
+    session-wide clipboard; whatever was there is put back afterwards, but
+    the replacement is not atomic and clipboard history sees the text.
+    That is why this is the rung *after* typing, not instead of it.
+    """
+    from .grid import clipboard_holds_non_text, read_clipboard_text, write_clipboard_text
+
+    lossy = clipboard_holds_non_text()
+    previous = read_clipboard_text()
+    try:
+        write_clipboard_text(text)
+        ok = user32.PostMessageW(wintypes.HWND(hwnd), EM_SETSEL, 0, -1)
+        ok = user32.PostMessageW(wintypes.HWND(hwnd), WM_PASTE, 0, 0) and ok
+        time.sleep(settle_s)
+        return bool(ok)
+    finally:
+        try:
+            write_clipboard_text(previous if not lossy else None)
+        except OSError:
+            pass

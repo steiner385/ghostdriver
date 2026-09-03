@@ -102,6 +102,14 @@ Fifteen tools at the `read_only` tier: `list_targets`, `attach`,
 `probe_grid` and `launch_isolated`. The tier is chosen at `attach` and is
 immutable for the session.
 
+**A value gets there whole, or the tool says it did not.** `set_value`
+types first, reads the field back, and if characters went missing pastes
+the value whole as the next rung; the result names the `route` that
+delivered. `send_keys` takes the editing actions `select-all`, `paste`,
+`copy`, `cut` and `undo` -- what Ctrl+A/V/C/X/Z become inside an edit
+control, since a posted keystroke carries no modifier state. `capture`
+renders the window that holds what you named, and says its frame.
+
 **When it needs a person, it says so on screen.** `await_human` shows its
 ask in a small always-on-top notice in the corner of the operator's screen
 for as long as it waits -- the one window this tool ever shows, and it

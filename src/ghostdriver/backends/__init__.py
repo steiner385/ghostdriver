@@ -33,7 +33,7 @@ CONTRACT: tuple[str, ...] = (
     # regions, hosting and assessment
     "region_evidence", "resolve_hosted_app", "assess_uia", "assess_msaa",
     # acting
-    "verbs", "NAMED_KEYS", "button_pair", "copy_route", "focus_route",
+    "verbs", "NAMED_KEYS", "EDIT_ACTIONS", "button_pair", "copy_route", "focus_route",
     # isolation and interference
     "MinimizedWatch", "WatchError", "HiddenDesktop", "InterferenceWatch",
     # the one thing this tool ever puts on the operator's screen

@@ -44,6 +44,9 @@ class ActionResult:
 
     ok: bool
     tier_used: int | None = None
+    #: Which attempt on the tier delivered -- "typed" or "pasted" at tier 3
+    #: -- when the verb named its attempts. A tier number alone cannot say.
+    route_used: str | None = None
     tiers_attempted: list[int] = field(default_factory=list)
     precondition_verified: bool | None = None
     postcondition_verified: bool | None = None

@@ -191,6 +191,7 @@ class _ActingCore(_ToolboxCore):
             "locator": locator,
             "element": _element(prepared.node),
             "tier_used": result.tier_used,
+            "route": result.route_used,
             "tiers_attempted": result.tiers_attempted,
             "cadence": prepared.cadence.name,
             "elapsed_ms": result.elapsed_ms,
