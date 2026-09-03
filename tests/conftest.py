@@ -650,6 +650,19 @@ def win32_target():
         else:
             raise RuntimeError("target did not create a window in time")
         time.sleep(0.3)  # let child controls finish being created
+        # A fresh, never-activated, off-screen window has no business being
+        # minimized. Twice in hundreds of full runs one was, and the test
+        # that found it could only report the symptom. Failing here, in
+        # setup, says "minimized before the test began" -- and names every
+        # top-level window of the process with its state, which is the
+        # evidence the next diagnosis starts from.
+        from ghostdriver.backends.windows import winapi
+        states = [(f"0x{h:08X}", winapi.class_name(h), winapi.is_minimized(h))
+                  for h in top_level_windows(pid)]
+        if any(iconic for _, _, iconic in states):
+            raise RuntimeError(
+                "a window of the fresh target is already minimized, before "
+                f"the test began: {states}")
         yield pid
     finally:
         # Terminating Popen's process is not enough when it is only a stub:

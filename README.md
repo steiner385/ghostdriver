@@ -82,6 +82,28 @@ ghostdriver modals --pid 1234
 ghostdriver restore --pid 1234
 ```
 
+## The operator directory
+
+Everything that names a target -- profile documents with real endpoints,
+curated denylists, workflow files, run reports -- lives in one directory
+outside any repository, and the tool reads such things from there and
+nowhere else:
+
+```bash
+set GHOSTDRIVER_OPERATOR_DIR=C:\Users\you\ghostdriver-operator
+ghostdriver list-workflows
+ghostdriver run-workflow walk-tabs --pid 1234
+```
+
+The directory holds `profiles/`, `workflows/` and `reports/`. A path
+inside a git checkout is refused, and so is a packaged application's
+virtualized AppData (a process inside one cannot write anywhere other
+processes will see). A workflow is a JSON list of tool calls with
+expectations; it names no target -- the pid is given at run time -- and
+attaches at the tier and isolation it declares. The runner stops at the
+first failed step, fails the run if the target ever takes the foreground,
+and writes a report of every step and event back to `reports/`.
+
 ## What it does not do
 
 - **Un-minimize anything on its own.** Measured: every way of restoring a

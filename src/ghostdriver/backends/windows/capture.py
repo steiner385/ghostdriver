@@ -163,9 +163,12 @@ def capture_window(
         # A minimized window has no valid client area. PrintWindow returns
         # success and an empty bitmap, so this has to be caught here or the
         # caller gets a blank image and no reason for it.
+        # Named, because a full-suite run has twice found a fresh fixture
+        # window minimized that nothing in the suite minimized; the class
+        # is the first half of the answer to "which window, and whose".
         raise CaptureError(
-            f"0x{hwnd:08X} is minimized and has nothing to render; "
-            "restore it first"
+            f"0x{hwnd:08X} ({winapi.class_name(hwnd)}) is minimized and has "
+            "nothing to render; restore it first"
         )
 
     left, top, right, bottom = winapi.window_rect(hwnd)

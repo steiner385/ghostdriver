@@ -1296,6 +1296,68 @@ position, and by plain caption pattern; and it all works on a
 hidden-desktop session, where the COM client has to be created on the
 desktop-bound thread.
 
+### D57. The operator directory, and the workflow runner that reads from it
+
+**Context.** B2 of the roadmap: an end-to-end harness against the real
+application. The operator's rule is that knowledge of the target lives in
+*no repository* -- not this one, not a private one. So the harness has two
+halves: a generic one here, and everything that names a target in a local
+directory the tool reads from and nothing else.
+
+**The operator directory is the rule made mechanical.** One configured
+path (`GHOSTDRIVER_OPERATOR_DIR`, or `--operator-dir`) holds
+`profiles/`, `workflows/` and `reports/`. `OperatorDir.resolve` refuses a
+directory inside a git checkout, so target knowledge cannot be one
+careless `git add` from a commit by a path the tool will read from; and a
+test refuses profile documents, workflow files and report folders
+anywhere in the source tree. Its first run found three probe-output
+profile documents sitting in the checkout root -- untracked and ignored,
+but inside the repository directory, one of them named for the target's
+version. They were moved out, not deleted.
+
+**It also refuses a packaged application's virtualized AppData.** Found
+while creating the directory: this tool's process tree runs inside the
+packaged desktop client, and Windows redirects a packaged app's AppData
+writes to `...\Packages\<app>\LocalCache\...`. A directory made under
+`%LOCALAPPDATA%` from here landed there, where the operator's own shell
+would never see it. Path resolution sees through the redirection, which
+is how the refusal can tell; the directory lives under the user profile
+root instead.
+
+**A workflow names no target.** It is a JSON file of steps -- one session
+tool each, with arguments and optional assertions by dotted path
+(`values.0.text`), a `contains` form, and `expect_ok: false` for a step
+that exists to prove a refusal -- plus the tier and isolation to attach
+under and a profile to attach with. The pid comes from the runner's
+argument. Running a workflow *is* the operator's consent for that target:
+it is recorded as an operator-tool grant naming the workflow, so the
+record says why. The runner stops at the first failed step, because on a
+real application the steps after a failure act on a screen nobody
+intended; runs the whole thing under an interference watch, where the
+target taking the foreground fails the run whatever the steps said and a
+moving cursor is reported rather than judged (this tool never moves it,
+so movement is the operator, and the operator is expected to be away);
+collects every watchdog event; and writes a report -- every step, every
+result with its pixels left out, every event -- back to `reports/`.
+`ghostdriver run-workflow <name> --pid N` prints the verdict and exits
+non-zero on anything but a pass.
+
+**Proven with fakes and with the fixture.** The runner is pure with
+respect to the desktop, so its behaviour -- stop on failure, release
+regardless, fail on a foreground event, collect watchdog events, refuse
+an unknown tool by name -- is proven with a scripted toolbox. The
+fixture run goes through the real tools and the CLI: a four-step
+workflow in a temporary operator directory, including an element click
+and an expected refusal, passes, writes its report, and records no
+foreground event. The only application any workflow in this repository
+names is the fixture.
+
+**What is now the operator's.** The workflows against the real
+application, its profile, its curated lists: written into the operator
+directory, run with the command above, asserted against the
+application's own audit trail. The template in that directory is the
+fixture workflow, so the shape is at hand.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

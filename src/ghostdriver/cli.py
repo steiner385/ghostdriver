@@ -11,6 +11,7 @@ import sys
 
 from .model.locator import Locator
 from .model.window import select_main_tree
+from .operator import ENV_VAR, OperatorDir, OperatorDirError
 from .resolve import resolve
 from .summarize import summarize
 
@@ -118,6 +119,26 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     restore.add_argument("--pid", type=int, required=True)
+
+    # The operator's harness. Workflows and profiles live in the operator
+    # directory (GHOSTDRIVER_OPERATOR_DIR), never in a repository; these
+    # commands are how they are listed and run.
+    listing = sub.add_parser("list-workflows",
+                             help="List the workflows in the operator directory")
+    listing.add_argument("--operator-dir", default=None,
+                         help=f"Overrides {ENV_VAR}")
+    run = sub.add_parser(
+        "run-workflow",
+        help=(
+            "Run one workflow from the operator directory against a running "
+            "target, under an interference watch, and write a report back."
+        ),
+    )
+    run.add_argument("name", help="Workflow name (workflows/<name>.json)")
+    run.add_argument("--pid", type=int, required=True,
+                     help="The target to attach to; the workflow names none")
+    run.add_argument("--operator-dir", default=None,
+                     help=f"Overrides {ENV_VAR}")
 
     return parser
 
@@ -584,6 +605,64 @@ def cmd_restore(pid: int) -> int:
     return 0
 
 
+def cmd_list_workflows(operator_dir: str | None = None) -> int:
+    try:
+        folder = OperatorDir.resolve(operator_dir)
+    except OperatorDirError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    names = folder.list_workflows()
+    if not names:
+        print(f"no workflows in {folder.workflows}")
+        return 0
+    for name in names:
+        print(name)
+    return 0
+
+
+def cmd_run_workflow(name: str, pid: int, operator_dir: str | None = None) -> int:
+    """Run a workflow, print the verdict, write the report; exit 0 only on pass."""
+    import time
+
+    from .session import SessionManager
+    from .tools import Toolbox
+    from .workflow import Workflow, WorkflowError, run_workflow
+
+    try:
+        folder = OperatorDir.resolve(operator_dir)
+        workflow = Workflow.load(folder.workflow_path(name))
+    except (OperatorDirError, WorkflowError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    from .backends.windows.interference import InterferenceWatch
+
+    profile_path = (str(folder.profile_path(workflow.profile))
+                    if workflow.profile else None)
+    report = run_workflow(
+        Toolbox(SessionManager()), workflow, pid=pid,
+        watch=InterferenceWatch(pid), profile_path=profile_path,
+    )
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(report.started_at))
+    written = folder.write_report(workflow.name, stamp, report.to_dict())
+
+    print(f"{workflow.name}: {report.verdict}"
+          f" ({sum(1 for s in report.steps if s.ok)}/{len(workflow.steps)} steps)")
+    for step in report.steps:
+        mark = "ok  " if step.ok else "FAIL"
+        print(f"  {mark} {step.index} {step.tool} {step.elapsed_ms}ms"
+              + (f"  -- {step.note}" if step.note else ""))
+        for failure in step.failures:
+            print(f"       {failure}")
+    if report.error:
+        print(f"  error: {report.error}")
+    if report.interference:
+        kinds = sorted({e["kind"] for e in report.interference})
+        print(f"  interference: {len(report.interference)} event(s): {', '.join(kinds)}")
+    print(f"  report: {written}")
+    return 0 if report.passed else 1
+
+
 def _use_utf8(stream) -> None:
     """Force UTF-8 on an output stream, tolerating streams that cannot.
 
@@ -634,6 +713,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_surfaces(
             args.pid, args.all, args.changed_from, args.all_windows
         )
+    if args.command == "list-workflows":
+        return cmd_list_workflows(getattr(args, "operator_dir", None))
+    if args.command == "run-workflow":
+        return cmd_run_workflow(args.name, args.pid, args.operator_dir)
     return 2
 
 

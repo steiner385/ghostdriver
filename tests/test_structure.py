@@ -113,3 +113,35 @@ def test_the_known_unwired_list_is_still_true():
 
     stale = sorted(m for m in KNOWN_UNWIRED if m in reached or m not in modules)
     assert not stale, "no longer unwired (or gone); remove from KNOWN_UNWIRED: " + ", ".join(stale)
+
+
+# --- nothing target-shaped in the source tree ---------------------------------
+
+REPO = PACKAGE_ROOT.parent.parent
+
+#: The one profile document that may live here: it names no target.
+ALLOWED_PROFILES = {REPO / "docs" / "example-profile.json"}
+
+
+def test_the_source_tree_holds_no_profile_workflow_or_report():
+    """Target knowledge lives in the operator directory and nowhere else.
+    .gitignore already refuses profile files; this refuses them, and the
+    other shapes the operator directory holds, before a commit is even
+    attempted -- and it fails on a file that .gitignore would have let
+    through under a different name."""
+    offenders = []
+    for path in REPO.rglob("*"):
+        parts = {p.lower() for p in path.relative_to(REPO).parts}
+        if parts & {".git", ".venv", "venv", "__pycache__", ".pytest_cache"}:
+            continue
+        name = path.name.lower()
+        if path.is_file() and "profile" in name and name.endswith(".json") \
+                and path not in ALLOWED_PROFILES:
+            offenders.append(path)
+        if path.is_dir() and name in {"workflows", "reports", "profiles"}:
+            offenders.append(path)
+    assert not offenders, (
+        "target-shaped files in the source tree; they belong in the operator "
+        "directory (GHOSTDRIVER_OPERATOR_DIR): "
+        + ", ".join(str(p.relative_to(REPO)) for p in offenders)
+    )
