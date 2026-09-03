@@ -21,6 +21,7 @@ Everything that can return many rows caps them and says what it capped.
 
 import functools
 import inspect
+import time
 
 from .actuation import ActuationTools
 from .core import MAX_ELEMENTS, SENSITIVE_HINT, _element, _error
@@ -43,32 +44,82 @@ class Toolbox(LifecycleTools, DiscoveryTools, StatusTools, ActuationTools,
     """
 
 
-def _reporting_watchdog_events(fn):
-    """Append what the minimized watchdog saw to any session tool's result.
+def _traced_and_reporting(fn, *, session_tool: bool):
+    """Record every call in the trace; append watchdog events to session tools.
 
-    The event is the product (D49): a caller should not have to know which
-    tool to ask. So every tool that takes a session id reports, on its own
-    result, whatever the watchdog recorded since the last call -- `describe`
-    as readily as `click`. `release` reports its own, because by the time
-    it returns the watch is gone.
+    Two things done in one wrapper because they need the same seam: the
+    place a result passes on its way out. The trace is what lets a call
+    made in another session be read afterwards -- tool, arguments, outcome,
+    error, elapsed -- which is how a report like "it could not click the
+    link" arrives with the call it tried. Watchdog events ride on session
+    tools because the event is the product (D49) and a caller should not
+    have to know which tool to ask; `release` reports its own.
     """
+    signature = inspect.signature(fn)
+
     @functools.wraps(fn)
-    def wrapper(self, session_id, *args, **kwargs):
-        result = fn(self, session_id, *args, **kwargs)
-        watch = self._watches.get(session_id)
-        if watch is not None and isinstance(result, dict):
-            events = watch.drain()
-            if events:
-                result["watchdog_events"] = events
-            if watch.suspended_reason:
-                result["watchdog_suspended"] = watch.suspended_reason
-        return result
+    def wrapper(self, *args, **kwargs):
+        started = time.monotonic()
+        try:
+            bound = signature.bind_partial(self, *args, **kwargs).arguments
+            bound.pop("self", None)
+        except TypeError:
+            bound = {"args": list(args), **kwargs}
+        session_id = bound.get("session_id") if session_tool else None
+        result = None
+        try:
+            result = fn(self, *args, **kwargs)
+            if session_tool and isinstance(result, dict) and fn.__name__ != "release":
+                watch = self._watches.get(session_id)
+                if watch is not None:
+                    events = watch.drain()
+                    if events:
+                        result["watchdog_events"] = events
+                    if watch.suspended_reason:
+                        result["watchdog_suspended"] = watch.suspended_reason
+            return result
+        except Exception as exc:
+            self._tracer().record({
+                "tool": fn.__name__, "session_id": session_id, "args": dict(bound),
+                "ok": False, "error_kind": "exception",
+                "error_message": f"{type(exc).__name__}: {exc}",
+                "elapsed_ms": int((time.monotonic() - started) * 1000),
+            })
+            raise
+        finally:
+            if result is not None:
+                trace = self._tracer()
+                if trace.enabled:
+                    error = result.get("error") if isinstance(result, dict) else None
+                    trace.record({
+                        "tool": fn.__name__,
+                        "session_id": (result.get("session_id") if isinstance(result, dict)
+                                       and "session_id" in result else session_id),
+                        "args": dict(bound),
+                        "ok": bool(result.get("ok")) if isinstance(result, dict) else None,
+                        "error_kind": (error or {}).get("kind") if error else None,
+                        "error_message": (error or {}).get("message") if error else None,
+                        "elapsed_ms": int((time.monotonic() - started) * 1000),
+                        "watchdog_events": (len(result.get("watchdog_events", []))
+                                            if isinstance(result, dict) else 0),
+                        "result": _result_summary(result),
+                    })
     return wrapper
 
 
+def _result_summary(result):
+    """The parts of a result worth keeping in a trace line."""
+    if not isinstance(result, dict):
+        return None
+    keep = ("verified", "tier_used", "tiers_attempted", "match_count", "display",
+            "isolation", "released", "blocked", "left_minimized", "needs_consent",
+            "total", "waited_ms", "expected", "button", "modifiers", "at", "count")
+    return {k: result[k] for k in keep if k in result}
+
+
 for _name, _fn in inspect.getmembers(Toolbox, inspect.isfunction):
-    if _name.startswith("_") or _name == "release":
+    if _name.startswith("_"):
         continue
     _params = list(inspect.signature(_fn).parameters)[1:]
-    if _params and _params[0] == "session_id":
-        setattr(Toolbox, _name, _reporting_watchdog_events(_fn))
+    setattr(Toolbox, _name, _traced_and_reporting(
+        _fn, session_tool=bool(_params) and _params[0] == "session_id"))

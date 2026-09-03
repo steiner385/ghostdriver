@@ -1644,6 +1644,42 @@ their own (it now asks whether the *target* came forward, which is the
 claim), and one released a session before the watchdog had polled on a
 loaded machine (it now waits, bounded, for the event itself).
 
+### D62. Every tool call is traced into the operator directory
+
+**Context.** Asked whether the calls another session was making could be
+seen from here, the honest answer was no: each session launches its own
+server over stdio, and that process kept no record. Every call, argument
+and result vanished with the session unless the model pasted them into
+chat, so a report like "it could not click the link" arrived without the
+call it had tried.
+
+**Decision.** The Toolbox's one outgoing seam -- the wrapper that already
+appends watchdog events to session tools -- now records every public
+tool call: when, which session, which tool, the arguments as bound to the
+tool's own signature, whether it succeeded, the error kind and message,
+the elapsed time, the count of watchdog events, and the parts of the
+result worth keeping (tier used, verification, match count, display).
+One JSON line per call, appended to
+`<operator dir>/logs/ghostdriver-<date>-<pid>.jsonl`, one file per server
+process per day. Pixels are left out and long values trimmed: the trace
+is for reading, not replaying. `ghostdriver trace` prints the recent
+lines of the newest file, or all files, or one session.
+
+**On when the operator directory is configured, and only then.** The
+trace holds locators, captions, values read from the target -- target
+knowledge -- so it lands in the one place that knowledge is allowed to
+land, and nowhere at all when that place is not configured.
+`GHOSTDRIVER_TRACE=0` turns it off; `GHOSTDRIVER_TRACE=<path>` names a
+file instead. A trace that cannot be written never stops the call it
+traces.
+
+**A slip caught by the contract test.** The first accessor for the trace
+was a public method on the Toolbox core, so the wrapper wrapped it too
+and recursed; the tool-surface test would also have flagged a public
+method no tier names. It is private now. The wrapping of every public
+method is the boundary the contract test guards, and this was the
+boundary doing its job.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

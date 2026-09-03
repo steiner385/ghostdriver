@@ -119,6 +119,16 @@ class _ToolboxCore:
     #: (when, pids) per session: the descendant list is asked for on nearly
     #: every call, and a snapshot half a second old is still the truth.
     _tree_cache: dict = field(default_factory=dict)
+    #: Where tool calls are recorded (trace.py); resolved from the
+    #: environment on first use, and a no-op when nothing is configured.
+    _trace: Any = None
+
+    def _tracer(self):
+        if self._trace is None:
+            from ..trace import Trace
+
+            self._trace = Trace.from_environment()
+        return self._trace
 
     def _tree_pids(self, session) -> list[int]:
         """The target and every process descended from it, target first.

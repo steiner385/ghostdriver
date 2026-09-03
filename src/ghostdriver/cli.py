@@ -140,6 +140,19 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--operator-dir", default=None,
                      help=f"Overrides {ENV_VAR}")
 
+    trace = sub.add_parser(
+        "trace",
+        help=(
+            "Show what tool calls sessions made, from the trace files under "
+            "the operator directory's logs/ (newest file by default)."
+        ),
+    )
+    trace.add_argument("--tail", type=int, default=40, help="Last N calls (default 40)")
+    trace.add_argument("--session", default=None, help="Only this session id")
+    trace.add_argument("--all-files", action="store_true",
+                       help="Every trace file, not just the newest")
+    trace.add_argument("--operator-dir", default=None, help=f"Overrides {ENV_VAR}")
+
     return parser
 
 
@@ -614,6 +627,32 @@ def cmd_restore(pid: int) -> int:
     return 0
 
 
+def cmd_trace(tail: int, session: str | None, all_files: bool,
+              operator_dir: str | None = None) -> int:
+    """Print recent tool calls from the trace, one line each."""
+    from .trace import describe, read
+
+    try:
+        folder = OperatorDir.resolve(operator_dir)
+    except OperatorDirError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    files = sorted((folder.root / "logs").glob("ghostdriver-*.jsonl"),
+                   key=lambda f: f.stat().st_mtime)
+    if not files:
+        print(f"no trace files under {folder.root / 'logs'} (is {ENV_VAR} set for the server?)")
+        return 0
+    chosen = files if all_files else files[-1:]
+    events: list[dict] = []
+    for f in chosen:
+        events.extend(read(f, session_id=session))
+    events.sort(key=lambda e: e.get("at", 0))
+    for event in events[-tail:]:
+        print(describe(event))
+    print(f"-- {len(events[-tail:])} of {len(events)} call(s) from {', '.join(f.name for f in chosen)}")
+    return 0
+
+
 def cmd_list_workflows(operator_dir: str | None = None) -> int:
     try:
         folder = OperatorDir.resolve(operator_dir)
@@ -725,6 +764,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "list-workflows":
         return cmd_list_workflows(getattr(args, "operator_dir", None))
+    if args.command == "trace":
+        return cmd_trace(args.tail, args.session, args.all_files, args.operator_dir)
     if args.command == "run-workflow":
         return cmd_run_workflow(args.name, args.pid, args.operator_dir)
     return 2

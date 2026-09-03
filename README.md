@@ -154,7 +154,11 @@ ghostdriver list-workflows
 ghostdriver run-workflow walk-tabs --pid 1234
 ```
 
-The directory holds `profiles/`, `workflows/` and `reports/`. A path
+The directory holds `profiles/`, `workflows/`, `reports/` and `logs/`,
+where every session's server writes a trace of its tool calls (one JSON
+line per call: session, tool, arguments, outcome, elapsed; pixels left
+out). `ghostdriver trace` prints the recent ones, so what another session
+did can be read after the fact; `GHOSTDRIVER_TRACE=0` turns it off. A path
 inside a git checkout is refused, and so is a packaged application's
 virtualized AppData (a process inside one cannot write anywhere other
 processes will see). A workflow is a JSON list of tool calls with
