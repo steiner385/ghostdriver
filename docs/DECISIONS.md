@@ -1149,3 +1149,108 @@ grid. The routes that could provide it are the control's own clipboard copy,
 an export command, or an accessible surface that only appears once the
 region has focus. The spec is right that those should be probed before
 anything is built on pixels, and none of them has been.
+
+### D47. What a real Profile L1 target actually looks like
+
+Measured during iteration 4, against a sandbox instance of a real 32-bit
+Delphi/VCL business client. Recorded because two of these corrected beliefs
+this project had been working from, and one of them was mine.
+
+**Classification held.** 97 windows, one per control, x86, toolkit inferred
+as Delphi/VCL at medium confidence. Profile L1, on the same evidence the
+fixture was built to reproduce.
+
+**The accessibility surface is real but useless for commands.** Phase 1
+reported `partial` -- 33 of 98 elements carrying patterns -- which
+contradicted the recorded belief that every element is a Pane with no
+patterns at all. Both readings were wrong. Broken down by class:
+
+| what answers | pattern |
+|---|---|
+| five EDIT-derived classes | `Value` |
+| the tab strip | `Selection` / `SelectionItem` ×19 |
+| **the vendor command-button class** | **nothing; control type Pane** |
+
+So the surface covers text fields -- which typing reaches anyway, and better
+(D21, D24) -- and tab selection. It covers none of the command buttons. Tier
+1 is not a real option for actuating this target, and the `partial` verdict
+would mislead anyone who read it without asking *which* elements answered.
+
+**The region model was right first time.** 73 regions: 70 native reachable
+by window messages, and three owner-drawn reachable only as pixels -- the
+data grid at 1,006,176px, a canvas panel, and the status bar. No false
+positives and no misclassification. The grid is the case the whole surface
+map exists for: a million pixels of business data with no child windows and
+nothing beneath it on any accessibility surface.
+
+**A modality bug that only a real target could show.** Its window chain is
+three deep -- an off-screen application proxy owning both the main window
+and a dialog -- and the detector reported the application as being held by
+its own main window. Fixed; see the commit. The fixture's chain is one level
+and structurally could not have surfaced it.
+
+**Interactive elements that are not windows.** The 19 tabs are owner-drawn
+inside their notebook and exist only on the accessibility surface. Locators
+address windows, so nothing in this tool can currently name a tab. The
+region model is not wrong here -- the notebook region does continue as a
+window tree -- but the gap is real: on this class of target, some of the
+safest things to actuate are the ones that cannot be addressed.
+
+**Why phase 2 nearly did not run.** Every captioned button on the screen
+reached was a write -- send, create, update, copy. Every other button
+carried no caption and no accessible name, including a row of six navigator
+buttons that a screenshot then confirmed to be Insert, Delete, Edit, Edit,
+Filter and Grid Fields. Nothing captioned could honestly be put on a
+safe-control list, and the probe is built so that it cannot choose for
+itself. Looking at the pixels is what turned "unidentifiable" into
+"identified": the toolbar overflow button opens a menu, which is view-only
+and reversible, and became the one entry. See D48 for what running it
+taught.
+
+### D48. A postcondition is polled to a deadline, not sampled once
+
+**Decision.** `Actuator` checks `expect_after` repeatedly, every 50ms after
+the settle, until it holds or two seconds pass. A tier falls through only
+after the whole window.
+
+**What forced it.** Phase 2's first run against the real target reported the
+overflow button as delivered-but-unverified. Every explanation was chased
+before the right one: the expectation's class name, the enumeration, the
+locator parser, a stacked modal, pacing, `WM_MOUSEMOVE`, foreground state.
+Then the window's arrival was timed: the popup menu became a window
+**957ms** after the click that opened it. The actuator checked once, at
+250ms, saw nothing, and moved down the ladder. A working control was
+declared ineffective by a fixed wait -- the false failure the settle was
+meant to prevent, produced by the settle.
+
+With polling, the same run verified on the first attempt and wrote
+`TsfToolbarOtherCommandsBtn: wm_mouse_pair, verified` into the profile.
+
+**Cost.** Falling through now takes the full window per tier, so a genuinely
+ineffective rung costs two seconds instead of a quarter. That is paid only
+on the failing path, and it buys never mistaking a slow effect for no
+effect. The unit tests inject a clock that advances on sleep, so the
+deadline logic is exercised without the wait.
+
+**Two retractions, recorded because they were said out loud.**
+
+- "The posted input pair does not actuate this control" was wrong. It does;
+  variant A -- exactly what `click()` sends -- opened the menu every time on
+  an unblocked application.
+- "Pacing and mouse-move were ruled out" was unsound. Those diagnostics
+  bypassed the `unblocked` precondition the tools enforce, and ran while a
+  connection-lost dialog held the application. A control in a held window
+  received the messages and did nothing, which is D20, and taught nothing
+  about the control. The lesson is procedural: diagnostic scripts get the
+  same preconditions as the tools, or their nulls are not evidence.
+
+**Also observed, and unconfounded.** `GetGUIThreadInfo` showed the control
+taking mouse capture 16ms after `WM_LBUTTONDOWN` and releasing it on UP --
+the VCL pattern, processing posted messages as real input all the way
+through. And the target does not pull itself to the front when actuated.
+
+**The gate.** A view-only control on a real Profile L1 target actuated
+through the full stack, expectation verified, cursor and foreground
+undisturbed, profile written with everything curated left intact. Iteration
+4's first half is met on one control class; the watchdog half is not yet
+built.

@@ -23,11 +23,33 @@ def condition(value, description="a stated expectation"):
     return Condition(check=check, description=description)
 
 
+class FakeClock:
+    """Time that passes only when something sleeps.
+
+    The actuator now polls its postcondition to a deadline, so a no-op sleep
+    against the real clock would spin for the whole window. Advancing a fake
+    clock on each sleep keeps the deadline logic real and the test instant.
+    """
+
+    def __init__(self) -> None:
+        self.t = 0.0
+        self.slept: list[float] = []
+
+    def now(self) -> float:
+        return self.t
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.t += seconds
+
+
 def actuator(**kw):
-    # Sleep is a no-op: settling is real behaviour, but waiting through it
-    # in a unit test buys nothing.
-    kw.setdefault("sleep", lambda _: None)
-    return Actuator(**kw)
+    clock = FakeClock()
+    kw.setdefault("sleep", clock.sleep)
+    kw.setdefault("now", clock.now)
+    act = Actuator(**kw)
+    act.clock = clock  # type: ignore[attr-defined]
+    return act
 
 
 # --- the ladder ----------------------------------------------------------
@@ -173,8 +195,10 @@ def test_a_delivered_but_ineffective_tier_falls_through():
             Attempt(Tier.UIA_PATTERN, lambda: ran.append(1) or True),
             Attempt(Tier.WINDOW_MESSAGE, lambda: ran.append(3) or True),
         ],
-        # False after tier 1, true after tier 3.
-        expect_after=condition([False, True], "the control acted"),
+        # Holds only once tier 3 has actually run, however often it is
+        # polled -- tier 1 delivers, is given the whole window, and never
+        # produces the effect.
+        expect_after=Condition(lambda: 3 in ran, "the control acted"),
     )
 
     assert ran == [1, 3], "tier 1 delivered, achieved nothing, and gave way"
@@ -195,7 +219,13 @@ def test_the_settle_wait_happens_before_a_postcondition_is_checked():
     """A posted message is handled on the target's own thread. Checking
     immediately races it and reports impatience as failure."""
     order = []
-    act = Actuator(sleep=lambda s: order.append(("slept", s)))
+    clock = FakeClock()
+
+    def sleep(s):
+        order.append(("slept", s))
+        clock.sleep(s)
+
+    act = Actuator(sleep=sleep, now=clock.now)
     act.perform(
         [Attempt(Tier.WINDOW_MESSAGE, lambda: order.append("sent") or True)],
         expect_after=Condition(
@@ -222,3 +252,65 @@ def test_a_condition_that_raises_has_not_been_met():
 def test_every_result_carries_how_long_it_took():
     result = actuator().perform([Attempt(Tier.WINDOW_MESSAGE, always(True))])
     assert result.elapsed_ms >= 0
+
+
+# --- the postcondition is polled to a deadline, not sampled once ---------
+
+def test_an_effect_that_arrives_late_is_still_verified():
+    """Measured on a real target: a popup menu became a window 957ms after
+    the click that opened it. A single check at 250ms called that click
+    ineffective and fell through the ladder -- a false failure manufactured
+    by a fixed wait."""
+    act = actuator()
+    ready_at = 0.95
+
+    result = act.perform(
+        [Attempt(Tier.WINDOW_MESSAGE, always(True))],
+        expect_after=Condition(lambda: act.clock.now() >= ready_at,
+                               "the menu window exists"),
+    )
+
+    assert result.ok and result.postcondition_verified is True
+    assert result.tier_used == 3
+
+
+def test_a_fast_effect_costs_one_poll():
+    """Polling must not make the common case slower."""
+    act = actuator()
+    act.perform(
+        [Attempt(Tier.WINDOW_MESSAGE, always(True))],
+        expect_after=condition(True),
+    )
+
+    assert act.clock.slept == [act.settle_seconds], "settle, one check, done"
+
+
+def test_an_effect_that_never_arrives_fails_at_the_deadline():
+    """And not before: the deadline is the whole of the claim being made."""
+    act = actuator()
+    result = act.perform(
+        [Attempt(Tier.WINDOW_MESSAGE, always(True))],
+        expect_after=condition(False, "something that never happens"),
+    )
+
+    assert not result.ok
+    waited = sum(act.clock.slept)
+    assert waited >= act.settle_seconds + act.verify_timeout_s - 1e-9
+    assert waited < act.settle_seconds + act.verify_timeout_s + act.poll_seconds
+
+
+def test_the_deadline_is_per_tier():
+    """Each rung is given the full window before the ladder moves on, so a
+    slow effect is never mistaken for an ineffective tier."""
+    act = actuator()
+    ran = []
+    act.perform(
+        [
+            Attempt(Tier.UIA_PATTERN, lambda: ran.append(1) or True),
+            Attempt(Tier.WINDOW_MESSAGE, lambda: ran.append(3) or True),
+        ],
+        expect_after=condition(False),
+    )
+
+    assert ran == [1, 3]
+    assert sum(act.clock.slept) >= 2 * (act.settle_seconds + act.verify_timeout_s) - 1e-9

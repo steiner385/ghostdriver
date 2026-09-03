@@ -64,10 +64,23 @@ DEFAULT_TIERS: tuple[Tier, ...] = (
     Tier.UIA_PATTERN, Tier.WINDOW_MESSAGE,
 )
 
-#: How long to let a target act before checking a postcondition. A posted
-#: message is handled on the target's own thread, so an immediate check
-#: races it and reports a failure that is really impatience.
+#: How long to let a target act before the *first* postcondition check. A
+#: posted message is handled on the target's own thread, so an immediate
+#: check races it and reports a failure that is really impatience.
 SETTLE_SECONDS = 0.25
+
+#: How long to keep checking before concluding the expectation will not
+#: hold. Measured on a real target: a toolbar's popup menu became a window
+#: 957ms after the click that opened it. A single check at 250ms declared
+#: the click ineffective, fell through the ladder, and reported a working
+#: control as unverified -- a false failure manufactured by a fixed wait.
+#: So the wait is a deadline, not a delay: a fast target is verified on the
+#: first poll, and a slow one is given until here.
+VERIFY_TIMEOUT_SECONDS = 2.0
+
+#: Gap between polls. Fine enough that a fast target is not held up, coarse
+#: enough that polling a full-tree resolver is not itself the load.
+POLL_SECONDS = 0.05
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +117,8 @@ class Actuator:
     """Runs a verb down the ladder, under its conditions."""
 
     settle_seconds: float = SETTLE_SECONDS
+    verify_timeout_s: float = VERIFY_TIMEOUT_SECONDS
+    poll_seconds: float = POLL_SECONDS
     sleep: Callable[[float], None] = time.sleep
     now: Callable[[], float] = time.monotonic
     tiers: tuple[Tier, ...] = DEFAULT_TIERS
@@ -189,8 +204,7 @@ class Actuator:
                     disturbances=self._changes(before),
                 )
 
-            self.sleep(self.settle_seconds)
-            if expect_after.holds():
+            if self._verified(expect_after):
                 return ActionResult(
                     ok=True,
                     tier_used=int(attempt.tier),
@@ -231,6 +245,30 @@ class Actuator:
                 ),
             },
         )
+
+    def _verified(self, condition: Condition) -> bool:
+        """Poll `condition` until it holds or the deadline passes.
+
+        A settle first, because the very first check almost always races
+        the target. Then repeated checks up to `verify_timeout_s`, returning
+        the moment it holds: a fast target costs one poll, a slow one is
+        given the whole window, and only a target that never gets there is
+        reported as not having done so.
+
+        Falling through to the next tier therefore waits the full window.
+        That is the price of not declaring a working control ineffective
+        because its effect took a second to arrive, and it is paid only on
+        the failing path.
+        """
+        self.sleep(self.settle_seconds)
+        deadline = self.now() + self.verify_timeout_s
+        while True:
+            if condition.holds():
+                return True
+            remaining = deadline - self.now()
+            if remaining <= 0:
+                return False
+            self.sleep(min(self.poll_seconds, remaining))
 
     def _look(self) -> Snapshot | None:
         """The observation, or nothing if it could not be taken.
