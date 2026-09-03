@@ -3,9 +3,9 @@
 
 from ..model.element import AccessibleElement
 from ..model.result import ErrorKind
+from .acting import _ActingCore
 from .core import (
     _error,
-    _ToolboxCore,
 )
 
 ELEMENT_NO_VALUE = (
@@ -14,7 +14,7 @@ ELEMENT_NO_VALUE = (
 )
 
 
-class ActuationTools(_ToolboxCore):
+class ActuationTools(_ActingCore):
     """Acting on one element under the tier ladder: click, set a value, type, send keys."""
 
     def click(

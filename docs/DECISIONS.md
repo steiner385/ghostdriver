@@ -1491,6 +1491,45 @@ system change this tool does not make on the operator's behalf. Until
 then `ghostdriver.backends.linux` is a refusal with a pointer, which is
 the truth.
 
+### D60. Re-audit after the roadmap: the figures moved, and one promise had slipped
+
+**Context.** The audit at the close of iteration 5 scored the four
+constraints met, code quality "good, with smells", coverage "broad,
+uneven", real-target testing "thin", and Linux "not started". Phases A
+to C of the roadmap (D54 to D59) were meant to move those rows. Re-measured
+on 2026-09-03 from the repository, not from memory.
+
+**What moved.** `tools.py` at 1,767 lines is a package of eight modules,
+the largest 363; ruff and mypy run under `pytest`; a structure guard
+refuses stray modules, target-shaped files and platform imports above the
+backend boundary, and on its first runs found an unwired strategy and
+three profile documents in the checkout root. 752 tests; every tool's
+session and tier gates are checked by enumeration; the per-tool floor
+rose from one test file to three; a session-long focus guard fails any
+run in which a test-spawned window takes the foreground. Elements that
+are not windows and embedded web documents are reached, driven and
+deniable. Linux is specified with its seam in place. Those rows now read
+"good, guarded", "broad, evened", "reached", "specified".
+
+**What did not move, and must not be dressed up.** Real-target testing
+is still thin. The product half of the harness exists -- the operator
+directory, the runner, the report -- and no workflow has run against the
+real application, because that half is the operator's. The row keeps its
+score.
+
+**The slip, and its guard.** A2 promised no tool module over about 400
+lines. B1 and C1 grew `tools/core.py` to 451: the element resolution
+and the actuation plumbing had both landed there. The actuation plumbing
+-- resolve to one, gate, cadence, perform, remember, report, expectation
+-- moved verbatim to `tools/acting.py` as `_ActingCore`, which the acting
+families subclass; `core` keeps the fields, the tree chokepoints and the
+resolver. And the promise is now a test: no module under `tools/` over
+400 lines. A promise that lives only in a decision record is one a later
+phase breaks without noticing, which is exactly what happened.
+
+**The scorecard page** was refreshed in place rather than replaced, so a
+reader sees what changed against what was claimed.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

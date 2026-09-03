@@ -145,3 +145,20 @@ def test_the_source_tree_holds_no_profile_workflow_or_report():
         "directory (GHOSTDRIVER_OPERATOR_DIR): "
         + ", ".join(str(p.relative_to(REPO)) for p in offenders)
     )
+
+
+# --- the tool modules stay readable -------------------------------------------
+
+TOOL_MODULE_LIMIT = 400
+
+
+def test_no_tool_module_outgrows_the_limit_the_split_set():
+    """A2 split a 1,767-line tools.py so a reader opens the file named for
+    what they are looking at; this keeps each file that size. A module
+    over the limit wants a split, not a bigger limit."""
+    over = {
+        p.name: sum(1 for _ in p.open(encoding="utf-8"))
+        for p in (PACKAGE_ROOT / "tools").glob("*.py")
+        if sum(1 for _ in p.open(encoding="utf-8")) > TOOL_MODULE_LIMIT
+    }
+    assert not over, f"tool modules over {TOOL_MODULE_LIMIT} lines: {over}"

@@ -4,14 +4,14 @@ import time
 
 from ..model.result import ErrorKind, GhostdriverError
 from ..probe.profile import merge_learned
+from .acting import _ActingCore
 from .core import (
     _element,
     _error,
-    _ToolboxCore,
 )
 
 
-class LearningTools(_ToolboxCore):
+class LearningTools(_ActingCore):
     """Probing how a target's controls and grids actually behave, under an operator's list."""
 
     def probe_phase2(
