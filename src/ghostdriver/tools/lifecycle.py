@@ -31,8 +31,10 @@ class LifecycleTools(_ToolboxCore):
         """
         import psutil
 
-        from ..backends.windows import winapi
-        from ..backends.windows.enumerate import top_level_windows
+        from ..backends import current
+        winapi = current().winapi
+        from ..backends import current
+        top_level_windows = current().top_level_windows
 
         attached = {s.pid: s.session_id for s in self.sessions.open_sessions()}
         targets = []
@@ -198,7 +200,9 @@ class LifecycleTools(_ToolboxCore):
         summary["ok"] = True
         summary["isolation"] = strategy.value
         if strategy is Isolation.MINIMIZED:
-            from ..backends.windows.isolate import MinimizedWatch, WatchError
+            from ..backends import current
+            MinimizedWatch = current().MinimizedWatch
+            WatchError = current().WatchError
 
             watch = MinimizedWatch(pid)
             try:
@@ -220,7 +224,8 @@ class LifecycleTools(_ToolboxCore):
         # the application inside so the caller gets a pid to attach to.
         selected = self._trees(session, all_windows=False)
         if selected and is_frame_host(selected[0].class_name):
-            from ..backends.windows.hosted import resolve_hosted_app
+            from ..backends import current
+            resolve_hosted_app = current().resolve_hosted_app
 
             found = resolve_hosted_app(selected[0].handle, session.pid)
             app_name = ""
@@ -315,7 +320,8 @@ class LifecycleTools(_ToolboxCore):
                           f"the operator declined to launch {command!r}"
                           + (f" ({grant.note})" if grant.note else ""))
 
-        from ..backends.windows.hidden_desktop import HiddenDesktop
+        from ..backends import current
+        HiddenDesktop = current().HiddenDesktop
 
         desktop = HiddenDesktop(name=f"ghostdriver-{uuid.uuid4().hex[:8]}")
         try:

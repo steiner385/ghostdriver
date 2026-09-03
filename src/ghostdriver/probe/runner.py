@@ -27,11 +27,16 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
     """
     import psutil
 
-    from ..backends.windows.enumerate import enumerate_process
-    from ..backends.windows.modality import top_level_state
-    from ..backends.windows.msaa import assess_msaa
-    from ..backends.windows.process import process_facts
-    from ..backends.windows.uia import assess_uia
+    from ..backends import current
+    enumerate_process = current().enumerate_process
+    from ..backends import current
+    top_level_state = current().top_level_state
+    from ..backends import current
+    assess_msaa = current().assess_msaa
+    from ..backends import current
+    process_facts = current().process_facts
+    from ..backends import current
+    assess_uia = current().assess_uia
     from ..hosting import hosted_frame_note, is_frame_host
     from ..modality import find_modal_blocks
     from ..surface import is_web_host
@@ -100,7 +105,8 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
     # application inside, so the reader gets a pid rather than a search.
     hosting_note = ""
     if is_frame_host(main.class_name):
-        from ..backends.windows.hosted import resolve_hosted_app
+        from ..backends import current
+        resolve_hosted_app = current().resolve_hosted_app
 
         found = resolve_hosted_app(main.handle, pid)
         app_name = ""

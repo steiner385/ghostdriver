@@ -38,7 +38,8 @@ class ActuationTools(_ToolboxCore):
         if failure is not None:
             return failure
 
-        from ..backends.windows import verbs
+        from ..backends import current
+        verbs = current().verbs
 
         try:
             after, described = self._expectation(prepared.session, expect)
@@ -107,8 +108,10 @@ class ActuationTools(_ToolboxCore):
             return refusal
 
         from ..actuate import Condition
-        from ..backends.windows import verbs
-        from ..backends.windows.text import read_window_text
+        from ..backends import current
+        verbs = current().verbs
+        from ..backends import current
+        read_window_text = current().read_window_text
 
         handle = prepared.node.handle
         wanted = text if expect_text is None else expect_text
@@ -120,7 +123,8 @@ class ActuationTools(_ToolboxCore):
             # An element's display is its value on the surface, re-read; a
             # window's is what it answers to a text query.
             if element is not None:
-                from ..backends.windows.elements import _current_value
+                from ..backends import current
+                _current_value = current()._current_value
                 return prepared.session.run(lambda: _current_value(element))
             return read_window_text(handle)
 
@@ -198,7 +202,8 @@ class ActuationTools(_ToolboxCore):
         if refusal is not None:
             return refusal
 
-        from ..backends.windows import verbs
+        from ..backends import current
+        verbs = current().verbs
 
         try:
             after, described = self._expectation(prepared.session, expect)
@@ -243,8 +248,10 @@ class ActuationTools(_ToolboxCore):
         )
         if failure is not None:
             return failure
-        from ..backends.windows import verbs
-        from ..backends.windows.input import NAMED_KEYS
+        from ..backends import current
+        verbs = current().verbs
+        from ..backends import current
+        NAMED_KEYS = current().NAMED_KEYS
 
         # Named keys carry nothing, so `tab` out of a password field a
         # person has filled in is fine. A character is the credential.

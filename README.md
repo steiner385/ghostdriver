@@ -105,6 +105,15 @@ attaches at the tier and isolation it declares. The runner stops at the
 first failed step, fails the run if the target ever takes the foreground,
 and writes a report of every step and event back to `reports/`.
 
+## Platforms
+
+Windows is the backend. Linux is specified in `docs/LINUX.md` -- AT-SPI
+for the tree and actuation, a nested X server for the structural
+isolation guarantee -- and its package refuses every call with a pointer
+there until it is built on a machine that can measure it. Everything
+above the backend boundary (`ghostdriver.backends.current()`) is
+platform-neutral, and a test keeps it that way.
+
 ## What it does not do
 
 - **Un-minimize anything on its own.** Measured: every way of restoring a

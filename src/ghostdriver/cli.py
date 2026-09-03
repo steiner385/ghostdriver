@@ -144,7 +144,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _main_tree(pid: int):
-    from .backends.windows.enumerate import enumerate_process
+    from .backends import current
+    enumerate_process = current().enumerate_process
 
     trees = enumerate_process(pid)
     tree = select_main_tree(trees)
@@ -165,7 +166,8 @@ def _trees(pid: int, all_windows: bool):
     48% of the process's windows sat outside it, including every dialog.
     `--all-windows` reaches them.
     """
-    from .backends.windows.enumerate import enumerate_process
+    from .backends import current
+    enumerate_process = current().enumerate_process
 
     trees = enumerate_process(pid)
     if not trees:
@@ -180,7 +182,8 @@ def _trees(pid: int, all_windows: bool):
 def cmd_list_targets() -> int:
     import psutil
 
-    from .backends.windows.enumerate import top_level_windows
+    from .backends import current
+    top_level_windows = current().top_level_windows
 
     rows = []
     for proc in psutil.process_iter(["pid", "name"]):
@@ -215,7 +218,8 @@ def cmd_describe(
     left, and any window that could not be reached is counted rather than
     dropped in silence.
     """
-    from .backends.windows.modality import top_level_state
+    from .backends import current
+    top_level_state = current().top_level_state
     from .modality import find_modal_blocks
 
     trees = _trees(pid, all_windows)
@@ -450,7 +454,8 @@ def cmd_surfaces(
     pid: int, show_all: bool, changed_from: str | None,
     all_windows: bool = False,
 ) -> int:
-    from .backends.windows.region import region_evidence
+    from .backends import current
+    region_evidence = current().region_evidence
     from .surface import (
         map_digest,
         needs_other_mechanism,
@@ -473,7 +478,8 @@ def cmd_surfaces(
     # Said first, and unconditionally. Which mechanism drives a region is
     # academic while the window is disabled: every one of them will fail,
     # and the caller needs to deal with the dialog before anything else.
-    from .backends.windows.modality import top_level_state
+    from .backends import current
+    top_level_state = current().top_level_state
     from .modality import find_modal_blocks
 
     blocks, unexplained = find_modal_blocks(top_level_state(pid))
@@ -535,7 +541,8 @@ def cmd_modals(pid: int) -> int:
     disabled window will retry forever, so this is worth an exit code
     rather than a line of prose.
     """
-    from .backends.windows.modality import top_level_state
+    from .backends import current
+    top_level_state = current().top_level_state
     from .modality import find_modal_blocks
 
     state = top_level_state(pid)
@@ -572,8 +579,10 @@ def cmd_modals(pid: int) -> int:
 def cmd_restore(pid: int) -> int:
     # Imported here, like every other backend use in this module, so the CLI
     # stays importable on a host with no Windows backend.
-    from .backends.windows import winapi
-    from .backends.windows.restore import restore_process
+    from .backends import current
+    winapi = current().winapi
+    from .backends import current
+    restore_process = current().restore_process
 
     result = restore_process(pid)
     if not result.restored:
@@ -635,7 +644,8 @@ def cmd_run_workflow(name: str, pid: int, operator_dir: str | None = None) -> in
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    from .backends.windows.interference import InterferenceWatch
+    from .backends import current
+    InterferenceWatch = current().InterferenceWatch
 
     profile_path = (str(folder.profile_path(workflow.profile))
                     if workflow.profile else None)

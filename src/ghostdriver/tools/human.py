@@ -156,7 +156,8 @@ class HumanTools(_ToolboxCore):
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, f"until is unusable: {exc}")
 
-        from ..backends.windows.text import read_window_text
+        from ..backends import current
+        read_window_text = current().read_window_text
 
         wanted = until.get("text")
         # "gone" is as common a signal as "there": a sign-in dialog closing

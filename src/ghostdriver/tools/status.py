@@ -39,7 +39,8 @@ class StatusTools(_ToolboxCore):
         except GhostdriverError as exc:
             return _error(exc.kind, exc.message)
 
-        from ..backends.windows.region import region_evidence
+        from ..backends import current
+        region_evidence = current().region_evidence
         from ..surface import (
             map_digest,
             needs_other_mechanism,
@@ -95,7 +96,8 @@ class StatusTools(_ToolboxCore):
         except GhostdriverError as exc:
             return _error(exc.kind, exc.message)
 
-        from ..backends.windows.modality import top_level_state
+        from ..backends import current
+        top_level_state = current().top_level_state
         from ..modality import find_modal_blocks
 
         state = session.run(lambda: top_level_state(session.pid))
@@ -149,8 +151,10 @@ class StatusTools(_ToolboxCore):
                 "then un-minimize it from the taskbar.",
             )
 
-        from ..backends.windows import winapi
-        from ..backends.windows.restore import restore_process
+        from ..backends import current
+        winapi = current().winapi
+        from ..backends import current
+        restore_process = current().restore_process
 
         result = restore_process(session.pid)
         return {

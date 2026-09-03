@@ -104,8 +104,10 @@ class LearningTools(_ToolboxCore):
         reached and the disturbances around it, and it must refuse rather
         than fall back on anything the tool surface would forgive.
         """
-        from ..backends.windows import verbs
-        from ..backends.windows.modality import snapshot
+        from ..backends import current
+        verbs = current().verbs
+        from ..backends import current
+        snapshot = current().snapshot
         from ..probe.phase2 import ControlOutcome
 
         def refused(reason: str, class_name: str = "") -> ControlOutcome:
@@ -189,7 +191,8 @@ class LearningTools(_ToolboxCore):
         that a single check straight afterwards would report a target that
         does disturb the desktop as one that does not.
         """
-        from ..backends.windows.modality import snapshot
+        from ..backends import current
+        snapshot = current().snapshot
 
         deadline = started + (settle_ms / 1000.0)
         while time.monotonic() < deadline:
@@ -237,7 +240,8 @@ class LearningTools(_ToolboxCore):
         except GhostdriverError as exc:
             return _error(exc.kind, exc.message, locator=locator)
 
-        from ..backends.windows.modality import blocking_ancestor
+        from ..backends import current
+        blocking_ancestor = current().blocking_ancestor
 
         if session.run(lambda: blocking_ancestor(node.handle)) is not None:
             return _error(ErrorKind.NOT_ACTIONABLE,
@@ -250,7 +254,9 @@ class LearningTools(_ToolboxCore):
                 "it is not a painted region. Use `read`",
             )
 
-        from ..backends.windows.grid import copy_route, focus_route
+        from ..backends import current
+        copy_route = current().copy_route
+        focus_route = current().focus_route
         from ..gridstrategy import GridProbe, find_grid_strategy
 
         # Routed through the session: the focus re-scan and the clipboard

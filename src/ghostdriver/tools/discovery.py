@@ -129,14 +129,16 @@ class DiscoveryTools(_ToolboxCore):
         except GhostdriverError as exc:
             return _error(exc.kind, exc.message)
 
-        from ..backends.windows.text import read_window_text
+        from ..backends import current
+        read_window_text = current().read_window_text
 
         try:
             matches = self._resolve(session, locator, all_windows)
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, str(exc), locator=locator)
 
-        from ..backends.windows.text import is_protected
+        from ..backends import current
+        is_protected = current().is_protected
 
         values = []
         for node in matches[:MAX_ELEMENTS]:
@@ -198,7 +200,9 @@ class DiscoveryTools(_ToolboxCore):
         except GhostdriverError as exc:
             return _error(exc.kind, exc.message)
 
-        from ..backends.windows.capture import CaptureError, capture_window
+        from ..backends import current
+        CaptureError = current().CaptureError
+        capture_window = current().capture_window
 
         trees = self._trees(session, all_windows=False)
         if not trees:

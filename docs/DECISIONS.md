@@ -1435,6 +1435,62 @@ queue -- would need the pattern route alone, which is on the ladder, or
 the browser protocol the plan deferred, which is still deferred: nothing
 measured here asked for it.
 
+### D59. The backend boundary is a registry and a contract; Linux is specified, not built
+
+**Context.** C2 of the roadmap, on a machine with no Linux desktop and no
+WSL. Everything in this project that mattered was a measurement
+contradicting a model, so a Linux backend written here would be code
+nobody has run -- the thing the discipline exists to prevent. What could
+be done honestly was done: the boundary the Linux backend will fill was
+made real, and the specification says what to build and, above all, what
+to measure first.
+
+**The boundary.** The tool layer, the CLI and the probe runner imported
+`backends.windows` directly at fifty sites. They now ask a registry:
+`backends.current()` returns the platform's backend, and every backend
+answers the same `CONTRACT` of twenty-nine names -- the tree, reading,
+modality, elements, regions, acting, isolation, interference, and the raw
+API. The Windows package binds each name to its module lazily, so
+importing the backend costs nothing and COM is touched only by a caller
+who needs it; the table that binds them is checked against the contract
+at import. A test holds the line mechanically: no module above
+`backends/` imports a platform package, every contract name resolves on
+Windows, and the Linux package refuses every name with the same message
+pointing at the specification. The rewiring changed no behaviour: the
+full suite is the proof.
+
+**Why a lazy namespace and not a protocol class.** The names are
+functions and classes from a dozen modules, used by name at call sites;
+a namespace that answers those names is the smallest thing that makes the
+seam explicit without rewriting every caller into method calls on an
+object. A `Protocol` can be layered on later for the type checker; the
+contract tuple is the checkable part today, and the structure guard
+sees the bound modules because the package declares them as imports
+under `TYPE_CHECKING` -- a table of strings is exactly what would let a
+stray hide.
+
+**The specification** (docs/LINUX.md) maps every contract name to its
+Windows mechanism, its proposed Linux mechanism, and the decision whose
+measurement must be repeated: AT-SPI2 for the tree, reading and tier 1;
+`XSendEvent` to a window for tier 3, with the synthetic-event flag named
+as *the* measurement that decides whether a Linux tier 3 exists; a nested
+X server with its own AT-SPI bus for the structural isolation guarantee,
+which needs no thread binding because the display is an environment
+variable; EWMH state for modality, restore and the watchdog. It says
+what is the same (everything above the backend), what needs its own
+decision (Wayland, sandboxed applications, the synthetic flag, MPX --
+after the nested server, not before), describes the hostile GTK fixture
+in the Windows fixture's shapes, and lists the eight measurements in the
+order they unblock one another. A test insists every contract name has a
+row in it.
+
+**What was left out, and why.** The backend itself, the GTK fixture, and
+every `tests/test_linux_*.py`. WSL2 with `Xvfb`, `at-spi2-core` and
+PyGObject is enough to build all of it headlessly; installing WSL is a
+system change this tool does not make on the operator's behalf. Until
+then `ghostdriver.backends.linux` is a refusal with a pointer, which is
+the truth.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

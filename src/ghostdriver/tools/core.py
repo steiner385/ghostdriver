@@ -112,7 +112,8 @@ class _ToolboxCore:
     _watches: dict = field(default_factory=dict)
 
     def _trees(self, session, all_windows: bool) -> list[WindowNode]:
-        from ..backends.windows.enumerate import enumerate_process
+        from ..backends import current
+        enumerate_process = current().enumerate_process
 
         # session.run so a hidden-desktop target is enumerated on its own
         # desktop thread; a plain call otherwise.
@@ -135,7 +136,8 @@ class _ToolboxCore:
         return [main] if main else []
 
     def _blocking(self, session) -> list[str]:
-        from ..backends.windows.modality import top_level_state
+        from ..backends import current
+        top_level_state = current().top_level_state
         from ..modality import find_modal_blocks
 
         state = session.run(lambda: top_level_state(session.pid))
@@ -165,7 +167,8 @@ class _ToolboxCore:
         if not locator.is_element:
             return [node for tree in trees for node in resolve(tree, locator)]
 
-        from ..backends.windows.elements import walk_elements_awake
+        from ..backends import current
+        walk_elements_awake = current().walk_elements_awake
 
         # Which windows to walk: the outermost *window* scope, if any.
         scope = locator.within
@@ -262,7 +265,8 @@ class _ToolboxCore:
         field a person has filled in, or `enter` to submit it, carries
         nothing.
         """
-        from ..backends.windows.text import is_protected
+        from ..backends import current
+        is_protected = current().is_protected
 
         if isinstance(node, AccessibleElement):
             if not node.is_password:
@@ -294,13 +298,15 @@ class _ToolboxCore:
         if all(n.surface == "*" for n in notes.notes):
             return notes.cadence_for()
 
-        from ..backends.windows.modality import surface_of
+        from ..backends import current
+        surface_of = current().surface_of
 
         return notes.cadence_for(surface_of(handle))
 
     def _actuator(self, session):
         from ..actuate import Actuator
-        from ..backends.windows.modality import snapshot
+        from ..backends import current
+        snapshot = current().snapshot
 
         return Actuator(observe=lambda: session.run(
             lambda: snapshot(session.pid)))
@@ -325,7 +331,8 @@ class _ToolboxCore:
         halves, and the successful paced attempt is the half that makes the
         failure mean something.
         """
-        from ..backends.windows.modality import surface_of
+        from ..backends import current
+        surface_of = current().surface_of
         from ..ledger import Outcome
 
         try:
@@ -386,7 +393,8 @@ class _ToolboxCore:
             return None, None
 
         from ..actuate import Condition
-        from ..backends.windows.text import read_window_text
+        from ..backends import current
+        read_window_text = current().read_window_text
 
         where = expect.get("locator")
         wanted = expect.get("text")
@@ -411,7 +419,8 @@ class _ToolboxCore:
                 # Re-read from the surface, not from the walk that found
                 # it: the state that proves a tab click worked is the one
                 # after the click.
-                from ..backends.windows.elements import is_selected
+                from ..backends import current
+                is_selected = current().is_selected
 
                 if not all(isinstance(n, AccessibleElement)
                            and is_selected(n) == bool(selected) for n in found):
