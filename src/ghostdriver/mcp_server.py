@@ -649,8 +649,15 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         tier: Annotated[str, Field(description=(
             "Tier of the opened session: read_only, interactive, or full."
         ))] = "read_only",
+        announces_pid: Annotated[bool, Field(description=(
+            "Only for a launcher that re-execs (a virtualenv python, say) "
+            "and prints its real pid as one JSON line. A normal application "
+            "leaves this false; setting it true would hang on one that "
+            "prints nothing."
+        ))] = False,
     ) -> dict[str, Any]:
-        return box.launch_isolated(command, tier=tier)
+        return box.launch_isolated(command, tier=tier,
+                                   announces_pid=announces_pid)
 
     return server
 

@@ -43,7 +43,7 @@ def test_a_target_launched_here_is_invisible_from_the_input_desktop(desktop):
     from ghostdriver.backends.windows.enumerate import top_level_windows
 
     fg_before = user32.GetForegroundWindow()
-    pid = desktop.launch(fixture_command())
+    pid = desktop.launch(fixture_command(), announces_pid=True)
 
     # From this thread -- the Default desktop -- the target does not exist.
     assert top_level_windows(pid) == []
@@ -57,7 +57,7 @@ def test_the_target_is_fully_visible_from_the_bound_thread(desktop):
                                                         top_level_windows)
     from ghostdriver.model.window import select_main_tree
 
-    pid = desktop.launch(fixture_command())
+    pid = desktop.launch(fixture_command(), announces_pid=True)
 
     windows = desktop.run(lambda: top_level_windows(pid))
     nodes = desktop.run(
@@ -72,7 +72,7 @@ def test_reading_from_the_wrong_thread_sees_nothing(desktop):
     call that works through `run` returns nothing off the bound thread."""
     from ghostdriver.backends.windows.enumerate import top_level_windows
 
-    pid = desktop.launch(fixture_command())
+    pid = desktop.launch(fixture_command(), announces_pid=True)
 
     on_thread = desktop.run(lambda: len(top_level_windows(pid)))
     off_thread = len(top_level_windows(pid))
@@ -88,7 +88,7 @@ def test_a_click_registers_through_the_bound_thread(desktop):
     from ghostdriver.backends.windows.text import read_window_text
     from ghostdriver.model.window import select_main_tree
 
-    pid = desktop.launch(fixture_command())
+    pid = desktop.launch(fixture_command(), announces_pid=True)
 
     def act_and_read():
         tree = select_main_tree(enumerate_process(pid))
@@ -113,7 +113,7 @@ def test_capture_through_the_bound_thread_is_a_real_png(desktop):
     from ghostdriver.backends.windows.enumerate import enumerate_process
     from ghostdriver.model.window import select_main_tree
 
-    pid = desktop.launch(fixture_command())
+    pid = desktop.launch(fixture_command(), announces_pid=True)
 
     def shoot():
         tree = select_main_tree(enumerate_process(pid))
@@ -140,7 +140,7 @@ def test_teardown_leaves_no_target_behind(desktop):
     on a hidden desktop is invisible and so especially easy to leak."""
     import psutil
 
-    pid = desktop.launch(fixture_command())
+    pid = desktop.launch(fixture_command(), announces_pid=True)
     assert psutil.pid_exists(pid)
 
     desktop.teardown()

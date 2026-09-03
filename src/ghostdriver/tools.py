@@ -300,6 +300,7 @@ class Toolbox:
         command: list[str],
         *,
         tier: str = "read_only",
+        announces_pid: bool = False,
     ) -> dict:
         """Launch a target onto a hidden desktop and open a session on it.
 
@@ -343,7 +344,7 @@ class Toolbox:
         desktop = HiddenDesktop(name=f"ghostdriver-{uuid.uuid4().hex[:8]}")
         try:
             desktop.prepare()
-            pid = desktop.launch(list(command))
+            pid = desktop.launch(list(command), announces_pid=announces_pid)
         except OSError as exc:
             desktop.teardown()
             return _error(ErrorKind.DENIED_BY_ENVIRONMENT,

@@ -43,7 +43,7 @@ def approved(box):
 def test_launching_without_approval_asks_rather_than_launches(box):
     """Launching a process is the tool's widest authority; it does not
     happen until the operator has approved the exact command."""
-    result = box.launch_isolated(COMMAND, tier="read_only")
+    result = box.launch_isolated(COMMAND, tier="read_only", announces_pid=True)
 
     assert not result["ok"]
     assert result["needs_consent"] is True
@@ -53,7 +53,7 @@ def test_launching_without_approval_asks_rather_than_launches(box):
 def test_a_declined_command_is_refused(box):
     box.sessions.record_launch_grant(COMMAND, allowed=False,
                                      note="not this one")
-    result = box.launch_isolated(COMMAND, tier="read_only")
+    result = box.launch_isolated(COMMAND, tier="read_only", announces_pid=True)
 
     assert not result["ok"]
     assert "declined" in result["error"]["message"]
@@ -65,7 +65,7 @@ def test_approval_is_for_the_exact_command(box):
     box.sessions.record_launch_grant(COMMAND, allowed=True)
 
     other = box.launch_isolated(COMMAND + ["--modal-after", "500"],
-                                tier="read_only")
+                                tier="read_only", announces_pid=True)
     assert other["needs_consent"] is True
 
 
@@ -73,7 +73,7 @@ def test_approval_is_for_the_exact_command(box):
 
 def test_a_launched_target_is_driven_through_the_normal_tools(box):
     approved(box)
-    launched = box.launch_isolated(COMMAND, tier="interactive")
+    launched = box.launch_isolated(COMMAND, tier="interactive", announces_pid=True)
     assert launched["ok"], launched
     assert launched["isolation"] == "hidden_desktop"
     session = launched["session_id"]
@@ -99,7 +99,7 @@ def test_the_launched_target_is_invisible_from_the_operators_desktop(box):
 
     approved(box)
     fg_before = user32.GetForegroundWindow()
-    launched = box.launch_isolated(COMMAND, tier="interactive")
+    launched = box.launch_isolated(COMMAND, tier="interactive", announces_pid=True)
     pid = launched["launched_pid"]
 
     # From this thread (the Default desktop) the target does not exist,
@@ -112,7 +112,7 @@ def test_the_launched_target_is_invisible_from_the_operators_desktop(box):
 
 def test_capture_of_a_hidden_target_is_a_real_png(box):
     approved(box)
-    launched = box.launch_isolated(COMMAND, tier="read_only")
+    launched = box.launch_isolated(COMMAND, tier="read_only", announces_pid=True)
 
     shot = box.capture(launched["session_id"])
 
@@ -126,7 +126,7 @@ def test_releasing_closes_the_target_and_the_desktop(box):
     import psutil
 
     approved(box)
-    launched = box.launch_isolated(COMMAND, tier="read_only")
+    launched = box.launch_isolated(COMMAND, tier="read_only", announces_pid=True)
     pid = launched["launched_pid"]
     assert psutil.pid_exists(pid)
 

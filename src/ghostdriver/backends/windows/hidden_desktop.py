@@ -189,41 +189,61 @@ class HiddenDesktop:
             raise payload
         return payload
 
-    def launch(self, command: list[str]) -> int:
-        """Start `command` on the hidden desktop; return its announced pid.
+    def launch(self, command: list[str], *, announces_pid: bool = False) -> int:
+        """Start `command` on the hidden desktop; return the target's pid.
 
-        The child is told which desktop to start on through STARTUPINFO, and
-        its stdout is piped back so the *announced* pid is read rather than
-        the launcher's -- the same launcher-stub problem the read-only tests
-        have (a venv shim re-execs, and CreateProcess returns the shim).
+        The child is told which desktop to start on through STARTUPINFO. Its
+        pid comes from CreateProcess -- the real pid for an ordinary
+        executable, which is the normal case.
+
+        `announces_pid` is for the exception: a launcher that re-execs, so
+        the process CreateProcess returns is a stub that owns no windows
+        while the real interpreter runs under a different pid (a virtualenv
+        python is the one this project meets, in its own tests). Such a
+        target prints one JSON line naming its real pid, read back here over
+        a pipe. A real application announces nothing and must not be waited
+        on, so this is opt-in and off by default -- the wrong default would
+        hang launch on anything that never prints a pid.
         """
-        sa = SECURITY_ATTRIBUTES(ctypes.sizeof(SECURITY_ATTRIBUTES), None, True)
-        read_end, write_end = wintypes.HANDLE(), wintypes.HANDLE()
-        if not kernel32.CreatePipe(ctypes.byref(read_end),
-                                   ctypes.byref(write_end),
-                                   ctypes.byref(sa), 0):
-            raise OSError("CreatePipe failed")
-        kernel32.SetHandleInformation(read_end, HANDLE_FLAG_INHERIT, 0)
-
         info = STARTUPINFOW()
         info.cb = ctypes.sizeof(info)
         info.lpDesktop = f"{WINDOW_STATION}\\{self.name}"
-        info.dwFlags = STARTF_USESTDHANDLES
-        info.hStdOutput = write_end
-        info.hStdError = write_end
+
+        read_end = write_end = None
+        if announces_pid:
+            sa = SECURITY_ATTRIBUTES(ctypes.sizeof(SECURITY_ATTRIBUTES),
+                                     None, True)
+            read_end, write_end = wintypes.HANDLE(), wintypes.HANDLE()
+            if not kernel32.CreatePipe(ctypes.byref(read_end),
+                                       ctypes.byref(write_end),
+                                       ctypes.byref(sa), 0):
+                raise OSError("CreatePipe failed")
+            kernel32.SetHandleInformation(read_end, HANDLE_FLAG_INHERIT, 0)
+            info.dwFlags = STARTF_USESTDHANDLES
+            info.hStdOutput = write_end
+            info.hStdError = write_end
+
         pi = PROCESS_INFORMATION()
         line = " ".join(f'"{part}"' if " " in part else part
                         for part in command)
-        if not kernel32.CreateProcessW(
-                None, ctypes.create_unicode_buffer(line), None, None, True,
-                0, None, None, ctypes.byref(info), ctypes.byref(pi)):
-            kernel32.CloseHandle(write_end)
-            kernel32.CloseHandle(read_end)
-            raise OSError(f"CreateProcess failed: "
-                          f"{ctypes.WinError(ctypes.get_last_error())}")
-        kernel32.CloseHandle(write_end)
+        ok = kernel32.CreateProcessW(
+            None, ctypes.create_unicode_buffer(line), None, None,
+            bool(announces_pid), 0, None, None,
+            ctypes.byref(info), ctypes.byref(pi))
+        if not ok:
+            err = ctypes.WinError(ctypes.get_last_error())
+            if write_end:
+                kernel32.CloseHandle(write_end)
+            if read_end:
+                kernel32.CloseHandle(read_end)
+            raise OSError(f"CreateProcess failed: {err}")
         self._process = pi.hProcess
-        self._launcher_pid = pi.dwProcessId
+
+        if not announces_pid:
+            self.pid = pi.dwProcessId
+            return pi.dwProcessId
+
+        kernel32.CloseHandle(write_end)
         try:
             announced = self._read_announced_pid(read_end)
         finally:

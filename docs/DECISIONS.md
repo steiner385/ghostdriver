@@ -1058,6 +1058,41 @@ launch) cannot proceed there without a `SwitchDesktop` that takes over the
 operator's screen -- which this does not do. For those, `minimized` remains
 the working strategy.
 
+### D53. hidden_desktop launches the direct pid, and fits only classic Win32
+
+**Two findings from launching a real app onto a hidden desktop, both of
+which corrected something.**
+
+**The launched pid is the CreateProcess pid, not an announced one.** The
+first `launch` always piped the child's stdout and read a JSON pid line --
+because the read-only tests launch a virtualenv `python.exe` that re-execs,
+so CreateProcess returns a stub that owns no windows. But a real application
+announces nothing and never closes stdout, so waiting for that line hangs
+the launch outright. So the announcement is now opt-in (`announces_pid`,
+off by default): an ordinary executable uses `pi.dwProcessId` directly, and
+only a re-execing launcher asks for the pipe. Off was the only safe default
+-- the wrong one hangs on everything that does not print a pid.
+
+**The strategy fits classic single-process Win32 targets, and not
+Store-activated ones.** Measured: launching `System32
+otepad.exe` onto a
+hidden desktop opened, held the guarantee, and tore down cleanly -- but the
+session saw no windows, because Windows 11 ships Notepad (and Solitaire, and
+Paint) as a Store app. `notepad.exe` is a stub that hands off to a packaged
+process the shell *activates* on the input desktop, ignoring the `lpDesktop`
+in STARTUPINFO. The real app lands on the operator's screen and the launched
+pid owns nothing. `charmap.exe` and `winver.exe` -- classic single-process
+Win32 -- launch onto the hidden desktop and are fully driveable there;
+Character Map was launched, described, and captured with its window never
+appearing on the operator's screen.
+
+This is a genuine limit on which targets `hidden_desktop` fits, and it
+compounds the interactive-login limit already recorded: a target must be
+both classic Win32 *and* not require a person to sign in for the strategy to
+be usable end to end. A Store-activated target cannot be isolated this way
+at all, and there is no workaround at this layer -- activation is the
+shell's, not ours to redirect.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised
