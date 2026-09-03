@@ -26,6 +26,8 @@ class ActuationTools(_ActingCore):
         expect: dict | None = None,
         button: str = "left",
         modifiers: list[str] | None = None,
+        at: dict | None = None,
+        count: int = 1,
     ) -> dict:
         """Actuate one control.
 
@@ -34,8 +36,12 @@ class ActuationTools(_ActingCore):
         the input was delivered and claims nothing about its effect, because
         on this class of target those are genuinely different statements.
 
-        `button` is left, right or middle; `modifiers` may hold ctrl and
-        shift. A right-click opens a context menu, which arrives as a new
+        `at` is a point {x, y} inside the element -- client-relative for a
+        window, relative to the top-left for an element -- for a region
+        that paints its own rows and exposes none of them: a capture shows
+        where the row is, this clicks there, and nothing is activated.
+        `count` 2 is a double-click. `button` is left, right or middle;
+        `modifiers` may hold ctrl and shift. A right-click opens a context menu, which arrives as a new
         top-level window (all_windows=true reaches it). Modifiers travel in
         the message's own flags, the only place a posted message can carry
         them: a target that reads those flags sees them, one that asks the
@@ -60,9 +66,28 @@ class ActuationTools(_ActingCore):
             current().button_pair(button, held)
         except ValueError as exc:
             return _error(ErrorKind.NOT_ACTIONABLE, str(exc), locator=locator)
-        attempts = (verbs.click_element(prepared.node, button=button, modifiers=held)
+        if count not in (1, 2):
+            return _error(ErrorKind.NOT_ACTIONABLE,
+                          f"count must be 1 or 2, not {count!r}", locator=locator)
+        point = None
+        if at is not None:
+            try:
+                point = (int(at["x"]), int(at["y"]))
+            except (KeyError, TypeError, ValueError):
+                return _error(ErrorKind.NOT_ACTIONABLE,
+                              "at must be {x, y} in pixels inside the element", locator=locator)
+            left, top, right, bottom = prepared.node.rect
+            width, height = right - left, bottom - top
+            if not (0 <= point[0] < max(width, 1) and 0 <= point[1] < max(height, 1)):
+                return _error(
+                    ErrorKind.NOT_ACTIONABLE,
+                    f"at={point} is outside the element, which is {width}x{height}",
+                    locator=locator)
+        attempts = (verbs.click_element(prepared.node, button=button, modifiers=held,
+                                        at=point, count=count)
                     if isinstance(prepared.node, AccessibleElement)
-                    else verbs.click(prepared.node.handle, button=button, modifiers=held))
+                    else verbs.click(prepared.node.handle, button=button, modifiers=held,
+                                     at=point, count=count))
         result = self._perform(prepared.session,
             attempts,
             expect_before=verbs.unblocked(prepared.node.handle),
@@ -74,7 +99,7 @@ class ActuationTools(_ActingCore):
             verified=("effect" if after is not None and result.ok
                       else "delivery_only"),
             expected=described,
-            button=button, modifiers=held,
+            button=button, modifiers=held, at=point, count=count,
         )
 
     def set_value(

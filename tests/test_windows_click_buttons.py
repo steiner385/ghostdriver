@@ -124,3 +124,50 @@ def test_a_posted_pair_of_one_button_does_not_complete_another(app):
     time.sleep(0.3)
 
     assert read_window_text(status.handle) == "clicks=0 last="
+
+
+# --- a point inside the element, and a double-click --------------------------------
+
+GRID = "class=GhostFixtureDataGrid"
+
+
+def test_a_click_at_a_point_reaches_a_row_the_grid_will_not_name(session):
+    """The painted grid exposes no rows; a capture says where row 2 is
+    (rows are 20px from y=4), and the click lands there. Still posted."""
+    box, sid = session
+
+    result = box.click(sid, GRID, at={"x": 30, "y": 4 + 2 * 20 + 8},
+                       expect={"locator": 'class=Static text="/last=grid row=2$/"'})
+
+    assert result["ok"], result
+    assert result["at"] == (30, 52) or result["at"] == [30, 52]
+    assert result["tier_used"] == 3
+
+
+def test_a_double_click_is_the_double_click_message(session):
+    box, sid = session
+
+    result = box.click(sid, GRID, at={"x": 30, "y": 4 + 1 * 20 + 8}, count=2,
+                       expect={"locator": 'class=Static text="/clicks=2 last=grid row=1 double/"'})
+
+    assert result["ok"], result
+    assert result["count"] == 2
+
+
+def test_a_point_outside_the_element_is_refused_before_anything_is_sent(session):
+    box, sid = session
+
+    result = box.click(sid, GRID, at={"x": 5000, "y": 5})
+
+    assert not result["ok"]
+    assert result["error"]["kind"] == "not_actionable"
+    assert "outside" in result["error"]["message"]
+    assert box.read(sid, 'class=Static text="/clicks=/"')["values"][0]["text"] == "clicks=0 last="
+
+
+def test_a_bad_count_is_refused(session):
+    box, sid = session
+
+    result = box.click(sid, EXPAND, count=3)
+
+    assert not result["ok"] and "count" in result["error"]["message"]

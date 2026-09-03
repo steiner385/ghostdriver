@@ -16,7 +16,8 @@ from . import elements, modality
 from . import input as win_input
 
 
-def click(hwnd: int, *, button: str = "left", modifiers=()) -> list[Attempt]:
+def click(hwnd: int, *, button: str = "left", modifiers=(), at=None,
+          count: int = 1) -> list[Attempt]:
     """Actuate a control.
 
     Tier 1 first because a target that publishes an Invoke pattern should be
@@ -26,8 +27,10 @@ def click(hwnd: int, *, button: str = "left", modifiers=()) -> list[Attempt]:
     modifier, so anything but a plain left click is tier 3 alone.
     """
     posted = Attempt(Tier.WINDOW_MESSAGE,
-                     lambda: win_input.click(hwnd, button=button, modifiers=modifiers))
-    if button != "left" or modifiers:
+                     lambda: win_input.click(hwnd, button=button, modifiers=modifiers,
+                                             at=at, count=count))
+    if button != "left" or modifiers or at is not None or count != 1:
+        # A pattern has no button, no modifier, no point and no double.
         return [posted]
     return [
         Attempt(Tier.UIA_PATTERN, lambda: win_input.invoke_via_uia(hwnd)),
@@ -36,7 +39,7 @@ def click(hwnd: int, *, button: str = "left", modifiers=()) -> list[Attempt]:
 
 
 def click_element(element: AccessibleElement, *, button: str = "left",
-                  modifiers=()) -> list[Attempt]:
+                  modifiers=(), at=None, count: int = 1) -> list[Attempt]:
     """Actuate an element that is not a window.
 
     **The posted click goes first, and the pattern is the fallback.** That
@@ -57,8 +60,9 @@ def click_element(element: AccessibleElement, *, button: str = "left",
     """
     posted = Attempt(Tier.WINDOW_MESSAGE,
                      lambda: elements.click_posted(element, button=button,
-                                                   modifiers=modifiers))
-    if button != "left" or modifiers:
+                                                   modifiers=modifiers, at=at,
+                                                   count=count))
+    if button != "left" or modifiers or at is not None or count != 1:
         return [posted]
     return [
         posted,

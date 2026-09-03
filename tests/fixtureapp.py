@@ -57,6 +57,7 @@ WM_RBUTTONDOWN = 0x0204
 WM_RBUTTONUP = 0x0205
 WM_MBUTTONDOWN = 0x0207
 WM_MBUTTONUP = 0x0208
+WM_LBUTTONDBLCLK = 0x0203
 BUTTON_DOWN = {WM_LBUTTONDOWN: "left", WM_RBUTTONDOWN: "right", WM_MBUTTONDOWN: "middle"}
 BUTTON_UP = {WM_LBUTTONUP: "left", WM_RBUTTONUP: "right", WM_MBUTTONUP: "middle"}
 MK_SHIFT, MK_CONTROL = 0x0004, 0x0008
@@ -353,14 +354,15 @@ def _blocked(hwnd: int) -> bool:
     return False
 
 
-def _on_click(hwnd: int, *, button: str = "left", modifiers=()) -> None:
+def _on_click(hwnd: int, *, button: str = "left", modifiers=(),
+              caption: str | None = None) -> None:
     """What a click does: bump a counter the test can read back.
 
     A counter rather than a visible effect, because an action that cannot be
     distinguished from a no-op manufactures false passes -- which is the
     reason pre- and post-conditions exist in the first place.
     """
-    caption = _text_of(hwnd)
+    caption = _text_of(hwnd) if caption is None else caption
     _STATE["clicks"] = _STATE.get("clicks", 0) + 1
     _STATE["last_clicked"] = caption
     status = _STATE.get("status")
@@ -424,6 +426,22 @@ def _grid_proc(hwnd, msg, wparam, lparam):
     if msg == WM_GETTEXT:
         if wparam:
             ctypes.cast(lparam, wintypes.LPWSTR).contents.value = "\0"
+        return 0
+    if msg in BUTTON_UP or msg == WM_LBUTTONDBLCLK:
+        # The row under the click, from the geometry the paint below uses:
+        # the only way a driver can act on a row this grid will not name.
+        y = (lparam >> 16) & 0xFFFF
+        row = (y - 4) // 20 if y >= 4 else -1
+        if msg == WM_LBUTTONDBLCLK:
+            # A real double-click arrives as down, up, DBLCLK, up; the up
+            # that follows is part of the double, not a third click.
+            _STATE["swallow_up"] = True
+            _on_click(hwnd, caption=f"grid row={row} double")
+            return 0
+        if _STATE.pop("swallow_up", False):
+            return 0
+        _on_click(hwnd, button=BUTTON_UP.get(msg, "left"), modifiers=[],
+                  caption=f"grid row={row}")
         return 0
     if msg == WM_COPY and _STATE.get("grid_copies", True):
         # Section 10 item 3, the other half: an owner-drawn grid that will

@@ -1620,6 +1620,24 @@ completing nothing. The context menu a right-click opens is a new
 top-level window, reachable with `all_windows=true` and, by its items,
 with element locators.
 
+**And a click can be aimed, and doubled.** From a second session's report:
+a search result in a data grid could not be clicked, because the grid
+paints its rows and exposes none of them -- to the window tree one grid
+with nothing inside, to the accessibility surface only its scrollbars --
+so no locator could name the link and `click` had nothing but the grid's
+centre to aim at. `click` now takes `at`, a point {x, y} inside the
+element (client-relative for a window, from the top-left for an
+element), and `count` 2 for a double-click, which is how most grids open
+a row. The route this makes possible is the one the surface model
+already prescribes for an owner-drawn region: `capture` it, see where
+the row is, click there. It is pixels guiding a posted message, not
+pixels replacing structure, and nothing is activated. A point outside
+the element is refused before anything is sent. A double is posted as a
+person's would arrive -- down, up, the button's DBLCLK, up -- whether or
+not the class asked for double-clicks, and the fixture grid records
+which row was hit. The keyboard remains the other route into a grid:
+`send_keys` with `down` and `enter`.
+
 **Two timing-sensitive tests made robust** on the same run: one compared
 foreground handles across the moment the operator switched windows of
 their own (it now asks whether the *target* came forward, which is the

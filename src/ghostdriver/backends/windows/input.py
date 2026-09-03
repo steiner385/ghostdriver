@@ -68,6 +68,8 @@ WM_RBUTTONDOWN = 0x0204
 WM_RBUTTONUP = 0x0205
 WM_MBUTTONDOWN = 0x0207
 WM_MBUTTONUP = 0x0208
+#: The double-click message of each button is its down message + 2.
+DBLCLK_OFFSET = 2
 WM_CHAR = 0x0102
 WM_KEYDOWN = 0x0100
 WM_KEYUP = 0x0101
@@ -201,19 +203,47 @@ def button_pair(button: str = "left", modifiers=()) -> tuple[int, int, int, int]
     return down_msg, up_msg, flags | button_flag, flags
 
 
-def click(hwnd: int, *, button: str = "left", modifiers=()) -> bool:
-    """Press and release a button over the middle of `hwnd`.
+def client_size(hwnd: int) -> tuple[int, int]:
+    rect = wintypes.RECT()
+    if not user32.GetClientRect(wintypes.HWND(hwnd), ctypes.byref(rect)):
+        return 0, 0
+    return rect.right - rect.left, rect.bottom - rect.top
+
+
+def post_click(hwnd: int, x: int, y: int, *, button: str = "left", modifiers=(),
+               count: int = 1) -> bool:
+    """The button pair at client point (x, y), `count` times.
+
+    A second click is the double-click message the window would receive
+    from a person: down, up, then the button's DBLCLK and another up. The
+    message is posted whether or not the class asked for double-clicks,
+    because a control that handles it handles it, and one that does not
+    sees two clicks -- which is what a person would have delivered too.
+    """
+    down_msg, up_msg, down_flags, up_flags = button_pair(button, modifiers)
+    point = _lparam_for_point(x, y)
+    target = wintypes.HWND(hwnd)
+    ok = bool(user32.PostMessageW(target, down_msg, down_flags, point))
+    ok &= bool(user32.PostMessageW(target, up_msg, up_flags, point))
+    if count >= 2:
+        ok &= bool(user32.PostMessageW(target, down_msg + DBLCLK_OFFSET, down_flags, point))
+        ok &= bool(user32.PostMessageW(target, up_msg, up_flags, point))
+    return ok
+
+
+def click(hwnd: int, *, button: str = "left", modifiers=(), at=None,
+          count: int = 1) -> bool:
+    """Press and release a button over `hwnd`: at its middle, or at `at`.
 
     The pair, not just the down: a toolkit decides a click happened on the
     *up*, having seen the down, and half of it leaves a control stuck
     looking pressed. Modifiers ride in the message flags (see MODIFIERS).
+    `at` is a client-relative (x, y): the way into a region that paints its
+    own rows and exposes none of them -- a capture says where the row is,
+    and this clicks there, still without activating anything.
     """
-    down_msg, up_msg, down_flags, up_flags = button_pair(button, modifiers)
-    x, y = client_centre(hwnd)
-    point = _lparam_for_point(x, y)
-    down = user32.PostMessageW(wintypes.HWND(hwnd), down_msg, down_flags, point)
-    up = user32.PostMessageW(wintypes.HWND(hwnd), up_msg, up_flags, point)
-    return bool(down and up)
+    x, y = client_centre(hwnd) if at is None else (int(at[0]), int(at[1]))
+    return post_click(hwnd, x, y, button=button, modifiers=modifiers, count=count)
 
 
 def set_text_by_typing(

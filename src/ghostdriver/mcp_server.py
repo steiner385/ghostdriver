@@ -468,9 +468,20 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "a target that reads them sees Ctrl+click, one that asks the "
             "keyboard does not -- say what should follow in `expect`."
         ))] = None,
+        at: Annotated[dict | None, Field(description=(
+            "A point {x, y} in pixels inside the element, from its top-left "
+            "corner, instead of its centre. For a region that paints its own "
+            "rows and exposes none of them (a data grid): `capture` it, see "
+            "where the row or link is, and click there. Still posted; still "
+            "activates nothing."
+        ))] = None,
+        count: Annotated[int, Field(description=(
+            "1 for a click, 2 for a double-click (how most grids open a row)."
+        ))] = 1,
     ) -> dict[str, Any]:
         return box.click(session_id, locator, all_windows=all_windows,
-                         expect=expect, button=button, modifiers=modifiers)
+                         expect=expect, button=button, modifiers=modifiers,
+                         at=at, count=count)
 
     @server.tool(annotations=ACTUATES, description=(
         "Replace a field's contents by typing them. Always reads the field "

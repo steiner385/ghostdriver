@@ -22,7 +22,7 @@ from ...model.element import AccessibleElement
 from ...model.window import WindowNode
 from . import input as win_input
 from . import winapi
-from .input import _lparam_for_point, button_pair, user32
+from .input import post_click, user32
 from .uia import CONTROL_TYPE_NAMES, PATTERN_IDS
 
 UIA_IS_PASSWORD_PROPERTY = 30019
@@ -231,7 +231,7 @@ def act_via_pattern(element: AccessibleElement) -> bool:
 
 
 def click_posted(element: AccessibleElement, *, button: str = "left",
-                 modifiers=()) -> bool:
+                 modifiers=(), at=None, count: int = 1) -> bool:
     """Tier 3: the button pair, posted to the host window at the element.
 
     The element's rectangle is in screen coordinates; the host wants
@@ -243,15 +243,15 @@ def click_posted(element: AccessibleElement, *, button: str = "left",
     left, top, right, bottom = element.rect
     if right <= left or bottom <= top:
         return False
-    point = wintypes.POINT((left + right) // 2, (top + bottom) // 2)
+    if at is None:
+        point = wintypes.POINT((left + right) // 2, (top + bottom) // 2)
+    else:
+        # `at` is relative to the element's own top-left corner.
+        point = wintypes.POINT(left + int(at[0]), top + int(at[1]))
     if not user32.ScreenToClient(wintypes.HWND(element.host_handle), ctypes.byref(point)):
         return False
-    packed = _lparam_for_point(point.x, point.y)
-    down_msg, up_msg, down_flags, up_flags = button_pair(button, modifiers)
-    down = user32.PostMessageW(wintypes.HWND(element.host_handle), down_msg,
-                               down_flags, packed)
-    up = user32.PostMessageW(wintypes.HWND(element.host_handle), up_msg, up_flags, packed)
-    return bool(down and up)
+    return post_click(element.host_handle, point.x, point.y, button=button,
+                      modifiers=modifiers, count=count)
 
 
 def is_selected(element: AccessibleElement) -> bool | None:
