@@ -56,6 +56,7 @@ WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
 WM_TIMER = 0x0113
 WM_COMMAND = 0x0111
+WM_COPY = 0x0301
 WM_USER = 0x0400
 
 WS_CHILD = 0x40000000
@@ -121,6 +122,10 @@ for fn, argtypes, restype in (
     ("IsWindowEnabled", [wintypes.HWND], wintypes.BOOL),
     ("GetAncestor", [wintypes.HWND, wintypes.UINT], wintypes.HWND),
     ("GetWindowTextLengthW", [wintypes.HWND], ctypes.c_int),
+    ("OpenClipboard", [wintypes.HWND], wintypes.BOOL),
+    ("CloseClipboard", [], wintypes.BOOL),
+    ("EmptyClipboard", [], wintypes.BOOL),
+    ("SetClipboardData", [wintypes.UINT, wintypes.HANDLE], wintypes.HANDLE),
 ):
     f = getattr(user32, fn)
     f.argtypes, f.restype = argtypes, restype
@@ -130,6 +135,13 @@ user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int,
 user32.SetWindowLongPtrW.restype = ctypes.c_void_p
 user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.GetWindowLongPtrW.restype = ctypes.c_void_p
+
+kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+kernel32.GlobalLock.restype = wintypes.LPVOID
+kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+kernel32.GlobalUnlock.restype = wintypes.BOOL
 
 gdi32.SetBkMode.argtypes = [wintypes.HDC, ctypes.c_int]
 gdi32.TextOutW.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int,
@@ -315,6 +327,28 @@ GRID_ROWS = [
 ]
 
 
+CF_UNICODETEXT = 13
+GMEM_MOVEABLE = 0x0002
+
+
+def _put_text_on_clipboard(text: str) -> None:
+    """Own the clipboard briefly and leave `text` on it, as a grid would."""
+    if not user32.OpenClipboard(None):
+        return
+    try:
+        user32.EmptyClipboard()
+        size = (len(text) + 1) * 2
+        handle = kernel32.GlobalAlloc(GMEM_MOVEABLE, size)
+        if not handle:
+            return
+        locked = kernel32.GlobalLock(handle)
+        ctypes.memmove(locked, ctypes.create_unicode_buffer(text), size)
+        kernel32.GlobalUnlock(handle)
+        user32.SetClipboardData(CF_UNICODETEXT, handle)
+    finally:
+        user32.CloseClipboard()
+
+
 def _grid_proc(hwnd, msg, wparam, lparam):
     """Owner-drawn: real content, zero child windows, no text anywhere.
 
@@ -328,6 +362,15 @@ def _grid_proc(hwnd, msg, wparam, lparam):
     if msg == WM_GETTEXT:
         if wparam:
             ctypes.cast(lparam, wintypes.LPWSTR).contents.value = "\0"
+        return 0
+    if msg == WM_COPY and _STATE.get("grid_copies", True):
+        # Section 10 item 3, the other half: an owner-drawn grid that will
+        # not answer a text query but *will* copy its rows on request. Many
+        # real grids do exactly this, and it is the cheapest exact-text
+        # route a driver has. Tab across, newline down.
+        _put_text_on_clipboard(
+            "\r\n".join("\t".join(row) for row in GRID_ROWS) + "\r\n"
+        )
         return 0
     if msg == WM_ERASEBKGND:
         return 1
@@ -547,6 +590,7 @@ def build(options) -> dict:
         raise ctypes.WinError(ctypes.get_last_error())
     _STATE["main"] = main
     _STATE["grab_after_ms"] = options.grab_foreground_after
+    _STATE["grid_copies"] = options.grid_copies
 
     def child(cls, text, sx, sy, w, h, parent=main, extra=0, exstyle=0):
         hwnd = user32.CreateWindowExW(
@@ -638,10 +682,14 @@ def main(argv=None) -> None:
                         metavar="MS",
                         help="Pull the window to the foreground this long "
                              "after a click. 0 disables it.")
+    parser.add_argument("--grid-no-copy", dest="grid_copies",
+                        action="store_false",
+                        help="Make the grid ignore WM_COPY, so the probe's "
+                             "honest 'no route works' verdict can be tested.")
     parser.add_argument("--modal-after", type=int, default=0, metavar="MS",
                         help="Raise a modal dialog this long after start. "
                              "0 disables it.")
-    parser.set_defaults(offscreen=True)
+    parser.set_defaults(offscreen=True, grid_copies=True)
     options = parser.parse_args(argv)
 
     handles = build(options)

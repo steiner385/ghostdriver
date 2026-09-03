@@ -271,13 +271,21 @@ class ProfileDocument:
         return cls(**{k: v for k, v in raw.items() if k in known})
 
 
-def merge_learned(path, *, actuation_map: dict, focus_behavior: dict) -> bool:
-    """Write what phase 2 learned into a profile, touching nothing else.
+def merge_learned(
+    path,
+    *,
+    actuation_map: dict | None = None,
+    focus_behavior: dict | None = None,
+    grid_strategy: str | None = None,
+    grid_evidence: dict | None = None,
+) -> bool:
+    """Write what a probe learned into a profile, touching nothing else.
 
     The same read-modify-write as `save`, and for the same reason: these
-    documents are hand-curated. Phase 2 owns exactly two fields and must not
-    be able to disturb a third -- least of all `safe_controls`, which is the
-    list granting it permission to act in the first place.
+    documents are hand-curated. A probe owns exactly the fields it learned
+    and must not be able to disturb a third -- least of all `safe_controls`,
+    which is the list granting phase 2 permission to act. Every argument is
+    optional so a probe that learned one thing writes one thing.
     """
     import json
     from pathlib import Path
@@ -287,13 +295,18 @@ def merge_learned(path, *, actuation_map: dict, focus_behavior: dict) -> bool:
     if not isinstance(document, dict):
         raise ValueError(f"{location} is not a profile document")
 
-    existing = document.get("actuation_map")
-    document["actuation_map"] = {
-        **(existing if isinstance(existing, dict) else {}),
-        **actuation_map,
-    }
+    if actuation_map:
+        existing = document.get("actuation_map")
+        document["actuation_map"] = {
+            **(existing if isinstance(existing, dict) else {}),
+            **actuation_map,
+        }
     if focus_behavior:
         document["focus_behavior"] = focus_behavior
+    if grid_strategy:
+        document["grid_strategy"] = grid_strategy
+    if grid_evidence:
+        document["grid_evidence"] = grid_evidence
 
     temporary = location.with_suffix(location.suffix + ".tmp")
     temporary.write_text(json.dumps(document, indent=2) + "\n",

@@ -920,6 +920,93 @@ Profile L1 target actuated through the full stack (D48), and the watchdog
 catches and re-minimizes a real self-raised window, cursor undisturbed. The
 grab-delay half of `focus_behavior` is phase 2's, measured there.
 
+### D50. Grid strategy: routes to exact text are probed, cheapest-first
+
+**Decision.** `probe_grid` finds how exact text comes out of an owner-drawn
+region and records the winning route as `grid_strategy`. Two routes are
+tried in order of *interference*, not likelihood: a focus-revealed
+accessibility surface, then the control's own copy via `WM_COPY` and the
+clipboard. Nothing is built on OCR; when neither works the answer is
+`unknown`, which is the verdict the spec defers OCR until.
+
+**Why cheapest-first.** The clipboard is one shared resource for the whole
+interactive session -- not per process, not per tool. A copy overwrites
+whatever a person had copied, is seen by clipboard history and clipboard
+managers, and cannot be restored atomically: anything that copies in the gap
+between snapshot and restore loses to the restore. Only text can be put
+back; an image or file list on the clipboard beforehand is gone. All of that
+is stated in the result's `caveat` rather than hidden behind "restored". So
+a region readable without a side effect must never be read with one, and
+the free route is ruled out before the clipboard is touched.
+
+**Measured.** On the fixture's painted grid -- the shape a real Profile L1
+data grid has, one million pixels with no windows beneath it -- focus
+reveals nothing (0 accessible elements before and after), and `WM_COPY`
+yields three tab-and-newline rows. The clipboard held a sentinel before and
+held it again afterwards. A grid built to ignore `WM_COPY` comes back
+`unknown` with "the control did not change the clipboard", not a guess.
+
+**What the profile keeps is shape, not cells.** `grid_evidence` records the
+route, whether each attempt worked, and a line count. Cell text is the
+target's business and never lands in a versioned document; a caller that
+wants the rows asks the route for them at read time.
+
+**Rails, same as phase 2.** Full tier, because the clipboard route sends a
+message and reads a shared resource. Exactly one match, operator-named. A
+denylisted caption or a held application refuses. And a region that already
+answers `read` is refused -- it is not a painted region, and spending a side
+effect on something a free call reads is the wrong trade.
+`allow_clipboard=false` runs the free route only and reports `unknown`
+rather than reaching for the route it was told not to use.
+
+**`WM_COPY` is posted, not sent.** It carries no pointer, so cross-process
+posting is fine; contrast D19.
+
+### D51. hidden_desktop is a thread you hand work to, and it is launch-only
+
+**Decision.** The `hidden_desktop` strategy creates a named desktop under
+WinSta0, launches the target onto it, and runs every target-touching call on
+one thread bound to that desktop with `SetThreadDesktop`. Operations are
+marshalled to that thread through `run`.
+
+**Why a thread, not a handle.** Measured against the fixture: a desktop is
+bound per-thread, not per-process. A call to enumerate or read the target
+from any thread not bound to its desktop returns *nothing* -- the windows
+are simply not visible. So the strategy cannot be a handle callers use from
+wherever; it has to own the one thread allowed to see the target, and hand
+it work. `test_reading_from_the_wrong_thread_sees_nothing` pins the contrast:
+the identical call returns the whole tree through `run` and an empty list
+off the bound thread.
+
+**The guarantee is structural, and that is the whole point.** `minimized` is
+observational -- it watches for an escape and puts the target back, and the
+watchdog exists because one quiet trial proves nothing. On a hidden desktop
+there is nowhere to escape to: a window on a non-input desktop has no
+foreground to steal. Measured: a fixture launched there was invisible to
+`EnumWindows` on the Default desktop and its foreground never moved, while
+the bound thread saw all ten windows, read them, landed a click, and
+captured a valid PNG. Unlike the minimized tests, these need no opt-in flag
+-- they cannot disturb the operator, which is the guarantee itself.
+
+**Launch-only, by necessity.** A window's desktop is fixed when the window
+is created, so a target already running on the input desktop cannot be moved
+to a hidden one. `attach` on a running pid raises `Unsupported` and says so.
+This is the first capability in the tool that launches a process; a session
+that only attaches cannot use it, and that is correct rather than a gap.
+
+**Its known limit, unsolved and stated.** Interactive login needs the
+operator to see and use the target, which means `SwitchDesktop` -- replacing
+their entire screen for the duration. Credentials supplied at launch avoid
+it where the target allows; otherwise the structural guarantee and an
+interactive login are mutually exclusive, and the operator chooses per run.
+
+**Not yet wired into the tool layer.** The strategy is a proven backend
+primitive. Making the MCP tools drive a hidden-desktop target means routing
+every existing tool's backend calls through the strategy's thread and adding
+a launch path with its own consent -- a deliberate, separate change, because
+process-launching widens the tool's authority and deserves its own scoping
+rather than riding in on this one.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

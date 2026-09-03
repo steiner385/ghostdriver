@@ -60,7 +60,7 @@ TIER_TOOLS: dict[Tier, frozenset[str]] = {
         # evidence it writes can only be produced by a session that acted.
         "record_input_sensitivity",
     }),
-    Tier.FULL: frozenset({"probe_phase2"}),
+    Tier.FULL: frozenset({"probe_phase2", "probe_grid"}),
 }
 
 

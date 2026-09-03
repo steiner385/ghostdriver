@@ -38,7 +38,7 @@ CURATION_TOOLS = {"record_input_sensitivity"}
 
 #: The `full` tier, which nothing grants by default. It actuates
 #: controls an operator listed, to learn how they respond.
-LEARNING_TOOLS = {"probe_phase2"}
+LEARNING_TOOLS = {"probe_phase2", "probe_grid"}
 
 EXPECTED_TOOLS = (READ_TOOLS | ACTUATION_TOOLS
                   | CURATION_TOOLS | LEARNING_TOOLS)

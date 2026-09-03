@@ -1566,3 +1566,83 @@ class Toolbox:
                 return True, int((time.monotonic() - started) * 1000)
             time.sleep(0.05)
         return False, None
+
+    # --- grid strategy: which route yields exact text from a painted region
+
+    def probe_grid(
+        self,
+        session_id: str,
+        locator: str,
+        *,
+        allow_clipboard: bool = True,
+        all_windows: bool = False,
+    ) -> dict:
+        """Find how exact text comes out of an owner-drawn region.
+
+        `read` returns nothing for a grid that paints itself, and a capture
+        is pixels a caller can look at but not verify against (D46). What a
+        caller needs is a route to the text, and the spec says those are
+        probed before anything is built on OCR. This tries them cheapest
+        first: a focus-revealed accessibility surface, which costs nothing
+        shared, and only if that fails the control\'s own copy, which
+        touches the session-wide clipboard and says so.
+
+        Same rails as phase 2. Full tier, because the clipboard route sends
+        a message and reads a shared resource; the region is named by the
+        caller, exactly one match; a denylisted caption or a held
+        application refuses. And a region that already answers `read` is
+        refused too -- it is not a grid, and the tool would be spending a
+        side effect on something a free call already reads.
+        """
+        try:
+            session = self.sessions.authorize(session_id, "probe_grid")
+        except GhostdriverError as exc:
+            return _error(exc.kind, exc.message)
+
+        node, failure = self._one(session, locator, all_windows)
+        if failure is not None:
+            return failure
+        try:
+            self.sessions.check_caption(session_id, node.text)
+        except GhostdriverError as exc:
+            return _error(exc.kind, exc.message, locator=locator)
+
+        from .backends.windows.modality import blocking_ancestor
+
+        if blocking_ancestor(node.handle) is not None:
+            return _error(ErrorKind.NOT_ACTIONABLE,
+                          "the application is held by a dialog; deal with it "
+                          "before probing anything")
+        if node.text:
+            return _error(
+                ErrorKind.NOT_ACTIONABLE,
+                f"{locator!r} already answers with text ({node.text[:40]!r}); "
+                "it is not a painted region. Use `read`",
+            )
+
+        from .backends.windows.grid import copy_route, focus_route
+        from .gridstrategy import GridProbe, find_grid_strategy
+
+        finding = find_grid_strategy(GridProbe(
+            accessible_on_focus=lambda: focus_route(node),
+            clipboard_copy=(
+                (lambda: copy_route(node)) if allow_clipboard else None
+            ),
+        ))
+        report = {"ok": True, "locator": locator, "element": _element(node),
+                  **finding.to_dict()}
+
+        if session.profile.path and finding.strategy.value != "unknown":
+            try:
+                merge_learned(
+                    session.profile.path,
+                    grid_strategy=finding.strategy.value,
+                    grid_evidence=finding.to_dict(),
+                )
+                report["written"] = True
+            except (OSError, ValueError) as exc:
+                report["written"] = False
+                report["write_error"] = str(exc)
+        else:
+            report["written"] = False
+        return report

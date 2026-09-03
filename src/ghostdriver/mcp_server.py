@@ -591,6 +591,30 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     ) -> dict[str, Any]:
         return box.probe_phase2(session_id, only=only, settle_ms=settle_ms)
 
+    @server.tool(annotations=ACTUATES, description=(
+        "Find how exact text comes out of an owner-drawn region such as a "
+        "data grid, where `read` returns nothing and a capture is only "
+        "pixels. Tries a focus-revealed accessibility surface first (no "
+        "side effects), then the control's own copy, which uses the "
+        "session-wide clipboard: prior text is restored afterwards, but the "
+        "restore is not atomic and clipboard history sees the grid text. "
+        "Pass allow_clipboard=false to try only the free route. Requires "
+        "the `full` tier. Records the winning route in the profile as "
+        "grid_strategy; never records cell data."
+    ))
+    def probe_grid(
+        session_id: SessionId,
+        locator: LocatorArg,
+        allow_clipboard: Annotated[bool, Field(description=(
+            "Whether the clipboard route may be tried after the free one "
+            "fails. It touches the shared clipboard."
+        ))] = True,
+        all_windows: AllWindows = False,
+    ) -> dict[str, Any]:
+        return box.probe_grid(session_id, locator,
+                              allow_clipboard=allow_clipboard,
+                              all_windows=all_windows)
+
     return server
 
 
