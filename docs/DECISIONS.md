@@ -1751,6 +1751,68 @@ application is not foreground -- the no-focus rule meeting the grid's
 own check -- and is why the keyboard, not the click, is the way to move
 through it; that is a measurement for the next session on the target.
 
+### D64. The second field report: a shared server, an empty probe, and two grids
+
+**Context.** The same session came back with four observations. Three are
+the tool's; the fourth belongs to the target and went to the operator's
+own notes.
+
+**"Consent evaporated between attach and the next call."** The trace
+(D62) answered this without a hypothesis. At 14:05:24 one chat attached
+the sandbox target; at 14:05:27 a *second* chat -- same server process,
+same trace file -- recorded `grant_targets(restrict=[that pid])` with a
+note saying the operator had told it to leave that target alone; at
+14:05:33 the first chat's next call was refused. Not a race and not the
+deploy: the operator app runs one server process for every chat, so a
+restriction recorded in one chat is a restriction in all of them, and
+"leave it alone" had been recorded as a restriction when it needed no
+record at all -- nothing is automated without an allow. Three changes:
+the refusal names the decision (when, via what, with what note), says
+another chat may have recorded it, and says `allow=[pid]` reverses it
+and the session then continues; `grant_targets` lists the open sessions
+a restriction stops, with a caution; and the server's own instructions
+say to restrict only what the operator ruled out. A grant now carries
+its time. R1 stands: approvals live for one server run.
+
+**`probe_grid` returned UNKNOWN on both grids, both routes, zero
+lines.** The session's own conclusion was right -- the tool behaved and
+the target exposes nothing -- and the report should have said so rather
+than leave that to be worked out. An UNKNOWN finding now carries a
+`meaning`: routes tried, that repeating will not change it, and what
+remains (pixels via `capture` and the point click, the caret keys, a
+person). Not a bug; a real outcome, said in the result.
+
+**Posted row clicks select in one grid and are ignored by another, same
+session, same technique.** Two controls of the same family on the same
+target, one taking a posted click and one not, means the difference is
+in the control, not the delivery. The likeliest difference is what the
+control checks before acting. A VCL grid's mouse-down asks its form for
+the active control, which the form records without needing the window
+to be active, so that grid proceeds; a control that asks the window
+state directly -- is my top-level window the thread's active one? -- can
+return without acting. The first assumption here was that a background
+application has no active window at all. The fixture disproved it: a
+window shown without activation is still its thread's active window,
+read with GetGUIThreadInfo. What need not be is a *second* top-level
+window of the same thread -- a floating panel, a form docked out of the
+main one, which is where a scheduling grid tends to live. This tool
+cannot make it active without activating it (D55), and
+`AttachThreadInput` -- the known way around that -- merges the target's
+input queue with this process's, which moves the keyboard focus the
+person is typing into: exactly the theft the tool exists to avoid. So
+the answer is measurement, not a workaround: a `click` result carries a
+`focus` block -- the thread's active window, its focus window, and
+whether the clicked control's top-level is the active one -- with a note
+when it is not. Proven on the fixture with a floating second window
+holding a grid and a flag that makes grids check the active window: the
+grid in the shell selects, the grid in the floating window is handed the
+click and ignores it, and the result says why. The next session on the
+target can read the two grids' blocks side by side.
+
+**An invalid filter expression raises an error dialog rather than
+emptying the grid.** Target knowledge; recorded in the operator's notes
+for that target, not here.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

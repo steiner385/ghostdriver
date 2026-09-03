@@ -29,10 +29,13 @@ reading their window tree directly.
 
 Start with `list_targets`. **No target may be automated until the person
 you are working with has approved it for this session.** Show them the
-candidates, ask which to automate and which to leave alone, then `attach`.
-If your client supports it, `attach` will ask them directly; otherwise
-record their answer with `grant_targets`. Approvals last for this session
-only and can be changed at any time.
+candidates, ask which to automate, then `attach`. If your client supports
+it, `attach` will ask them directly; otherwise record their answer with
+`grant_targets`. Approvals last for this server run and can be changed at
+any time. Record a *restriction* only for a target the operator ruled
+out: a target nobody allowed is never automated, and one server can serve
+several chats at once, so a restriction recorded here stops that target's
+sessions in every chat.
 
 Four things about this class of target are worth knowing before you plan:
 
@@ -176,7 +179,9 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "this session, and which they want left alone. Use this after "
         "asking them. Decisions last for this session only and can be "
         "revised; restricting a target with an open session stops it "
-        "immediately."
+        "immediately, in every chat this server serves -- so restrict only "
+        "what the operator ruled out, never what this chat merely does not "
+        "need."
     ))
     def grant_targets(
         allow: Annotated[list[int] | None, Field(description=(

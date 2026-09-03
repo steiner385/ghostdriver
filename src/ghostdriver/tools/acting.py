@@ -18,6 +18,7 @@ from .core import (
     _Prepared,
     _ToolboxCore,
 )
+from .guidance import FOCUS_NOTE
 
 
 class _ActingCore(_ToolboxCore):
@@ -178,6 +179,45 @@ class _ActingCore(_ToolboxCore):
             locator=locator, tool=tool, cadence=prepared.cadence.name,
             ok=bool(result.ok), surface=surface,
         ))
+
+    def _focus_report(self, prepared) -> dict:
+        """Where the target thread's active window and focus stand after an
+        action, read with GetGUIThreadInfo: nothing is touched.
+
+        Two grids on one target, same technique: posted row clicks selected
+        in one and were ignored by the other. A control decides for itself
+        whether to act on a click it has been handed, and some check that
+        their window is the thread's active one first; a second top-level
+        window of the same thread need not be, and this tool never activates
+        one (D55). Reporting the state lets the next session tell that case
+        from a click that missed (D64).
+        """
+        from ..backends import current
+
+        winapi = current().winapi
+        handle = prepared.node.handle
+
+        def named(h):
+            return None if not h else {"class": winapi.class_name(h), "handle_ephemeral": h}
+
+        def read():
+            state = winapi.thread_gui_state(handle)
+            root = winapi.root_window(handle)
+            active = state["active"]
+            return {
+                "thread_active_window": named(active),
+                "thread_focus": named(state["focus"]),
+                "target_window_active": bool(active) and winapi.root_window(active) == root,
+            }
+
+        try:
+            report = prepared.session.run(read)
+        except Exception:  # a diagnostic must never fail the action it describes
+            return {"thread_active_window": None, "thread_focus": None,
+                    "target_window_active": None}
+        if not report["target_window_active"]:
+            report["note"] = FOCUS_NOTE
+        return report
 
     def _reported(self, result, prepared, locator: str, **extra) -> dict:
         """One shape for every actuation outcome, successful or not.

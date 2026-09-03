@@ -22,7 +22,8 @@ narrow to make one.
 
 import fnmatch
 import re
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -122,6 +123,10 @@ class Grant:
     #: process tree, not a pid: the dialog a browser opens in a helper
     #: process is the same application the operator approved.
     inherited_from: int | None = None
+    #: When the decision was recorded. A session refused because its target
+    #: was restricted after it opened needs to say by which decision, and
+    #: one server can be serving several chats at once (D64).
+    at: float = field(default_factory=time.time)
 
     def describe(self) -> str:
         verdict = "allowed" if self.allowed else "restricted"
@@ -129,6 +134,9 @@ class Grant:
         via = (f"via pid {self.inherited_from}, its parent" if self.inherited_from
                else f"via {self.source.value}")
         return f"pid {self.pid} {verdict} {via}{detail}"
+
+    def when(self) -> str:
+        return time.strftime("%H:%M:%S", time.localtime(self.at))
 
 
 # --- endpoints, for informing a decision rather than making one ----------

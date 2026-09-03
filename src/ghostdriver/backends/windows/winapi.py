@@ -154,6 +154,47 @@ def minimize_no_activate(hwnd: int) -> None:
     user32.ShowWindow(wintypes.HWND(hwnd), SW_SHOWMINNOACTIVE)
 
 
+class GUITHREADINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD),
+        ("hwndActive", wintypes.HWND), ("hwndFocus", wintypes.HWND),
+        ("hwndCapture", wintypes.HWND), ("hwndMenuOwner", wintypes.HWND),
+        ("hwndMoveSize", wintypes.HWND), ("hwndCaret", wintypes.HWND),
+        ("rcCaret", wintypes.RECT),
+    ]
+
+
+user32.GetGUIThreadInfo.argtypes = [wintypes.DWORD, ctypes.POINTER(GUITHREADINFO)]
+user32.GetGUIThreadInfo.restype = wintypes.BOOL
+user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+user32.GetAncestor.restype = wintypes.HWND
+GA_ROOT = 2
+
+
+def thread_gui_state(hwnd: int) -> dict:
+    """The active, focused and capturing windows of the thread that owns
+    `hwnd`, read with GetGUIThreadInfo: no message, no activation.
+
+    The three are per thread, not per system. Measured: a window shown
+    without activation is still its thread's active window, and a second
+    top-level window of the same thread need not be -- which is what a
+    control that checks before acting on a click sees (D64). Read, never
+    assumed.
+    """
+    thread = user32.GetWindowThreadProcessId(wintypes.HWND(hwnd), None)
+    info = GUITHREADINFO()
+    info.cbSize = ctypes.sizeof(GUITHREADINFO)
+    if not thread or not user32.GetGUIThreadInfo(thread, ctypes.byref(info)):
+        return {"active": None, "focus": None, "capture": None}
+    return {"active": info.hwndActive or None, "focus": info.hwndFocus or None,
+            "capture": info.hwndCapture or None}
+
+
+def root_window(hwnd: int) -> int:
+    """The top-level window `hwnd` belongs to (itself, when it is one)."""
+    return user32.GetAncestor(wintypes.HWND(hwnd), GA_ROOT) or hwnd
+
+
 def window_pid(hwnd: int) -> int:
     pid = wintypes.DWORD()
     user32.GetWindowThreadProcessId(wintypes.HWND(hwnd), ctypes.byref(pid))

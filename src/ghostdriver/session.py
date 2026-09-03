@@ -356,10 +356,7 @@ class SessionManager:
         grant = self.grant_for(session.pid)
         if grant is None or not grant.allowed:
             raise GhostdriverError(
-                ErrorKind.DENIED_BY_POLICY,
-                f"pid {session.pid} is no longer approved for automation in "
-                "this session",
-            )
+                ErrorKind.DENIED_BY_POLICY, revoked_message(session.pid, grant))
         return session
 
     def check_caption(self, session_id: str, caption: str) -> None:
@@ -388,3 +385,30 @@ class SessionManager:
                     ErrorKind.DENIED_BY_POLICY,
                     f"refusing to act on {match.describe()}",
                 )
+
+
+def revoked_message(pid: int, grant: Grant | None) -> str:
+    """Why an open session is refused, naming the decision that did it.
+
+    A session that was approved when it opened and refused three seconds
+    later read as consent evaporating -- until the trace showed a second
+    chat, sharing the same server process, recording a restriction for a
+    target it had merely been told to leave alone (D64). The refusal now
+    says when and via what the restriction arrived, that another chat may
+    have recorded it, and how the operator reverses it.
+    """
+    if grant is None:
+        cause = "its approval was withdrawn"
+    else:
+        cause = f"it was restricted at {grant.when()} via {grant.source.value}"
+        if grant.note:
+            cause += f" with the note {grant.note!r}"
+        if grant.inherited_from:
+            cause += f" (through pid {grant.inherited_from}, its ancestor)"
+    return (
+        f"pid {pid} is no longer approved for automation in this session: "
+        f"{cause}. One server can serve several chats at once, so a "
+        "restriction recorded in another chat applies here too. If the "
+        f"operator still approves this target, record allow=[{pid}] and this "
+        "session continues."
+    )

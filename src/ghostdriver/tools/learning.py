@@ -270,6 +270,8 @@ class LearningTools(_ActingCore):
         ))
         report = {"ok": True, "locator": locator, "element": _element(node),
                   **finding.to_dict()}
+        if finding.strategy.value == "unknown":
+            report["meaning"] = _unknown_meaning(len(finding.attempts), allow_clipboard)
 
         if session.profile.path and finding.strategy.value != "unknown":
             try:
@@ -285,3 +287,24 @@ class LearningTools(_ActingCore):
         else:
             report["written"] = False
         return report
+
+
+def _unknown_meaning(routes_tried: int, allow_clipboard: bool) -> str:
+    """Said with an UNKNOWN finding, so it is read as the answer it is.
+
+    A session that got UNKNOWN on two grids, both routes, zero lines,
+    wondered whether the probe had failed. It had not: the grid exposes
+    nothing, and the report should say so rather than leave the next
+    session to re-run it (D64).
+    """
+    untried = ("" if allow_clipboard else
+               "; the clipboard route was not tried (allow_clipboard=false)")
+    return (
+        f"{routes_tried} route(s) ran and none produced structured text{untried}. "
+        "This is a real outcome, not a failure of the probe: the grid exposes "
+        "nothing readable through the accessibility tree or the clipboard, and "
+        "repeating it will not change that. What remains for this grid is "
+        "pixels -- capture to see the rows, click at={x, y} to act on one -- "
+        "the caret keys through send_keys, and a person, through await_human, "
+        "for reading a value."
+    )

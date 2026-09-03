@@ -113,7 +113,9 @@ def _result_summary(result):
         return None
     keep = ("verified", "tier_used", "tiers_attempted", "match_count", "display",
             "isolation", "released", "blocked", "left_minimized", "needs_consent",
-            "total", "waited_ms", "expected", "button", "modifiers", "at", "count")
+            "total", "waited_ms", "expected", "button", "modifiers", "at", "count",
+            "route", "grid_strategy", "sample_lines", "written", "focus",
+            "open_sessions_stopped")
     return {k: result[k] for k in keep if k in result}
 
 

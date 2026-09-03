@@ -110,6 +110,13 @@ delivered. `send_keys` takes the editing actions `select-all`, `paste`,
 control, since a posted keystroke carries no modifier state. `capture`
 renders the window that holds what you named, and says its frame.
 
+**One server, several chats.** The operator app runs one server process
+for every chat, so approvals and restrictions are shared across them. A
+restriction recorded in one chat stops that target's sessions in all of
+them; a target nobody allowed is never automated, so leaving one alone
+needs no record. A refused session says which decision refused it and
+that `allow=[pid]` reverses it.
+
 **When it needs a person, it says so on screen.** `await_human` shows its
 ask in a small always-on-top notice in the corner of the operator's screen
 for as long as it waits -- the one window this tool ever shows, and it

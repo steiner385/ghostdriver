@@ -102,30 +102,43 @@ class LifecycleTools(_ToolboxCore):
     ) -> dict:
         """Record which targets the operator approved or ruled out.
 
-        Session-scoped and revisable: a later decision replaces an earlier
-        one, so someone can change their mind mid-task without restarting
-        anything. Restricting a target that already has an open session
-        takes effect immediately -- the next call on that session refuses.
+        Session-scoped and revisable: a later decision replaces an earlier one.
+        Restricting a target that already has an open session takes effect
+        immediately -- the next call on that session refuses (D64 says why).
         """
         recorded = []
+        stopped: list[str] = []
         for pid in allow or []:
             recorded.append(self.sessions.record_grant(
                 pid, allowed=True, source=source, note=note))
         for pid in restrict or []:
             recorded.append(self.sessions.record_grant(
                 pid, allowed=False, source=source, note=note))
+            stopped.extend(s.session_id for s in self.sessions.open_sessions()
+                           if s.pid == pid)
         if not recorded:
             return _error(
                 ErrorKind.NOT_ACTIONABLE,
                 "nothing to record: pass allow=[...] or restrict=[...]",
             )
         grants = self.sessions.grants()
-        return {
+        out = {
             "ok": True,
             "recorded": [g.describe() for g in recorded],
             "allowed": sorted(g.pid for g in grants if g.allowed),
             "restricted": sorted(g.pid for g in grants if not g.allowed),
         }
+        if stopped:
+            out["open_sessions_stopped"] = stopped
+            out["caution"] = (
+                f"session(s) {', '.join(stopped)} were open against a target "
+                "just restricted and will refuse from now on -- possibly "
+                "another chat's work, since one server can serve several "
+                "chats at once. Restrict only a target the operator ruled "
+                "out: a target nobody allowed is never automated, so leaving "
+                "one alone needs no record. allow=[pid] reverses this."
+            )
+        return out
 
     def attach(
         self,

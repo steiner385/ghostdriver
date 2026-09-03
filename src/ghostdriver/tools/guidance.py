@@ -22,3 +22,17 @@ PIXELS_HINT = (
     "shows it; `click` with at={x, y} acts at a point inside it; `send_keys` "
     "moves through it (home, end, pageup, pagedown, down)."
 )
+
+
+#: Carried by a click result when the target's window is not its thread's
+#: active window -- which a second top-level window of the same thread
+#: need not be.
+FOCUS_NOTE = (
+    "the target's window is not its thread's active window, so a control "
+    "that checks that before acting on a click ignores it. Controls differ: "
+    "a VCL form records its active control without it, so one grid proceeds "
+    "while another, asking the window state directly, does not; `expect` is "
+    "how to tell which. This tool cannot make a window active without "
+    "activating it, which it never does. A control that insists is a step "
+    "for a person: await_human."
+)

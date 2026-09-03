@@ -100,6 +100,7 @@ class ActuationTools(_ActingCore):
                       else "delivery_only"),
             expected=described,
             button=button, modifiers=held, at=point, count=count,
+            focus=self._focus_report(prepared),
         )
 
     def set_value(

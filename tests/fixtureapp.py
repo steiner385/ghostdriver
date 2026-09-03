@@ -34,6 +34,9 @@ import os
 from ctypes import wintypes
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
+user32.GetActiveWindow.restype = wintypes.HWND
+user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+user32.GetAncestor.restype = wintypes.HWND
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
@@ -245,6 +248,7 @@ GRID_CLASS = "GhostFixtureDataGrid"
 BOUND_EDIT_CLASS = "GhostFixtureBoundEdit"
 PLAIN_EDIT_CLASS = "GhostFixturePlainEdit"
 MODAL_CLASS = "GhostFixtureModal"
+FLOAT_CLASS = "GhostFixtureFloat"
 CAPTION_CLASS = "GhostFixtureFieldCaption"
 VALUE_CLASS = "GhostFixtureFieldValue"
 
@@ -428,6 +432,14 @@ def _grid_proc(hwnd, msg, wparam, lparam):
             ctypes.cast(lparam, wintypes.LPWSTR).contents.value = "\0"
         return 0
     if msg in BUTTON_UP or msg == WM_LBUTTONDBLCLK:
+        if (_STATE.get("grid_needs_active")
+                and user32.GetActiveWindow() != user32.GetAncestor(wintypes.HWND(hwnd), 2)):
+            # A grid that acts on a click only when its top-level window is
+            # its thread's active one. Measured: a window shown without
+            # activation is still its thread's active window, so the grid in
+            # the shell proceeds; the one in the floating window does not,
+            # and that is the shape of the two-grids report (D64).
+            return 0
         # The row under the click, from the geometry the paint below uses:
         # the only way a driver can act on a row this grid will not name.
         y = (lparam >> 16) & 0xFFFF
@@ -638,6 +650,12 @@ def _modal_proc(hwnd, msg, wparam, lparam):
     return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
 
+def _float_proc(hwnd, msg, wparam, lparam):
+    """A second top-level window of the same thread, owned by the shell:
+    a floating panel, a docked-out form. Nothing of its own to say."""
+    return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+
 def _show_modal() -> None:
     modal = _STATE["modal"]
     user32.EnableWindow(wintypes.HWND(_STATE["main"]), False)
@@ -683,16 +701,17 @@ def _register(name: str, proc) -> None:
 
 def build(options) -> dict:
     procs = [WNDPROC(_main_proc), WNDPROC(_button_proc), WNDPROC(_grid_proc),
-             WNDPROC(_modal_proc), WNDPROC(_plain_edit_proc),
+             WNDPROC(_modal_proc), WNDPROC(_float_proc), WNDPROC(_plain_edit_proc),
              WNDPROC(_bound_edit_proc)]
     _PROCS.extend(procs)
-    main_p, button_p, grid_p, modal_p, plain_p, bound_p = procs
+    main_p, button_p, grid_p, modal_p, float_p, plain_p, bound_p = procs
 
     label_p = WNDPROC(_label_proc)
     _PROCS.append(label_p)
     for name, proc in ((MAIN_CLASS, main_p), (PAGE_CLASS, main_p),
                        (BUTTON_CLASS, button_p), (GRID_CLASS, grid_p),
-                       (MODAL_CLASS, modal_p), (CAPTION_CLASS, label_p),
+                       (MODAL_CLASS, modal_p), (FLOAT_CLASS, float_p),
+                       (CAPTION_CLASS, label_p),
                        (VALUE_CLASS, label_p)):
         _register(name, proc)
     _superclass_edit(PLAIN_EDIT_CLASS, plain_p)
@@ -717,6 +736,7 @@ def build(options) -> dict:
     _STATE["main"] = main
     _STATE["grab_after_ms"] = options.grab_foreground_after
     _STATE["grid_copies"] = options.grid_copies
+    _STATE["grid_needs_active"] = options.grid_needs_active
 
     def child(cls, text, sx, sy, w, h, parent=main, extra=0, exstyle=0):
         hwnd = user32.CreateWindowExW(
@@ -805,6 +825,15 @@ def build(options) -> dict:
         x + 80, x + 80, 300, 140, main, None, INSTANCE, None)
     _STATE["modal"] = modal
 
+    floating = None
+    if options.floating:
+        floating = user32.CreateWindowExW(
+            WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, FLOAT_CLASS,
+            "Schedule", WS_OVERLAPPEDWINDOW,
+            x + 120, x + 120, 320, 160, main, None, INSTANCE, None)
+        child(GRID_CLASS, "", 8, 8, 290, 110, parent=floating)
+        user32.ShowWindow(wintypes.HWND(floating), SW_SHOWNOACTIVATE)
+
     user32.ShowWindow(wintypes.HWND(main), SW_SHOWNOACTIVATE)
     if options.modal_after:
         user32.SetTimer(wintypes.HWND(main), ctypes.c_void_p(1),
@@ -829,6 +858,7 @@ def build(options) -> dict:
         "tabs": tabs,
         "toolbar_hwnd": tools,
         "modal": modal,
+        "floating": floating,
     }
 
 
@@ -841,6 +871,11 @@ def main(argv=None) -> None:
                         metavar="MS",
                         help="Pull the window to the foreground this long "
                              "after a click. 0 disables it.")
+    parser.add_argument("--grid-needs-active", action="store_true",
+                        help="grids ignore clicks unless their top-level window "
+                             "is the thread's active window")
+    parser.add_argument("--floating", action="store_true",
+                        help="also show a second top-level window holding a grid")
     parser.add_argument("--grid-no-copy", dest="grid_copies",
                         action="store_false",
                         help="Make the grid ignore WM_COPY, so the probe's "
