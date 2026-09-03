@@ -705,6 +705,31 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "the `full` tier. Records the winning route in the profile as "
         "grid_strategy; never records cell data."
     ))
+    def grid_seek(
+        session_id: SessionId,
+        locator: LocatorArg,
+        value: Annotated[str | None, Field(description=(
+            "Stop at the first row containing this text; omit to read every "
+            "page to the end."
+        ))] = None,
+        advance: Annotated[str, Field(description=(
+            "The named key that pages the grid: pagedown (default) or down."
+        ))] = "pagedown",
+        max_pages: Annotated[int, Field(description="Stop after this many pages.")] = 50,
+        all_windows: AllWindows = False,
+    ) -> dict[str, Any]:
+        return box.grid_seek(session_id, locator, value=value, advance=advance,
+                             max_pages=max_pages, all_windows=all_windows)
+
+    @server.tool(annotations=CHANGES_SCREEN, description=(
+        "Read an owner-drawn grid a page at a time -- one that yields its "
+        "rows only to its own Copy and shows only the rows in view. Copies "
+        "the current rows, matches `value` if given, pages with a caret key, "
+        "and stops at the value, the end (a page that repeats), or max_pages. "
+        "Full tier; touches the shared clipboard; paging needs the grid to "
+        "act on a posted key, which it may decline unless its window is "
+        "active -- a view that never changes says so."
+    ))
     def probe_grid(
         session_id: SessionId,
         locator: LocatorArg,

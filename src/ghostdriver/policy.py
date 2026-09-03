@@ -70,7 +70,7 @@ TIER_TOOLS: dict[Tier, frozenset[str]] = {
         "record_input_sensitivity",
     }),
     Tier.FULL: frozenset({
-        "probe_phase2", "probe_grid",
+        "probe_phase2", "probe_grid", "grid_seek",
         # Launching a process is the widest authority the tool has, so it
         # sits at the top tier even though the session it opens may be
         # read-only.

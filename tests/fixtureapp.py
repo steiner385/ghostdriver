@@ -411,6 +411,14 @@ GRID_ROWS = [
     ("PART-0003", "Fastener kit", "KIT", "3"),
 ]
 
+#: A larger set for the paging grid (D63's grid_seek): nine rows shown three
+#: at a time, so a seek must page to reach the last, and one value
+#: (PART-0009) lives only on the final page.
+GRID_PAGE_ROWS = [(f"PART-{n:04d}", f"Item {n}", "EA", str(n)) for n in range(1, 10)]
+GRID_PAGE_SIZE = 3
+VK_PRIOR = 0x21
+VK_NEXT = 0x22
+
 
 CF_UNICODETEXT = 13
 GMEM_MOVEABLE = 0x0002
@@ -507,11 +515,27 @@ def _grid_proc(hwnd, msg, wparam, lparam):
         if msg == WM_RBUTTONUP:
             _show_context_menu(hwnd, lparam & 0xFFFF, y)
         return 0
+    if msg == WM_KEYDOWN and _STATE.get("grid_pages"):
+        # A grid that pages on PageDown/PageUp, showing GRID_PAGE_SIZE rows
+        # of GRID_PAGE_ROWS from an offset. So a seek must page to reach the
+        # last row (D63). Posted, so it works without activation here; on a
+        # real target a grid may decline a key it is not focused for (D64).
+        last = len(GRID_PAGE_ROWS) - GRID_PAGE_SIZE
+        if wparam == VK_NEXT:
+            _STATE["grid_offset"] = min(_STATE.get("grid_offset", 0) + GRID_PAGE_SIZE, last)
+        elif wparam == VK_PRIOR:
+            _STATE["grid_offset"] = max(_STATE.get("grid_offset", 0) - GRID_PAGE_SIZE, 0)
+        return 0
     if msg == WM_COPY and _STATE.get("grid_copies", True):
         # Section 10 item 3, the other half: an owner-drawn grid that will
         # not answer a text query but *will* copy its rows on request. Many
         # real grids do exactly this, and it is the cheapest exact-text
         # route a driver has. Tab across, newline down.
+        if _STATE.get("grid_pages"):
+            offset = _STATE.get("grid_offset", 0)
+            visible = GRID_PAGE_ROWS[offset:offset + GRID_PAGE_SIZE]
+            _put_text_on_clipboard("\r\n".join("\t".join(r) for r in visible) + "\r\n")
+            return 0
         _put_text_on_clipboard(
             "\r\n".join("\t".join(row) for row in GRID_ROWS) + "\r\n"
         )
@@ -813,6 +837,8 @@ def build(options) -> dict:
     _STATE["grab_after_ms"] = options.grab_foreground_after
     _STATE["grid_copies"] = options.grid_copies
     _STATE["grid_needs_active"] = options.grid_needs_active
+    _STATE["grid_pages"] = options.grid_pages
+    _STATE["grid_offset"] = 0
 
     def child(cls, text, sx, sy, w, h, parent=main, extra=0, exstyle=0):
         hwnd = user32.CreateWindowExW(
@@ -958,6 +984,8 @@ def main(argv=None) -> None:
     parser.add_argument("--grid-needs-active", action="store_true",
                         help="grids ignore clicks unless their top-level window "
                              "is the thread's active window")
+    parser.add_argument("--grid-pages", action="store_true",
+                        help="the grid pages on PageDown/PageUp over a nine-row set")
     parser.add_argument("--floating", action="store_true",
                         help="also show a second top-level window holding a grid")
     parser.add_argument("--grid-no-copy", dest="grid_copies",
