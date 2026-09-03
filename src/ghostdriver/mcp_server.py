@@ -203,7 +203,10 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "session's lifetime."
         ))] = "read_only",
         profile_path: Annotated[str | None, Field(description=(
-            "Optional profile document supplying the caption denylist."
+            "Optional profile document: a bare name looked up in the operator "
+            "directory (profiles/<name>.json under GHOSTDRIVER_OPERATOR_DIR), "
+            "or a path. Supplies the denylist, safe controls and input "
+            "sensitivity notes."
         ))] = None,
         isolation: Annotated[str, Field(description=(
             "none (default) or minimized. minimized keeps the target "

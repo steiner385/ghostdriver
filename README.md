@@ -6,11 +6,15 @@ machine.
 
 ## Status
 
-**Iteration 2: MCP server, read-only tier.** Thirteen tools over a session
-manager, with capability tiers, a caption denylist, and session-scoped
-consent: no target can be automated until the person running the session
-approves it, and approvals die with the session. Still no actuation:
-nothing clicks, types, or changes application state.
+**Usable on Windows.** Twenty-three tools over a session manager, in three
+capability tiers (`read_only`, `interactive`, `full`), with session-scoped
+consent, a denylist that names controls by caption or by identity, a
+tiered actuation ladder that never activates a window, two isolation
+strategies (`minimized`, with a watchdog; `hidden_desktop`, launch-only),
+locators for windows and for elements that are not windows, embedded web
+documents driven through their accessibility tree, and an operator
+directory the tool reads profiles and workflows from and refuses to read
+from any repository. Linux is specified (`docs/LINUX.md`), not built.
 
 See `docs/superpowers/specs/2026-09-01-desktop-automation-mcp-design.md` for
 the design, `docs/DECISIONS.md` for what was decided along the way and why,
@@ -51,9 +55,41 @@ without it.
 ghostdriver-mcp          # stdio transport
 ```
 
-Thirteen tools at the `read_only` tier: `list_targets`, `attach`,
-`release`, `grant_targets`, `describe`, `find`, `read`, `capture`,
-`wait_for`, `probe`, `surfaces`, `modals`, `restore`.
+Register it with a Claude client as a stdio server, with the operator
+directory in its environment. For Claude Code (and the desktop app's Code
+tab), from any directory:
+
+```bash
+claude mcp add --scope user --env GHOSTDRIVER_OPERATOR_DIR=C:\Users\you\ghostdriver-operator ghostdriver -- C:\path\to\ghostdriver-mcp\.venv\Scripts\ghostdriver-mcp.exe
+```
+
+The same server in JSON form, for a `.mcp.json` or the desktop chat
+app's `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "ghostdriver": {
+      "command": "C:\\path\\to\\ghostdriver-mcp\\.venv\\Scripts\\ghostdriver-mcp.exe",
+      "env": { "GHOSTDRIVER_OPERATOR_DIR": "C:\\Users\\you\\ghostdriver-operator" }
+    }
+  }
+}
+```
+
+Use the virtual environment's console script, not a bare `python`: the
+server needs the COM and Win32 bindings installed there. With the
+operator directory configured, `attach` accepts a profile by bare name
+(`profile_path="sandbox"` finds `profiles/sandbox.json` there), so no
+path that names a machine crosses the wire.
+
+Fifteen tools at the `read_only` tier: `list_targets`, `attach`,
+`release`, `grant_targets`, `grant_launch`, `describe`, `find`, `read`,
+`capture`, `wait_for`, `probe`, `surfaces`, `modals`, `restore`,
+`await_human`. `interactive` adds `click`, `set_value`, `type_text`,
+`send_keys` and `record_input_sensitivity`; `full` adds `probe_phase2`,
+`probe_grid` and `launch_isolated`. The tier is chosen at `attach` and is
+immutable for the session.
 
 **Consent is decided in the chat, not in configuration.** `list_targets`
 shows each candidate with the endpoint read from its own command line —

@@ -166,7 +166,8 @@ class LifecycleTools(_ToolboxCore):
 
         try:
             profile = (
-                Profile.load(profile_path) if profile_path else Profile.none()
+                Profile.load(_profile_location(profile_path)) if profile_path
+                else Profile.none()
             )
             session = self.sessions.attach(
                 pid,
@@ -361,3 +362,19 @@ class LifecycleTools(_ToolboxCore):
             "take your foreground. Release the session to close it."
         )
         return summary
+
+
+def _profile_location(name_or_path: str) -> str:
+    """A bare profile name is looked up in the operator directory, when one is
+    configured; a path is used as given. So a client says `profile_path=
+    "sandbox"` and never types a path that names a machine."""
+    import os
+
+    from ..operator import ENV_VAR, OperatorDir, OperatorDirError
+
+    if os.environ.get(ENV_VAR):
+        try:
+            return str(OperatorDir.resolve().profile_path(name_or_path))
+        except OperatorDirError:
+            pass  # a misconfigured directory falls back to the literal path
+    return name_or_path

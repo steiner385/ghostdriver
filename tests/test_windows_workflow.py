@@ -136,3 +136,27 @@ def test_the_cli_refuses_an_operator_directory_inside_this_checkout():
 
     assert completed.returncode == 2
     assert "inside the git checkout" in completed.stderr
+
+
+def test_attach_resolves_a_bare_profile_name_through_the_operator_directory(
+        app, operator_dir, monkeypatch):
+    """A client of the MCP server says `profile_path="sandbox"`; the server,
+    started with the operator directory in its environment, finds
+    profiles/sandbox.json there. No path that names a machine crosses the
+    wire."""
+    import json
+
+    from ghostdriver.operator import ENV_VAR
+
+    (operator_dir.profiles).mkdir(exist_ok=True)
+    (operator_dir.profiles / "sandbox.json").write_text(
+        json.dumps({"denylist": ["*delete*", "*submit*"]}), encoding="utf-8")
+    monkeypatch.setenv(ENV_VAR, str(operator_dir.root))
+    from ghostdriver.policy import ConsentSource
+    box = Toolbox(SessionManager())
+    box.sessions.record_grant(app["pid"], allowed=True, source=ConsentSource.ELICITED)
+
+    attached = box.attach(app["pid"], profile_path="sandbox")
+
+    assert attached["ok"], attached
+    assert attached["denylist_patterns"] == 2
