@@ -3,6 +3,7 @@
 import uuid
 
 from ..hosting import classify_process, hosted_frame_note, is_frame_host
+from ..isolation import Isolation
 from ..model.result import ErrorKind, GhostdriverError
 from ..policy import (
     ConsentSource,
@@ -123,14 +124,36 @@ class LifecycleTools(_ToolboxCore):
         *,
         tier: str = "read_only",
         profile_path: str | None = None,
+        isolation: str = "none",
     ) -> dict:
         """Open a session against a target the operator has approved.
 
         When nobody has decided about this target yet, the result says so
         and carries what a person needs to be asked -- which application,
         and where it is pointed. That is a question, not a failure.
+
+        `isolation="minimized"` keeps the target minimized for the life of
+        the session: it is put away now without activating anything else,
+        a watchdog re-minimizes it if a window of it comes on screen, and
+        every such escape is captured and reported on the next result as
+        `watchdog_events` -- because a background application that shows
+        a window is almost always raising a modal, and that is the
+        information (D49). The strategy fits a target that is already
+        running and needed a person to sign in, which a hidden desktop
+        cannot host. Its costs: `restore` is refused while it runs; a
+        capture of the minimized window itself is not available (what the
+        watchdog photographs is the window that escaped); and at release
+        the window stays minimized, because no way of un-minimizing it
+        leaves the operator's focus alone.
         """
         import psutil
+
+        try:
+            strategy = Isolation(isolation)
+        except ValueError:
+            return _error(ErrorKind.NOT_ACTIONABLE,
+                          f"unknown isolation {isolation!r}; expected one of "
+                          f"{[i.value for i in Isolation]}")
 
         try:
             process = psutil.Process(pid)
@@ -173,6 +196,24 @@ class LifecycleTools(_ToolboxCore):
 
         summary = session.summary()
         summary["ok"] = True
+        summary["isolation"] = strategy.value
+        if strategy is Isolation.MINIMIZED:
+            from ..backends.windows.isolate import MinimizedWatch, WatchError
+
+            watch = MinimizedWatch(pid)
+            try:
+                session.run(watch.start)
+            except WatchError as exc:
+                self.sessions.release(session.session_id)
+                return _error(ErrorKind.NOT_ACTIONABLE,
+                              f"cannot keep pid {pid} minimized: {exc}")
+            self._watches[session.session_id] = watch
+            summary["note"] = (
+                "kept minimized for this session; if a window of it comes on "
+                "screen it is photographed, put back, and reported on the "
+                "next result as watchdog_events. It stays minimized after "
+                "release; the operator un-minimizes it from the taskbar."
+            )
         # Said at attach, not left for the caller to discover from a
         # profile that quietly describes a title bar. Judged on the window
         # this session will actually read, not on the process, and it names
@@ -202,13 +243,33 @@ class LifecycleTools(_ToolboxCore):
 
     def release(self, session_id: str) -> dict:
         self.sessions.release(session_id)
+        result: dict = {"ok": True, "released": session_id}
+        watch = self._watches.pop(session_id, None)
+        if watch is not None:
+            # Anything it saw since the last call is still worth reporting.
+            # The window stays minimized: every way of un-minimizing it
+            # activates it (see MinimizedWatch.stop), and taking the
+            # operator's focus at release would break the promise the
+            # strategy exists to keep. They click the taskbar when ready.
+            events = watch.drain()
+            if events:
+                result["watchdog_events"] = events
+            watch.stop()
+            result["left_minimized"] = True
+            result["minimized_by_this_session"] = watch.put_away
+            result["note"] = (
+                "the target is still minimized"
+                + (" (this session minimized it)" if watch.put_away else "")
+                + "; un-minimizing it from here would bring it to the front, "
+                "so that is left to you -- click it in the taskbar."
+            )
         desktop = self._desktops.pop(session_id, None)
         if desktop is not None:
             # Its target was launched onto a hidden desktop and is invisible;
             # a stranded process there is especially easy to leak, so
             # teardown terminates it and closes the desktop.
             desktop.teardown()
-        return {"ok": True, "released": session_id}
+        return result
 
     def launch_isolated(
         self,

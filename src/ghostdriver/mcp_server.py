@@ -202,8 +202,18 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         profile_path: Annotated[str | None, Field(description=(
             "Optional profile document supplying the caption denylist."
         ))] = None,
+        isolation: Annotated[str, Field(description=(
+            "none (default) or minimized. minimized keeps the target "
+            "minimized for the session without activating anything else; "
+            "if a window of it comes on screen -- usually a modal -- it is "
+            "photographed, put back, and reported on the next result as "
+            "watchdog_events. restore is refused while it runs, and the "
+            "window stays minimized after release (un-minimizing it would "
+            "bring it to the front); the operator clicks the taskbar."
+        ))] = "none",
     ) -> dict[str, Any]:
-        result = box.attach(pid, tier=tier, profile_path=profile_path)
+        result = box.attach(pid, tier=tier, profile_path=profile_path,
+                            isolation=isolation)
         if not result.get("needs_consent"):
             return result
 
@@ -396,9 +406,13 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         return box.modals(session_id)
 
     @server.tool(annotations=CHANGES_SCREEN, description=(
-        "Un-minimize the target without taking the foreground, so it can be "
-        "read. Changes no application state. Safe to call before reading; "
-        "does nothing if the target is already visible."
+        "Un-minimize the target so it can be read. Changes no application "
+        "state; does nothing if the target is already visible. It CAN bring "
+        "the window to the front: a plain minimized window comes back "
+        "activated, and took_foreground in the result says whether it did. "
+        "If the operator must not be interrupted, ask them to click the "
+        "taskbar instead. Refused on a session that keeps its target "
+        "minimized."
     ))
     def restore(session_id: SessionId) -> dict[str, Any]:
         return box.restore(session_id)

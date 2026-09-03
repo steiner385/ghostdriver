@@ -31,16 +31,11 @@ ENTRY_POINTS = {
     "ghostdriver.mcp_server",    # [project.scripts] ghostdriver-mcp, python -m
 }
 
-#: Validated by tests, unreachable from any entry point, and known to be.
-#: Found by this test on its first run: the `minimized` isolation strategy
-#: -- the watchdog that re-minimizes a target that surfaces -- was built and
-#: proven against the fixture (D49) but never wired into `attach`. Only
-#: `hidden_desktop` was (D52). Wiring it is the next piece of Phase B: it
-#: is the strategy that fits a target which must already be running.
-KNOWN_UNWIRED = {
-    "ghostdriver.isolation": "minimized watchdog, platform-neutral half (D49)",
-    "ghostdriver.backends.windows.isolate": "minimized watchdog, Windows half (D49)",
-}
+#: Validated by tests, unreachable from any entry point, and known to be,
+#: with the reason beside each entry. Meant to be empty. Its first run
+#: found the `minimized` isolation strategy unwired (D49 built it, D52
+#: wired only hidden_desktop); B0 wired it and emptied the list.
+KNOWN_UNWIRED: dict[str, str] = {}
 
 
 def _module_name(path: Path) -> str:

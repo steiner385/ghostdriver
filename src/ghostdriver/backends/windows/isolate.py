@@ -12,6 +12,7 @@ watchdog that grabbed focus to prevent focus theft would be the disease it
 treats.
 """
 
+import threading
 import time
 from collections.abc import Callable
 from ctypes import wintypes
@@ -142,3 +143,93 @@ def guard(pid: int, *, duration_s: float, interval_s: float = 0.1,
         watch_once(pid, main_hwnd, dog)
         sleep(interval_s)
     return dog.drain()
+
+
+class WatchError(RuntimeError):
+    """The minimized strategy could not be established on this target."""
+
+
+class MinimizedWatch:
+    """The minimized strategy as a background thread over one session's target.
+
+    `guard` is the strategy for a fixed duration; this is it for the life of
+    a session. The main window handle is locked once at start, before the
+    first minimize, for the reason `watch_once` documents: after minimizing,
+    re-resolving by visible nodes can flip to a proxy window. The same locked
+    handle is what the tool layer reads from, so the tools keep seeing the
+    window a person was looking at, not whatever is visible now.
+
+    The `Watchdog` is not thread-safe, so every touch of it -- the poll and
+    the drain -- is under one lock. Captures ride along on events; the most
+    recent one is kept so a caller can ask for it after the event has been
+    reported and drained.
+    """
+
+    INTERVAL_S = 0.1
+
+    def __init__(self, pid: int, *, now: Callable[[], float] = time.monotonic):
+        self.pid = pid
+        self.dog = Watchdog(now=now)
+        self.main_hwnd: int | None = None
+        #: True when *we* minimized it -- reported at release, so the
+        #: operator knows the window is minimized because of this session.
+        self.put_away = False
+        self.last_capture: bytes | None = None
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        main = _main_window(self.pid)
+        if main is None:
+            raise WatchError("the target has no window to keep minimized")
+        self.main_hwnd = main
+        if not winapi.is_minimized(main):
+            winapi.minimize_no_activate(main)
+            self.put_away = True
+        self._thread = threading.Thread(
+            target=self._run, daemon=True, name=f"minimized-watch-{self.pid}")
+        self._thread.start()
+
+    def _run(self) -> None:
+        assert self.main_hwnd is not None
+        while not self._stop.is_set():
+            try:
+                with self._lock:
+                    watch_once(self.pid, self.main_hwnd, self.dog)
+            except OSError:
+                # A window that vanished between sample and act. The next
+                # poll sees the world as it is; one bad poll is not news.
+                pass
+            self._stop.wait(self.INTERVAL_S)
+
+    def drain(self) -> list[dict]:
+        """Every event since the last drain, as data; captures kept aside."""
+        with self._lock:
+            events = self.dog.drain()
+        for event in events:
+            if event.capture_png is not None:
+                self.last_capture = event.capture_png
+        return [e.to_dict() for e in events]
+
+    @property
+    def suspended_reason(self) -> str:
+        return self.dog.suspended_reason
+
+    def stop(self) -> None:
+        """Stop watching. The window stays minimized, deliberately.
+
+        Measured against a plain top-level window, from a process allowed to
+        set the foreground (which every process launched from the operator's
+        own application is): `ShowWindow(SW_SHOWNOACTIVATE)`,
+        `ShowWindowAsync`, `SetWindowPlacement` and `SetWindowPos` with
+        `SWP_NOACTIVATE` all un-minimize *and activate* the window, and a
+        `LockSetForegroundWindow` around the show only moves the foreground
+        somewhere else instead. There is no un-minimize that leaves the
+        operator's focus where it was. So this tool never un-minimizes on
+        its own: the operator clicks the taskbar when they want the window,
+        which costs them nothing and cannot surprise them.
+        """
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2)

@@ -1185,6 +1185,59 @@ window minimized that nothing minimized, for the second time; alone it
 never reproduces. `restore` now names what it restored -- class and
 visibility -- so the next occurrence says which window it was.
 
+### D55. The minimized strategy is wired, and nothing ever un-minimizes
+
+**Context.** Phase A's stray-module guard found the `minimized` isolation
+strategy reachable from no entry point (D54): built and proven against the
+fixture in D49, never connected to `attach`; only `hidden_desktop` was
+(D52). It is the strategy that fits a target which is already running and
+needed a person to sign in -- the primary target -- so it was first in
+Phase B.
+
+**The wiring.** `attach(isolation="minimized")` locks the main window
+handle, puts it away without activating anything else, and starts a
+`MinimizedWatch`: a background thread polling `watch_once` under one lock,
+the same hold and flap rules D49 proved. The watch is held on the Toolbox
+by session id, like a hidden desktop, so the neutral `Session` stays free
+of threads and handles. `_trees` reads the locked handle's tree for such a
+session rather than selecting by visible nodes, which for a minimized
+target can flip to a proxy holding none of the UI. Every session tool
+reports what the watchdog saw since the last call as `watchdog_events` on
+its own result -- `describe` as readily as `click` -- because the event is
+the product and a caller should not have to know which tool to ask; the
+wrapper that does it is applied once, in the package root, to every method
+whose first argument is a session id. `restore` is refused on such a
+session, since the watchdog would put the window straight back. Proven
+through the tool layer on the fixture: attach puts it away with nobody's
+focus moving, read and click work on the locked window while minimized,
+a self-raised modal is caught, photographed, put back and reported on the
+next result, once.
+
+**Nothing un-minimizes, ever -- measured, not decided.** The first release
+path put the window back with `SW_SHOWNOACTIVATE` and the operator, at
+the keyboard, felt it take their focus. Measured against a plain top-level
+window (even one with `WS_EX_NOACTIVATE`), each in a fresh process:
+`ShowWindow(SW_SHOWNOACTIVATE)`, `ShowWindowAsync(SW_SHOWNOACTIVATE)`,
+`SetWindowPlacement(SW_SHOWNOACTIVATE)` and `SetWindowPos(SWP_NOACTIVATE |
+SWP_SHOWWINDOW)` all un-minimize *and activate* the window;
+`LockSetForegroundWindow` around the show stops the target taking the
+foreground but moves the foreground somewhere else instead. The
+documentation's "not activated" does not hold for un-minimizing when the
+caller is allowed to set the foreground, and every process launched from
+the operator's own application is. The no-activate show does hold for the
+case `restore` was built on -- a toolkit's minimized owner proxy, whose
+forms the application re-shows itself -- which is why its tests passed
+while the promise was false in general. So: a released minimized session
+leaves the window minimized and says whose doing that is; `restore`'s
+documentation now says it can bring the window to the front and that
+`took_foreground` reports whether it did; and the operator un-minimizes
+from the taskbar, which costs them nothing and cannot surprise them. The
+measurement script is not kept: it steals focus by design, and the
+finding is recorded here instead.
+
+**The known-unwired list is empty again.** As intended: the test that
+insists it stays true made removing the two entries part of the work.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

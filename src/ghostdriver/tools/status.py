@@ -126,11 +126,28 @@ class StatusTools(_ToolboxCore):
         }
 
     def restore(self, session_id: str) -> dict:
-        """Un-minimize the target without taking the foreground."""
+        """Un-minimize the target, reporting whether that took the foreground.
+
+        It can. Measured: a plain minimized top-level window shown with
+        SW_SHOWNOACTIVATE by a process allowed to set the foreground comes
+        back *activated* -- there is no un-minimize that does not. The
+        no-activate show holds for the case this was built for (a toolkit's
+        minimized owner proxy, whose forms the application re-shows itself),
+        and `took_foreground` says which case happened. Marked as changing
+        the screen for this reason; a caller wanting the guarantee should
+        ask the operator to click the taskbar instead.
+        """
         try:
             session = self.sessions.authorize(session_id, "restore")
         except GhostdriverError as exc:
             return _error(exc.kind, exc.message)
+        if session_id in self._watches:
+            return _error(
+                ErrorKind.NOT_ACTIONABLE,
+                "this session keeps its target minimized (isolation=minimized); "
+                "the watchdog would put it straight back. Release the session, "
+                "then un-minimize it from the taskbar.",
+            )
 
         from ..backends.windows import winapi
         from ..backends.windows.restore import restore_process

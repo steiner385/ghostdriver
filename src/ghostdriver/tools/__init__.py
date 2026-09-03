@@ -19,6 +19,9 @@ windows can answer almost any query with more than a caller can read.
 Everything that can return many rows caps them and says what it capped.
 """
 
+import functools
+import inspect
+
 from .actuation import ActuationTools
 from .core import MAX_ELEMENTS, SENSITIVE_HINT, _element, _error
 from .discovery import DiscoveryTools
@@ -38,3 +41,34 @@ class Toolbox(LifecycleTools, DiscoveryTools, StatusTools, ActuationTools,
     reader opens the file named for what they are looking at. The
     dataclass fields and every shared helper live on `_ToolboxCore`.
     """
+
+
+def _reporting_watchdog_events(fn):
+    """Append what the minimized watchdog saw to any session tool's result.
+
+    The event is the product (D49): a caller should not have to know which
+    tool to ask. So every tool that takes a session id reports, on its own
+    result, whatever the watchdog recorded since the last call -- `describe`
+    as readily as `click`. `release` reports its own, because by the time
+    it returns the watch is gone.
+    """
+    @functools.wraps(fn)
+    def wrapper(self, session_id, *args, **kwargs):
+        result = fn(self, session_id, *args, **kwargs)
+        watch = self._watches.get(session_id)
+        if watch is not None and isinstance(result, dict):
+            events = watch.drain()
+            if events:
+                result["watchdog_events"] = events
+            if watch.suspended_reason:
+                result["watchdog_suspended"] = watch.suspended_reason
+        return result
+    return wrapper
+
+
+for _name, _fn in inspect.getmembers(Toolbox, inspect.isfunction):
+    if _name.startswith("_") or _name == "release":
+        continue
+    _params = list(inspect.signature(_fn).parameters)[1:]
+    if _params and _params[0] == "session_id":
+        setattr(Toolbox, _name, _reporting_watchdog_events(_fn))

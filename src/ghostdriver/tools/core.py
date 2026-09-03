@@ -80,6 +80,9 @@ class _ToolboxCore:
     #: rather than on the platform-neutral Session so that layer stays free
     #: of Windows objects. Torn down when the session is released.
     _desktops: dict = field(default_factory=dict)
+    #: Minimized-strategy watches, by session id. Same reasoning: a
+    #: thread and a window handle are the backend's, not the Session's.
+    _watches: dict = field(default_factory=dict)
 
     def _trees(self, session, all_windows: bool) -> list[WindowNode]:
         from ..backends.windows.enumerate import enumerate_process
@@ -91,6 +94,16 @@ class _ToolboxCore:
             return []
         if all_windows:
             return sorted(trees, key=lambda t: -sum(1 for _ in t.walk()))
+        # A session under the minimized strategy reads the window it locked
+        # at attach. Selecting by visible nodes is the right question for a
+        # target a person can see; for one kept minimized it can flip to a
+        # proxy window holding none of the UI, and every read would answer
+        # about the wrong window forever.
+        watch = self._watches.get(session.session_id)
+        if watch is not None and watch.main_hwnd is not None:
+            locked = [t for t in trees if t.handle == watch.main_hwnd]
+            if locked:
+                return locked
         main = select_main_tree(trees)
         return [main] if main else []
 

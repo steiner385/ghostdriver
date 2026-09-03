@@ -80,21 +80,24 @@ ghostdriver modals --pid 1234
 ghostdriver restore --pid 1234
 ```
 
-## What this iteration does not do
+## What it does not do
 
-- **No actuation of any kind.** Nothing clicks, types, focuses, or changes
-  application state. No actuation verb is registered as a tool, because a
-  tool an agent can find is a tool it will call.
-- **`launch` is not implemented.** It needs an isolation strategy, and the
-  `minimized` strategy ships in Iteration 4. Attach to a running target.
-- **The denylist is enforced but unexercised.** The machinery matches
-  captions and refuses, and is tested — but nothing calls it end to end,
-  because there is no action to refuse yet.
-- **Owner-drawn grids yield no text through any accessibility surface.**
-  Measured directly against two real grids across four surfaces: no child
-  windows, no text, no MSAA children, and a UIA subtree containing only
-  their own scrollbars. `capture` is the way in; a grid reading strategy is
-  future work.
+- **Un-minimize anything on its own.** Measured: every way of restoring a
+  minimized window from a process allowed to set the foreground -- which any
+  process launched from the operator's own application is -- brings it to
+  the front. So a session under `isolation="minimized"` leaves the target
+  minimized at release and says so, and `restore` reports `took_foreground`
+  honestly rather than promising it stayed put. The operator clicks the
+  taskbar.
+- **Launch onto a hidden desktop anything but a classic Win32 process.**
+  Store-activated applications are activated by the shell on the input
+  desktop and ignore the desktop they were launched onto. And a target that
+  needs a person to sign in cannot use a hidden desktop at all; `minimized`
+  is the strategy for a target that is already running.
+- **Give exact text out of an owner-drawn grid by itself.** `probe_grid`
+  finds which route does -- a focus-revealed accessibility surface, or the
+  control's own clipboard copy -- and records it; `capture` remains the way
+  to look.
 - **No role mapping.** `Locator` carries a `role` field for profiles to
   populate later, but nothing resolves it, so `Locator.parse` rejects
   `role=` outright rather than accepting a query that would match nothing.
