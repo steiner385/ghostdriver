@@ -41,6 +41,17 @@ pip install -e ".[dev,server]"
 pytest
 ```
 
+The quick gate for everyday changes leaves out the tests that launch an
+engine, a hidden desktop or a server, or wait on a watchdog:
+
+```bash
+pytest -m "not slow"
+```
+
+Run the whole suite before a push, or after touching a backend, the
+session gate or the actuation ladder. Both include the lint and type
+tests and the focus guard.
+
 That one command is the whole gate: the suite includes a test that runs
 `ruff check src tests` and another that runs `mypy`, both configured in
 `pyproject.toml`, so lint and type regressions fail the tests rather than
@@ -91,6 +102,13 @@ Fifteen tools at the `read_only` tier: `list_targets`, `attach`,
 `probe_grid` and `launch_isolated`. The tier is chosen at `attach` and is
 immutable for the session.
 
+**When it needs a person, it says so on screen.** `await_human` shows its
+ask in a small always-on-top notice in the corner of the operator's screen
+for as long as it waits -- the one window this tool ever shows, and it
+never takes focus. `click` takes `button` (left, right, middle) and
+`modifiers` (ctrl, shift), so a Ctrl+right-click that opens a menu is the
+tool's to do rather than the person's.
+
 **Consent is decided in the chat, not in configuration.** `list_targets`
 shows each candidate with the endpoint read from its own command line —
 `the client (pid 62088) -- http://devhost:8183/devenv/gateway` — so the
@@ -99,7 +117,11 @@ their client supports elicitation; otherwise it returns `needs_consent` and
 the agent asks in chat and records the answer with `grant_targets`.
 
 Approvals and restrictions last for that session only, can be revised at any
-time, and revoking a target stops a session already using it. A profile
+time, and revoking a target stops a session already using it. A decision
+covers the application's whole process tree: the file dialog a browser
+opens in a helper process is the application the operator approved, not a
+new question, and a session sees that dialog's windows with
+`all_windows=true` without a second attach. A profile
 document is now optional and carries only the caption denylist.
 
 ## Use — CLI

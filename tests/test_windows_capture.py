@@ -12,9 +12,7 @@ import pytest
 
 from tests.conftest import on_windows
 
-pytestmark = on_windows
-
-
+pytestmark = [on_windows, pytest.mark.slow]
 def _decode(png: bytes):
     """Parse our own PNG with the stdlib, to prove it round-trips."""
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
@@ -52,6 +50,7 @@ def test_capture_does_not_activate_the_window(win32_target):
     unusable on a machine someone is working at."""
     import ctypes
 
+    from ghostdriver.backends.windows import winapi
     from ghostdriver.backends.windows.capture import capture_window
     from ghostdriver.backends.windows.enumerate import top_level_windows
 
@@ -61,7 +60,12 @@ def test_capture_does_not_activate_the_window(win32_target):
     hwnd = top_level_windows(win32_target)[0]
     capture_window(hwnd)
 
-    assert user32.GetForegroundWindow() == before
+    # The claim is that the *target* did not come forward. The operator
+    # may switch windows of their own while the suite runs; the focus
+    # guard covers every test-spawned window, and this asks the one
+    # question a handle comparison cannot survive the operator answering.
+    after = user32.GetForegroundWindow()
+    assert after == before or winapi.window_pid(after) != win32_target
 
 
 def test_a_region_is_cropped_from_the_window(win32_target):

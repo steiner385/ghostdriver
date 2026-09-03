@@ -37,6 +37,12 @@ class LifecycleTools(_ToolboxCore):
         top_level_windows = current().top_level_windows
 
         attached = {s.pid: s.session_id for s in self.sessions.open_sessions()}
+        # One process snapshot for every consent lookup in this listing: a
+        # per-process parent walk over a hundred candidates was seconds.
+        try:
+            parents = current().parent_map()
+        except Exception:
+            parents = {}
         targets = []
         for process in psutil.process_iter(["pid", "name"]):
             pid = process.info["pid"]
@@ -50,7 +56,7 @@ class LifecycleTools(_ToolboxCore):
                 endpoints = extract_endpoints(psutil.Process(pid).cmdline())
             except (psutil.Error, OSError):
                 endpoints = []
-            grant = self.sessions.grant_for(pid)
+            grant = self.sessions.grant_for(pid, parent_of=parents.get)
             # Whether this process owns windows for other applications, or
             # is an application whose frame something else owns. Cheap: the
             # top-level class names alone decide it.

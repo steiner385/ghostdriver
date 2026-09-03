@@ -117,11 +117,18 @@ class Grant:
     allowed: bool
     source: ConsentSource
     note: str = ""
+    #: Set when this decision was made about an ancestor process and applies
+    #: to `pid` because it descends from that one. An application is a
+    #: process tree, not a pid: the dialog a browser opens in a helper
+    #: process is the same application the operator approved.
+    inherited_from: int | None = None
 
     def describe(self) -> str:
         verdict = "allowed" if self.allowed else "restricted"
         detail = f" ({self.note})" if self.note else ""
-        return f"pid {self.pid} {verdict} via {self.source.value}{detail}"
+        via = (f"via pid {self.inherited_from}, its parent" if self.inherited_from
+               else f"via {self.source.value}")
+        return f"pid {self.pid} {verdict} {via}{detail}"
 
 
 # --- endpoints, for informing a decision rather than making one ----------

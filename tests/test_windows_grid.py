@@ -18,9 +18,7 @@ import pytest
 
 from tests.conftest import on_windows
 
-pytestmark = on_windows
-
-
+pytestmark = [on_windows, pytest.mark.slow]
 def start(*args):
     proc = subprocess.Popen(
         [sys.executable, "-m", "tests.fixtureapp", *args],

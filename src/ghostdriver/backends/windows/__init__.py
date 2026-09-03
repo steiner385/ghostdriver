@@ -26,6 +26,7 @@ if TYPE_CHECKING:
         isolate,
         modality,
         msaa,
+        notice,
         process,
         region,
         restore,
@@ -39,7 +40,7 @@ if TYPE_CHECKING:
 #: name *is* a submodule (a namespace of verbs, or the raw API).
 _WHERE: dict[str, str | None] = {
     "enumerate_process": "enumerate", "top_level_windows": "enumerate",
-    "process_facts": "process",
+    "process_facts": "process", "descendants": "process", "parent_map": "process",
     "read_window_text": "text", "is_protected": "text",
     "capture_window": "capture", "CaptureError": "capture",
     "top_level_state": "modality", "blocking_ancestor": "modality",
@@ -49,10 +50,11 @@ _WHERE: dict[str, str | None] = {
     "_current_value": "elements",
     "region_evidence": "region", "resolve_hosted_app": "hosted",
     "assess_uia": "uia", "assess_msaa": "msaa",
-    "verbs": None, "NAMED_KEYS": "input",
+    "verbs": None, "NAMED_KEYS": "input", "button_pair": "input",
     "copy_route": "grid", "focus_route": "grid",
     "MinimizedWatch": "isolate", "WatchError": "isolate",
     "HiddenDesktop": "hidden_desktop", "InterferenceWatch": "interference",
+    "OperatorNotice": "notice",
     "winapi": None,
 }
 assert set(_WHERE) == set(CONTRACT), set(_WHERE) ^ set(CONTRACT)

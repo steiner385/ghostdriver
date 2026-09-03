@@ -153,12 +153,39 @@ class ConsentRequired(GhostdriverError):
         self.pid = pid
 
 
-class SessionManager:
-    """Open sessions, session-scoped consent, and the gate for every call."""
+def _psutil_parent(pid: int) -> int | None:
+    """The parent pid, or None at the root or for a pid that is gone.
 
-    def __init__(self) -> None:
+    psutil refuses a parent whose creation time is later than the child's,
+    which is what keeps a recycled pid from looking like an ancestor.
+    """
+    try:
+        import psutil
+
+        parent = psutil.Process(pid).parent()
+        return parent.pid if parent is not None else None
+    except Exception:
+        return None
+
+
+class SessionManager:
+    """Open sessions, session-scoped consent, and the gate for every call.
+
+    **Consent is about an application, and an application is a process
+    tree.** A decision recorded for a pid applies to every process that
+    descends from it: the file dialog a Chromium browser opens lives in a
+    helper process with its own pid, and asking the operator again for it
+    is asking them to approve the application they just approved. A
+    decision about the pid itself still wins over an inherited one, in
+    either direction, and a restriction inherits exactly as an approval
+    does. `parent_of` is injectable so the walk is testable without
+    processes.
+    """
+
+    def __init__(self, parent_of: Callable[[int], int | None] = _psutil_parent) -> None:
         self._sessions: dict[str, Session] = {}
         self._grants: dict[int, Grant] = {}
+        self._parent_of = parent_of
         # Approval to *launch* a command, keyed by the command itself --
         # there is no pid to key on until after the launch. Separate from
         # pid grants because launching is a distinct authority from driving
@@ -190,8 +217,33 @@ class SessionManager:
         self._grants[pid] = grant
         return grant
 
-    def grant_for(self, pid: int) -> Grant | None:
-        return self._grants.get(pid)
+    def grant_for(self, pid: int, *,
+                  parent_of: Callable[[int], int | None] | None = None) -> Grant | None:
+        """The decision that applies to `pid`: its own, else its nearest
+        decided ancestor's, marked as inherited; None if nobody decided.
+
+        `parent_of` may be supplied for a bulk, informational use -- listing
+        every target with its consent -- where one process snapshot answers
+        for all of them and opening each process to check its creation
+        time is a cost paid for nothing. The authorizing paths use the
+        default, which does check.
+        """
+        own = self._grants.get(pid)
+        if own is not None:
+            return own
+        if not self._grants:
+            return None  # nobody has decided anything; no walk can find a decision
+        walk = parent_of or self._parent_of
+        seen = {pid}
+        current = walk(pid)
+        while current is not None and current not in seen:
+            seen.add(current)
+            ancestor = self._grants.get(current)
+            if ancestor is not None:
+                return Grant(pid=pid, allowed=ancestor.allowed, source=ancestor.source,
+                             note=ancestor.note, inherited_from=current)
+            current = walk(current)
+        return None
 
     def grants(self) -> list[Grant]:
         return list(self._grants.values())
@@ -239,7 +291,7 @@ class SessionManager:
         would be wrong: not-yet-asked is a different state from refused,
         and only one of them is worth putting a question to a person about.
         """
-        grant = self._grants.get(pid)
+        grant = self.grant_for(pid)
         if grant is None:
             raise ConsentRequired(
                 pid,
@@ -299,7 +351,7 @@ class SessionManager:
         # Consent can be withdrawn mid-session, and an open session must not
         # outlive it. Checked here rather than only at attach, so revoking a
         # target stops work already under way.
-        grant = self._grants.get(session.pid)
+        grant = self.grant_for(session.pid)
         if grant is None or not grant.allowed:
             raise GhostdriverError(
                 ErrorKind.DENIED_BY_POLICY,

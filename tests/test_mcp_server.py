@@ -17,6 +17,8 @@ import pytest
 from ghostdriver.session import SessionManager
 from tests.conftest import on_windows
 
+pytestmark = pytest.mark.slow
+
 mcp = pytest.importorskip(
     "mcp", reason="the protocol layer is an optional extra: pip install -e .[server]"
 )

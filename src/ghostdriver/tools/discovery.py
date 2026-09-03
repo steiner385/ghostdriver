@@ -61,6 +61,7 @@ class DiscoveryTools(_ToolboxCore):
                 "text": tree.text,
                 "visible": tree.visible,
                 "role": "main" if index == 0 else "other",
+                "pid": tree.pid,
                 "tree": summary.text,
             })
             remaining -= summary.node_count

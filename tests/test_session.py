@@ -205,3 +205,74 @@ def test_a_session_needs_no_profile_at_all():
 
     assert session.profile.denylist == ()
     manager.check_caption(session.session_id, "Delete Everything")
+
+
+# --- consent covers a process tree ---------------------------------------
+
+def tree_manager(parents: dict[int, int]) -> SessionManager:
+    """A manager whose parent walk is a table, not psutil."""
+    return SessionManager(parent_of=parents.get)
+
+
+def test_a_child_process_inherits_its_ancestors_approval():
+    """A browser's file dialog runs in a helper process with its own pid;
+    it is the application the operator approved, not a new question."""
+    manager = tree_manager({300: 200, 200: 100})
+    manager.record_grant(100, allowed=True, source=ConsentSource.ELICITED, note="the browser")
+
+    grant = manager.grant_for(300)
+
+    assert grant is not None and grant.allowed
+    assert grant.inherited_from == 100 and grant.pid == 300
+    assert "via pid 100" in grant.describe()
+    session = manager.attach(300, command_line=["dialog-helper"])
+    assert session.pid == 300
+
+
+def test_a_restriction_inherits_exactly_as_an_approval_does():
+    manager = tree_manager({300: 200, 200: 100})
+    manager.record_grant(100, allowed=False, source=ConsentSource.ELICITED,
+                         note="production")
+
+    with pytest.raises(GhostdriverError) as raised:
+        manager.attach(300, command_line=["dialog-helper"])
+
+    assert raised.value.kind is ErrorKind.DENIED_BY_POLICY
+    assert "production" in raised.value.message
+
+
+def test_a_decision_about_the_pid_itself_beats_an_inherited_one():
+    manager = tree_manager({300: 100})
+    manager.record_grant(100, allowed=True, source=ConsentSource.ELICITED)
+    manager.record_grant(300, allowed=False, source=ConsentSource.OPERATOR_TOOL,
+                         note="not this helper")
+
+    grant = manager.grant_for(300)
+
+    assert grant is not None and not grant.allowed and grant.inherited_from is None
+
+
+def test_an_undecided_tree_is_still_a_question():
+    manager = tree_manager({300: 200, 200: 100})
+
+    assert manager.grant_for(300) is None
+    with pytest.raises(ConsentRequired):
+        manager.attach(300, command_line=["x"])
+
+
+def test_the_parent_walk_survives_a_cycle_and_a_missing_parent():
+    manager = tree_manager({300: 200, 200: 300})
+    assert manager.grant_for(300) is None
+    assert tree_manager({}).grant_for(300) is None
+
+
+def test_revoking_the_ancestor_stops_a_session_on_the_child():
+    manager = tree_manager({300: 100})
+    manager.record_grant(100, allowed=True, source=ConsentSource.ELICITED)
+    session = manager.attach(300, command_line=["helper"])
+    manager.record_grant(100, allowed=False, source=ConsentSource.ELICITED)
+
+    with pytest.raises(GhostdriverError) as raised:
+        manager.authorize(session.session_id, "describe")
+
+    assert raised.value.kind is ErrorKind.DENIED_BY_POLICY

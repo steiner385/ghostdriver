@@ -53,6 +53,13 @@ WM_KEYDOWN = 0x0100
 WM_CHAR = 0x0102
 WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
+WM_RBUTTONDOWN = 0x0204
+WM_RBUTTONUP = 0x0205
+WM_MBUTTONDOWN = 0x0207
+WM_MBUTTONUP = 0x0208
+BUTTON_DOWN = {WM_LBUTTONDOWN: "left", WM_RBUTTONDOWN: "right", WM_MBUTTONDOWN: "middle"}
+BUTTON_UP = {WM_LBUTTONUP: "left", WM_RBUTTONUP: "right", WM_MBUTTONUP: "middle"}
+MK_SHIFT, MK_CONTROL = 0x0004, 0x0008
 WM_TIMER = 0x0113
 WM_COMMAND = 0x0111
 WM_NOTIFY = 0x004E
@@ -302,7 +309,7 @@ def _button_proc(hwnd, msg, wparam, lparam):
                        len(caption))
         user32.EndPaint(wintypes.HWND(hwnd), ctypes.byref(ps))
         return 0
-    if msg in (WM_LBUTTONDOWN, WM_LBUTTONUP) and _blocked(hwnd):
+    if (msg in BUTTON_DOWN or msg in BUTTON_UP) and _blocked(hwnd):
         # A modal disables the top-level, and the system then drops real
         # input before a control sees it. A *posted* message arrives anyway,
         # so a control that acted on it would let a driver operate an
@@ -310,15 +317,20 @@ def _button_proc(hwnd, msg, wparam, lparam):
         # one checks, because a fixture that did not would quietly bless a
         # driver that skips the check too.
         return 0
-    if msg == WM_LBUTTONDOWN:
-        _STATE[("pressed", hwnd)] = True
+    if msg in BUTTON_DOWN:
+        _STATE[("pressed", hwnd)] = BUTTON_DOWN[msg]
         user32.InvalidateRect(wintypes.HWND(hwnd), None, True)
         return 0
-    if msg == WM_LBUTTONUP:
-        if _STATE.get(("pressed", hwnd)):
+    if msg in BUTTON_UP:
+        if _STATE.get(("pressed", hwnd)) == BUTTON_UP[msg]:
             _STATE[("pressed", hwnd)] = False
             user32.InvalidateRect(wintypes.HWND(hwnd), None, True)
-            _on_click(hwnd)
+            # The modifiers the *message* carried, which is what a VCL
+            # control reads (KeysToShiftState); recorded so a test can see
+            # whether a posted Ctrl+right-click arrived as one.
+            mods = [name for flag, name in ((MK_CONTROL, "ctrl"), (MK_SHIFT, "shift"))
+                    if wparam & flag]
+            _on_click(hwnd, button=BUTTON_UP[msg], modifiers=mods)
         return 0
     return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
@@ -341,7 +353,7 @@ def _blocked(hwnd: int) -> bool:
     return False
 
 
-def _on_click(hwnd: int) -> None:
+def _on_click(hwnd: int, *, button: str = "left", modifiers=()) -> None:
     """What a click does: bump a counter the test can read back.
 
     A counter rather than a visible effect, because an action that cannot be
@@ -353,9 +365,12 @@ def _on_click(hwnd: int) -> None:
     _STATE["last_clicked"] = caption
     status = _STATE.get("status")
     if status:
+        detail = ""
+        if button != "left" or modifiers:
+            detail = f" button={button} mods={'+'.join(modifiers) or 'none'}"
         user32.SetWindowTextW(
             wintypes.HWND(status),
-            f"clicks={_STATE['clicks']} last={caption}",
+            f"clicks={_STATE['clicks']} last={caption}{detail}",
         )
     if _STATE.get("grab_after_ms"):
         # Section 10 item 5: an application that pulls itself to the
@@ -562,6 +577,21 @@ def _main_proc(hwnd, msg, wparam, lparam):
             user32.KillTimer(wintypes.HWND(hwnd), ctypes.c_void_p(2))
             user32.SetForegroundWindow(wintypes.HWND(hwnd))
             return 0
+        if wparam == 3:
+            # A window in a child process: the shape of a browser's file
+            # dialog, which lives in a helper process of its own. A second
+            # fixture, off-screen, announced on a second stdout line.
+            user32.KillTimer(wintypes.HWND(hwnd), ctypes.c_void_p(3))
+            import json as _json
+            import subprocess as _subprocess
+            import sys as _sys
+            child = _subprocess.Popen(
+                [_sys.executable, "-u", "-m", "tests.fixtureapp"],
+                stdout=_subprocess.PIPE, text=True)
+            announced = _json.loads(child.stdout.readline())
+            _STATE["child"] = child
+            print(_json.dumps({"child": announced["pid"]}), flush=True)
+            return 0
     if msg == WM_DESTROY:
         user32.PostQuitMessage(0)
         return 0
@@ -761,6 +791,9 @@ def build(options) -> dict:
     if options.modal_after:
         user32.SetTimer(wintypes.HWND(main), ctypes.c_void_p(1),
                         options.modal_after, None)
+    if options.child_after:
+        user32.SetTimer(wintypes.HWND(main), ctypes.c_void_p(3),
+                        options.child_after, None)
 
     return {
         "pid": os.getpid(),
@@ -794,6 +827,9 @@ def main(argv=None) -> None:
                         action="store_false",
                         help="Make the grid ignore WM_COPY, so the probe's "
                              "honest 'no route works' verdict can be tested.")
+    parser.add_argument("--child-after", type=int, default=0, metavar="MS",
+                        help="spawn a second fixture in a child process after MS "
+                             "(announced as a second JSON line: {\"child\": pid})")
     parser.add_argument("--modal-after", type=int, default=0, metavar="MS",
                         help="Raise a modal dialog this long after start. "
                              "0 disables it.")

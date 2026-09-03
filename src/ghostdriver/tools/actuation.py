@@ -24,6 +24,8 @@ class ActuationTools(_ActingCore):
         *,
         all_windows: bool = False,
         expect: dict | None = None,
+        button: str = "left",
+        modifiers: list[str] | None = None,
     ) -> dict:
         """Actuate one control.
 
@@ -31,6 +33,13 @@ class ActuationTools(_ActingCore):
         and the text it should then have. Without it the result reports that
         the input was delivered and claims nothing about its effect, because
         on this class of target those are genuinely different statements.
+
+        `button` is left, right or middle; `modifiers` may hold ctrl and
+        shift. A right-click opens a context menu, which arrives as a new
+        top-level window (all_windows=true reaches it). Modifiers travel in
+        the message's own flags, the only place a posted message can carry
+        them: a target that reads those flags sees them, one that asks the
+        keyboard does not, and the result's `expect` is how to tell which.
         """
         prepared, failure = self._prepared(
             session_id, "click", locator, all_windows, None
@@ -45,9 +54,15 @@ class ActuationTools(_ActingCore):
             after, described = self._expectation(prepared.session, expect)
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
-        attempts = (verbs.click_element(prepared.node)
+        held = list(modifiers or [])
+        try:
+            from ..backends import current
+            current().button_pair(button, held)
+        except ValueError as exc:
+            return _error(ErrorKind.NOT_ACTIONABLE, str(exc), locator=locator)
+        attempts = (verbs.click_element(prepared.node, button=button, modifiers=held)
                     if isinstance(prepared.node, AccessibleElement)
-                    else verbs.click(prepared.node.handle))
+                    else verbs.click(prepared.node.handle, button=button, modifiers=held))
         result = self._perform(prepared.session,
             attempts,
             expect_before=verbs.unblocked(prepared.node.handle),
@@ -59,6 +74,7 @@ class ActuationTools(_ActingCore):
             verified=("effect" if after is not None and result.ok
                       else "delivery_only"),
             expected=described,
+            button=button, modifiers=held,
         )
 
     def set_value(

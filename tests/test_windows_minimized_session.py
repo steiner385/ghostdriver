@@ -26,9 +26,7 @@ from ghostdriver.session import SessionManager
 from ghostdriver.tools import Toolbox
 from tests.conftest import on_windows
 
-pytestmark = on_windows
-
-
+pytestmark = [on_windows, pytest.mark.slow]
 def start(*args):
     proc = subprocess.Popen(
         [sys.executable, "-m", "tests.fixtureapp", "--onscreen", *args],
@@ -223,7 +221,12 @@ def test_release_leaves_a_target_that_was_already_minimized_alone(box, target):
 
 def test_release_reports_what_the_watchdog_saw_last(box, modal_target):
     session = attached(box, modal_target["pid"])["session_id"]
-    time.sleep(1.5)
+    # The modal comes at 600ms and the watchdog polls at 100ms; on a loaded
+    # machine either can be late, so wait for the event itself, bounded.
+    watch = box._watches[session]
+    deadline = time.monotonic() + 6.0
+    while not watch.dog.events and time.monotonic() < deadline:
+        time.sleep(0.1)
 
     result = box.release(session)
 

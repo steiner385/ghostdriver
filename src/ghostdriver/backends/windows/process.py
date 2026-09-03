@@ -182,3 +182,67 @@ def process_facts(pid: int) -> ProcessFacts:
         dpi_awareness=dpi, modules=modules or [],
         modules_readable=modules is not None,
     )
+
+
+# --- the process tree, cheaply ------------------------------------------------
+
+TH32CS_SNAPPROCESS = 0x00000002
+
+
+class _PROCESSENTRY32W(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+        ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
+        ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+        ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", ctypes.c_long),
+        ("dwFlags", wintypes.DWORD), ("szExeFile", ctypes.c_wchar * 260),
+    ]
+
+
+def parent_map() -> dict[int, int]:
+    """pid -> parent pid for every process, from one toolhelp snapshot.
+
+    One kernel call and a walk over the entries, with no handle opened per
+    process. Measured against the alternative: psutil's recursive children
+    walk opens every process on the machine to read its creation time, and
+    on a loaded machine that took seconds per call -- called on nearly every
+    tool call, it tripled the suite's running time. A pid reused since the
+    snapshot can pose as a parent here; the consent walk still asks psutil,
+    which refuses a parent younger than its child, so that risk stays with
+    the cheap, non-authorizing use: which windows to enumerate.
+    """
+    kernel32 = winapi.kernel32
+    snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if snapshot == wintypes.HANDLE(-1).value or not snapshot:
+        return {}
+    found: dict[int, int] = {}
+    try:
+        entry = _PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(_PROCESSENTRY32W)
+        if kernel32.Process32FirstW(snapshot, ctypes.byref(entry)):
+            while True:
+                found[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
+                if not kernel32.Process32NextW(snapshot, ctypes.byref(entry)):
+                    break
+    finally:
+        kernel32.CloseHandle(snapshot)
+    return found
+
+
+def descendants(pid: int) -> list[int]:
+    """Every process descended from `pid`, nearest first."""
+    parents = parent_map()
+    children: dict[int, list[int]] = {}
+    for child, parent in parents.items():
+        children.setdefault(parent, []).append(child)
+    out: list[int] = []
+    frontier = [pid]
+    seen = {pid}
+    while frontier:
+        current = frontier.pop(0)
+        for child in children.get(current, ()):
+            if child not in seen:
+                seen.add(child)
+                out.append(child)
+                frontier.append(child)
+    return out

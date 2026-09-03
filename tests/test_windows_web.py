@@ -23,8 +23,7 @@ from ghostdriver.session import Profile, SessionManager
 from ghostdriver.tools import Toolbox
 from tests.conftest import on_windows
 
-pytestmark = on_windows
-
+pytestmark = [on_windows, pytest.mark.slow]
 ENGINES = [
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
     r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",

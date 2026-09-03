@@ -20,7 +20,7 @@ decision holds the measurement the Linux one must repeat.
 | Contract name | Windows mechanism | Linux mechanism (proposed) | Measure against |
 |---|---|---|---|
 | `enumerate_process`, `top_level_windows` | `EnumWindows` / `EnumChildWindows`, per pid | AT-SPI2 over D-Bus: the application's accessible tree, rooted at the desktop; X11 window ids via `_NET_CLIENT_LIST` + `_NET_WM_PID` where a window is needed | D3, D40 (main-window selection by visible nodes) |
-| `process_facts` | `CreateToolhelp32Snapshot`, `IsWow64Process`, DPI awareness | `/proc/<pid>` (exe, cmdline, maps for toolkit detection: libgtk, libQt, libwx, Electron) | D2 (toolkit inference from loaded modules) |
+| `process_facts`, `descendants`, `parent_map` | `CreateToolhelp32Snapshot`, `IsWow64Process`, DPI awareness | `/proc/<pid>` (exe, cmdline, maps for toolkit detection: libgtk, libQt, libwx, Electron) | D2 (toolkit inference from loaded modules) |
 | `read_window_text` | `SendMessageTimeout(WM_GETTEXT)` | AT-SPI `Text` interface, or `Name` for controls without one; timeout per call because a hung application hangs the bus call | D4 (the unresponsive control), D47 |
 | `is_protected` | `EM_GETPASSWORDCHAR` | AT-SPI `STATE_PROTECTED`, role `PASSWORD_TEXT` | D33 (constraint 4) |
 | `capture_window`, `CaptureError` | `PrintWindow` | `XGetImage` on the window (composited: `XCompositeNameWindowPixmap`); never a screen grab | D46 |
@@ -31,11 +31,12 @@ decision holds the measurement the Linux one must repeat.
 | `region_evidence`, `resolve_hosted_app` | UIA count under a window; frame-host resolution | AT-SPI subtree count; embedded documents are `ROLE_DOCUMENT_WEB` | D41 |
 | `assess_uia`, `assess_msaa` | pattern richness | AT-SPI interface richness (`Action`, `Value`, `Text`, `Selection` counts) | D5 |
 | `verbs` | posted `WM_LBUTTONDOWN/UP`, posted `WM_CHAR`, UIA patterns | tier 1: AT-SPI `Action.DoAction`; tier 3: `XSendEvent` of `ButtonPress/Release` and `KeyPress/Release` **to the window**, which toolkits may ignore as synthetic (the `send_event` flag) -- this is the measurement that decides whether a Linux tier 3 exists at all | D21, D30, D44, D56 |
-| `NAMED_KEYS` | virtual-key table | X keysyms via `XStringToKeysym` | D44 |
+| `NAMED_KEYS`, `button_pair` | virtual-key table; button messages with modifier flags | X keysyms via `XStringToKeysym`; `ButtonPress` with `state` modifier mask | D44, D61 |
 | `copy_route`, `focus_route` | `WM_COPY`, posted `WM_SETFOCUS` | AT-SPI `Action` named "copy", `Component.GrabFocus` (which may raise the window: measure) | D50 |
 | `MinimizedWatch`, `WatchError` | poll `WS_MINIMIZE` + foreground; `SW_SHOWMINNOACTIVE` | poll `_NET_WM_STATE_HIDDEN` + `_NET_ACTIVE_WINDOW`; iconify via `XIconifyWindow` (does not focus) | D49, D55 |
 | `HiddenDesktop` | `CreateDesktopW` + thread binding | a nested X server (`Xephyr` or `Xvfb`) with its own `DISPLAY` and its own AT-SPI bus (`at-spi-bus-launcher` per display); launch-only, as on Windows; **no thread binding needed** -- the display is an environment variable | D51, D52, D53 |
 | `InterferenceWatch` | foreground pid + cursor | `_NET_ACTIVE_WINDOW` owner + `XQueryPointer` | D57 |
+| `OperatorNotice` | a topmost, no-activate popup window | an override-redirect X window with `_NET_WM_STATE_ABOVE`, never focused (`WM_HINTS` input False); under Wayland a layer-shell surface or a desktop notification (`org.freedesktop.Notifications`) | D61 |
 | `winapi` | raw Win32 | a small `x11` module: the handful of Xlib and EWMH calls above | -- |
 
 ## What is the same

@@ -190,3 +190,11 @@ def send_message_timeout(
     if not ok:
         return None
     return out.value
+
+# Toolhelp: one snapshot of the process list, for the process tree.
+kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
+kernel32.Process32FirstW.restype = wintypes.BOOL
+kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
+kernel32.Process32NextW.restype = wintypes.BOOL

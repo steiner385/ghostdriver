@@ -80,6 +80,18 @@ class HumanTools(_ToolboxCore):
             )
         return {"ok": True, **outcome}
 
+    def _notice(self, ask: str):
+        """The on-screen notice, or None where the platform cannot show one.
+        A notice that cannot be shown must not stop the wait."""
+        try:
+            from ..backends import current
+
+            shown = current().OperatorNotice(ask)
+            shown.show()
+            return shown
+        except Exception:
+            return None
+
     def await_human(
         self,
         session_id: str,
@@ -90,8 +102,18 @@ class HumanTools(_ToolboxCore):
         poll_s: float = 0.5,
         all_windows: bool = False,
         confirmed: bool = False,
+        notice: bool = True,
     ) -> dict:
         """Hand a step to the person, and wait for the target to show it done.
+
+        **The ask is put where the person is looking.** In a chat client the
+        ask can end up folded inside a tool call they have to expand to
+        read, and while this waits nobody is told anything. So, unless
+        `notice` is off, it is also shown on their screen for the length of
+        the wait: a small always-on-top window in the corner that never
+        takes focus and closes when the wait ends. The agent should still
+        say it in chat first -- the notice is where the ask is *kept*, the
+        chat is where it is *noticed*.
 
         Some steps are not the driver\'s to take. A password is the clearest
         case -- it would have to pass through this process to be typed, and
@@ -178,19 +200,24 @@ class HumanTools(_ToolboxCore):
         started = time.monotonic()
         deadline = started + max(0.0, timeout_s)
         met = False
-        while True:
-            try:
-                met = satisfied()
-            except GhostdriverError:
-                # The target went away while we waited, which is an answer.
-                met = False
-                break
-            if met:
-                break
-            now = time.monotonic()
-            if now >= deadline:
-                break
-            time.sleep(min(poll_s, deadline - now))
+        shown = self._notice(asked) if notice else None
+        try:
+            while True:
+                try:
+                    met = satisfied()
+                except GhostdriverError:
+                    # The target went away while we waited, which is an answer.
+                    met = False
+                    break
+                if met:
+                    break
+                now = time.monotonic()
+                if now >= deadline:
+                    break
+                time.sleep(min(poll_s, deadline - now))
+        finally:
+            if shown is not None:
+                shown.close()
 
         waited_ms = int((time.monotonic() - started) * 1000)
         described = (

@@ -32,6 +32,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "slow: launches an engine, a hidden desktop, a server, or waits on a watchdog; excluded from the quick gate (pytest -m \"not slow\")",
+]
 
 [tool.ruff]
 line-length = 100

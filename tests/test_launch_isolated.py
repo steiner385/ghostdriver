@@ -14,8 +14,7 @@ import pytest
 
 from tests.conftest import on_windows
 
-pytestmark = on_windows
-
+pytestmark = [on_windows, pytest.mark.slow]
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 
 COMMAND = [sys.executable, "-u", "-m", "tests.fixtureapp", "--onscreen"]

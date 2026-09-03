@@ -37,9 +37,12 @@ only and can be changed at any time.
 Four things about this class of target are worth knowing before you plan:
 
 1. Menus, dropdowns, lookup lists and modal dialogs are usually *separate
-   top-level windows*. Tools default to the main window; pass
-   all_windows=true to reach the rest. A "not found" that did not search
-   them is not evidence the control is absent.
+   top-level windows*, and some -- a browser's file dialog -- live in a
+   helper process of their own. Tools default to the main window; pass
+   all_windows=true to reach the rest, including windows the target's
+   child processes own. Approval of a target covers its child processes,
+   so never re-ask for a dialog the approved application opened. A "not
+   found" that did not search them is not evidence the control is absent.
 
 2. A modal dialog disables the window it belongs to, so every control there
    legitimately refuses input. `describe` and `attach` report this as
@@ -456,9 +459,18 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         locator: LocatorArg,
         all_windows: AllWindows = False,
         expect: ExpectArg = None,
+        button: Annotated[str, Field(description=(
+            "left (default), right or middle. A right-click's context menu "
+            "is a new top-level window: find it with all_windows=true."
+        ))] = "left",
+        modifiers: Annotated[list[str] | None, Field(description=(
+            "Held keys: ctrl and/or shift. Carried in the click's own flags; "
+            "a target that reads them sees Ctrl+click, one that asks the "
+            "keyboard does not -- say what should follow in `expect`."
+        ))] = None,
     ) -> dict[str, Any]:
         return box.click(session_id, locator, all_windows=all_windows,
-                         expect=expect)
+                         expect=expect, button=button, modifiers=modifiers)
 
     @server.tool(annotations=ACTUATES, description=(
         "Replace a field's contents by typing them. Always reads the field "
@@ -548,14 +560,14 @@ def build_server(sessions: SessionManager | None = None) -> Any:
 
     @server.tool(annotations=READS, description=(
         "Hand a step to the person and wait for the application to show it "
-        "done. Use it for anything that is not yours to do: a password or "
-        "any other credential, a step the operator asked to perform "
-        "themselves, an irreversible action, or a decision that needs their "
-        "judgement. Pass `until` naming what will be true once they have "
-        "finished -- a dialog gone, a field filled -- so you resume on "
-        "something observed rather than on someone saying they did it. "
-        "Never type a credential yourself, and never ask for one to be told "
-        "to you: it goes from the person into the application directly."
+        "done. SAY THE ASK IN CHAT FIRST, in your own message, before "
+        "calling this: the call blocks while it waits, and a person should "
+        "not have to open a tool call to learn what you need. While it "
+        "waits, the ask is also shown in a small always-on-top notice in the "
+        "corner of their screen, which never takes focus and closes when "
+        "the wait ends. Use it for anything a person must do themselves -- "
+        "a password, a sign-in, a judgement call. `until` is what proves it "
+        "happened; without it nothing is verified. Never carries a value."
     ))
     async def await_human(
         session_id: SessionId,

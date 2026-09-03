@@ -6,7 +6,7 @@ families subclass it, and `Toolbox` in the package root composes them.
 The rules every result follows are stated in the package docstring.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ..disturbance import INPUT_SENSITIVE_HINT
@@ -16,6 +16,9 @@ from ..model.result import ErrorKind
 from ..model.window import WindowNode, select_main_tree
 from ..resolve import resolve, resolve_elements
 from ..session import SessionManager
+
+#: How long a session's descendant list is trusted before it is re-read.
+TREE_CACHE_S = 0.5
 
 #: Most elements any single result will enumerate. A locator matching more
 #: than this is almost always a locator that needs narrowing, and returning
@@ -84,6 +87,9 @@ def _element(node) -> dict:
         # Valid only for this call. Present because it is the only thing that
         # tells two identically-captioned controls apart within one result.
         "handle_ephemeral": f"0x{node.handle:08X}",
+        # Which process owns it: a session sees its target's whole process
+        # tree, and a dialog in a helper process is worth telling apart.
+        "pid": node.pid,
     }
     if node.actionable is False:
         # Only when False, and only then. A control whose own flag is
@@ -110,6 +116,31 @@ class _ToolboxCore:
     #: Minimized-strategy watches, by session id. Same reasoning: a
     #: thread and a window handle are the backend's, not the Session's.
     _watches: dict = field(default_factory=dict)
+    #: (when, pids) per session: the descendant list is asked for on nearly
+    #: every call, and a snapshot half a second old is still the truth.
+    _tree_cache: dict = field(default_factory=dict)
+
+    def _tree_pids(self, session) -> list[int]:
+        """The target and every process descended from it, target first.
+
+        A window the application opens in a helper process -- a browser's
+        file dialog, a print dialog -- is the application's window, and a
+        session should see it without a second attach. The consent that
+        covers the target covers its descendants (session.grant_for), so
+        seeing them is consistent with what was approved.
+        """
+        import time
+
+        cached = self._tree_cache.get(session.session_id)
+        if cached is not None and time.monotonic() - cached[0] < TREE_CACHE_S:
+            return cached[1]
+        from ..backends import current
+        try:
+            pids = [session.pid] + list(current().descendants(session.pid))
+        except Exception:
+            pids = [session.pid]
+        self._tree_cache[session.session_id] = (time.monotonic(), pids)
+        return pids
 
     def _trees(self, session, all_windows: bool) -> list[WindowNode]:
         from ..backends import current
@@ -118,10 +149,14 @@ class _ToolboxCore:
         # session.run so a hidden-desktop target is enumerated on its own
         # desktop thread; a plain call otherwise.
         trees = session.run(lambda: enumerate_process(session.pid))
+        if all_windows:
+            # Every top-level window of the target and of its descendants,
+            # largest first. The main window stays the target's own.
+            for pid in self._tree_pids(session)[1:]:
+                trees = trees + session.run(lambda p=pid: enumerate_process(p))
+            return sorted(trees, key=lambda t: -sum(1 for _ in t.walk()))
         if not trees:
             return []
-        if all_windows:
-            return sorted(trees, key=lambda t: -sum(1 for _ in t.walk()))
         # A session under the minimized strategy reads the window it locked
         # at attach. Selecting by visible nodes is the right question for a
         # target a person can see; for one kept minimized it can flip to a
@@ -140,7 +175,12 @@ class _ToolboxCore:
         top_level_state = current().top_level_state
         from ..modality import find_modal_blocks
 
-        state = session.run(lambda: top_level_state(session.pid))
+        # Across the process tree: a dialog a helper process owns disables
+        # the target's window from outside its pid, and reading the target
+        # alone would report a block nothing accounts for.
+        state: list = []
+        for pid in self._tree_pids(session):
+            state = state + session.run(lambda p=pid: top_level_state(p))
         blocks, unexplained = find_modal_blocks(state)
         return (
             [b.describe() for b in blocks]
@@ -164,8 +204,16 @@ class _ToolboxCore:
         """
         locator = Locator.parse(expression)
         trees = self._trees(session, all_windows)
+        # `index` picks from the matches across *every* tree searched, so it
+        # is applied here, after the trees are combined. Applied inside each
+        # tree it could never name a match in the second window -- which,
+        # with a session that sees a whole process tree, is exactly where a
+        # dialog's controls are.
+        index = locator.index
+        unindexed = replace(locator, index=None)
         if not locator.is_element:
-            return [node for tree in trees for node in resolve(tree, locator)]
+            found: list = [node for tree in trees for node in resolve(tree, unindexed)]
+            return _pick(found, index)
 
         from ..backends import current
         walk_elements_awake = current().walk_elements_awake
@@ -182,11 +230,11 @@ class _ToolboxCore:
                 continue
             for node in resolve(tree, scope):
                 roots.append((node, chains[node.handle]))
-        found: list = []
+        found = []
         for root, chain in roots:
             walked = session.run(lambda r=root: walk_elements_awake(r))
-            found.extend(resolve_elements(walked, chain, locator))
-        return found
+            found.extend(resolve_elements(walked, chain, unindexed))
+        return _pick(found, index)
 
 def _chains(tree: WindowNode) -> dict[int, tuple[WindowNode, ...]]:
     """For every window in `tree`, the chain from the root down to it."""
@@ -200,3 +248,10 @@ def _chains(tree: WindowNode) -> dict[int, tuple[WindowNode, ...]]:
 
     walk(tree, ())
     return chains
+
+
+def _pick(matches: list, index: int | None) -> list:
+    """`index` over the combined matches; out of range is no match, not an error."""
+    if index is None:
+        return matches
+    return [matches[index]] if 0 <= index < len(matches) else []

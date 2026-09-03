@@ -1530,6 +1530,102 @@ phase breaks without noticing, which is exactly what happened.
 **The scorecard page** was refreshed in place rather than replaced, so a
 reader sees what changed against what was claimed.
 
+### R5. Consent covers a process tree, and so does a session
+
+**Revises R1.** Found in the first real use after rollout: driving a file
+upload into a web application, the operator was asked to approve the
+browser's file dialog on every upload. A Chromium browser opens that
+dialog in a helper process with its own pid, and R1 keyed consent by pid.
+The question it asked was "may I automate the application you just
+approved?", and a permission scheme that asks that is keying on the
+wrong thing.
+
+**An application is a process tree.** A decision recorded for a pid now
+applies to every process descended from it, evaluated at the moment of
+the check by walking parents (psutil, which refuses a parent created
+after its child, so a recycled pid cannot pose as an ancestor). A
+decision about the pid itself wins over an inherited one, in either
+direction; a restriction inherits exactly as an approval does; revoking
+the ancestor stops a session open on the child. `list_targets` shows the
+child as allowed, and the grant record says "via pid N, its parent". The
+walk is injectable and proven with a table; the real case is proven with
+the fixture spawning a second fixture in a child process.
+
+**And a session sees its target's tree.** Consent that covers the dialog
+is only half of it: under per-pid enumeration the dialog was invisible to
+the session that needed it, so a second attach was the only way in.
+`all_windows=true` now enumerates the target and every descendant, the
+main window stays the target's own, every element and window carries its
+`pid`, and modality is read across the tree -- a dialog in a helper
+process disables the target's window from outside its pid, and reading
+the target alone reported a block nothing accounted for. The dialog's
+button is the application's button, found and clicked from the one
+session, with no second question.
+
+**A defect this exposed.** `index=` was applied inside each window tree
+rather than across the combined matches, so it could never name a match
+in a second window -- with a session that sees a whole process tree,
+exactly where a dialog's controls are. It is applied after the trees are
+combined now, for windows and for elements alike, and the fixture test
+picks the child's button by index among two identical ones.
+
+**Not extended: the watchdog and the interference watch.** Both still
+sample the target pid alone. A helper-process dialog that comes on screen
+under the `minimized` strategy is not yet an escape the watchdog sees,
+and a helper taking the foreground is not yet an interference event. Both
+should follow the tree; neither was needed for the case at hand, and
+each is a measurement rather than a line of code.
+
+### D61. The ask goes where the person is looking, and a click has buttons and modifiers
+
+Two findings from the first real use after rollout, both about the tool
+meeting the person halfway.
+
+**`await_human` puts its ask on the screen.** The operator had to expand
+a tool call in the chat client to learn what the tool needed them to do,
+and while the call blocked, waiting, nobody was told anything. The client
+did not carry the elicitation, so the ask lived only in the call's
+arguments. Two layers now carry it. The tool's description tells the
+agent to say the ask in chat, in its own message, *before* calling --
+the call blocks, so afterwards is too late. And for the length of the
+wait, the ask is shown in `OperatorNotice`: a small window in the corner
+of the operator's screen that says what is being waited for and that the
+wait ends on its own once the application shows it done. It is the one
+thing this tool ever puts on the operator's screen, and it obeys the
+rule everything else obeys: topmost so a full-screen application cannot
+hide it, a tool window so it is not in the taskbar, created no-activate
+and shown no-activate, and it answers a click with "do not activate me".
+Its message loop is its own thread, so the waiting tool is not the one
+pumping it. Proven: visible, topmost, never the foreground, on screen
+during the wait and gone after, and switchable off. It is a contract
+name, and the Linux specification says what it becomes there.
+
+**A click can be a right click, with Ctrl held.** The step the operator
+was asked to take was a Ctrl+right-click on a status bar to open a menu;
+the tool knew exactly what was needed and could not do it, because
+`click` posted a plain left pair and nothing else. It now takes `button`
+(left, right, middle) and `modifiers` (ctrl, shift). The button is the
+message id; the modifiers ride in the message's own flags, which is the
+only place a posted message can carry them -- the real keyboard is not
+pressed, so a target that asks `GetKeyState` sees nothing, while one that
+reads the flags sees the modifier. A VCL control derives its shift state
+from those flags (`KeysToShiftState`), so on the primary target this is
+the Ctrl+right-click that opens its menu; the result's `expect` is how a
+caller learns which kind of target it has. A pattern has no notion of a
+button or a held key, so anything but a plain left click is tier 3
+alone, and an unknown button or modifier is refused by name. The fixture
+records the button and the flags its window procedure saw, so the test
+shows a posted Ctrl+right-click arriving as one and a mismatched pair
+completing nothing. The context menu a right-click opens is a new
+top-level window, reachable with `all_windows=true` and, by its items,
+with element locators.
+
+**Two timing-sensitive tests made robust** on the same run: one compared
+foreground handles across the moment the operator switched windows of
+their own (it now asks whether the *target* came forward, which is the
+claim), and one released a session before the watchdog had polled on a
+loaded machine (it now waits, bounded, for the event itself).
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

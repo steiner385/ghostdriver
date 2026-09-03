@@ -16,21 +16,27 @@ from . import elements, modality
 from . import input as win_input
 
 
-def click(hwnd: int) -> list[Attempt]:
+def click(hwnd: int, *, button: str = "left", modifiers=()) -> list[Attempt]:
     """Actuate a control.
 
     Tier 1 first because a target that publishes an Invoke pattern should be
     driven through it -- that is the surface it supports, and it survives a
     control moving or resizing. Tier 3 is where a Profile L1 target is
-    actually reached.
+    actually reached. A pattern has no notion of a right button or a held
+    modifier, so anything but a plain left click is tier 3 alone.
     """
+    posted = Attempt(Tier.WINDOW_MESSAGE,
+                     lambda: win_input.click(hwnd, button=button, modifiers=modifiers))
+    if button != "left" or modifiers:
+        return [posted]
     return [
         Attempt(Tier.UIA_PATTERN, lambda: win_input.invoke_via_uia(hwnd)),
-        Attempt(Tier.WINDOW_MESSAGE, lambda: win_input.click(hwnd)),
+        posted,
     ]
 
 
-def click_element(element: AccessibleElement) -> list[Attempt]:
+def click_element(element: AccessibleElement, *, button: str = "left",
+                  modifiers=()) -> list[Attempt]:
     """Actuate an element that is not a window.
 
     **The posted click goes first, and the pattern is the fallback.** That
@@ -49,8 +55,13 @@ def click_element(element: AccessibleElement) -> list[Attempt]:
     posted click -- a provider that draws its elements itself and reads the
     real input queue -- where Invoke or Select is the surface it supports.
     """
+    posted = Attempt(Tier.WINDOW_MESSAGE,
+                     lambda: elements.click_posted(element, button=button,
+                                                   modifiers=modifiers))
+    if button != "left" or modifiers:
+        return [posted]
     return [
-        Attempt(Tier.WINDOW_MESSAGE, lambda: elements.click_posted(element)),
+        posted,
         Attempt(Tier.UIA_PATTERN, lambda: elements.act_via_pattern(element),
                 rank=1),
     ]

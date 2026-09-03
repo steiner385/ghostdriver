@@ -20,8 +20,7 @@ from ghostdriver.tools import Toolbox
 from ghostdriver.workflow import Workflow, run_workflow
 from tests.conftest import on_windows
 
-pytestmark = on_windows
-
+pytestmark = [on_windows, pytest.mark.slow]
 WALK_TABS = {
     "name": "walk-tabs",
     "description": "Find the tabs, switch to the second, read the status line.",
