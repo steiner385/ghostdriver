@@ -7,6 +7,7 @@ backend's only job is producing the tree (spec section 3.2).
 import fnmatch
 import re
 
+from .model.element import AccessibleElement
 from .model.locator import Locator
 from .model.result import ErrorKind, GhostdriverError
 from .model.window import WindowNode
@@ -109,3 +110,87 @@ def resolve_one(tree: WindowNode, locator: Locator) -> WindowNode:
             locator.describe(),
         )
     return matches[0]
+
+
+# --- elements that are not windows ------------------------------------------
+
+def _element_matches(element: AccessibleElement, loc: Locator) -> bool:
+    if loc.visible is not None and element.visible != loc.visible:
+        return False
+    if loc.control_type is not None and not fnmatch.fnmatchcase(
+        element.control_type.lower(), loc.control_type.lower()
+    ):
+        return False
+    # `name=` and `text=` are the same question of an element.
+    for wanted in (loc.name, loc.text):
+        if wanted is not None and not _text_matches(wanted, element.name):
+            return False
+    if loc.class_name is not None and not fnmatch.fnmatchcase(
+        element.class_name, loc.class_name
+    ):
+        return False
+    return loc.role is None
+
+
+def _element_scope_matches(
+    ancestors: tuple[AccessibleElement, ...],
+    host_chain: tuple[WindowNode, ...],
+    loc: Locator,
+) -> bool:
+    """Whether a `within=` scope holds for an element.
+
+    An element scope (`within=(type=Tab)`) is asked of the element's
+    ancestors on the accessibility surface. A window scope
+    (`within=(class=SysTabControl32)`) is asked of the host window and its
+    ancestors -- the window the element lives in, and everything above it.
+    Both nest: each level is checked against a strictly shorter chain.
+    """
+    if loc.is_element:
+        for i, ancestor in enumerate(ancestors):
+            if not _element_matches(ancestor, loc):
+                continue
+            if loc.within is None:
+                return True
+            if _element_scope_matches(ancestors[:i], host_chain, loc.within):
+                return True
+        return False
+    # A window scope: the host chain is root-first, host last, and the
+    # host itself counts -- `within=(class=ToolbarWindow32)` names the
+    # window the buttons are *in*, not one above it.
+    for i, window in enumerate(host_chain):
+        if not _node_matches(window, loc):
+            continue
+        if loc.within is None:
+            return True
+        if _ancestor_matches(host_chain[:i], loc.within):
+            return True
+    return False
+
+
+def resolve_elements(
+    walked: list[tuple[AccessibleElement, tuple[AccessibleElement, ...]]],
+    host_chain: tuple[WindowNode, ...],
+    locator: Locator,
+) -> list[AccessibleElement]:
+    """Every element in `walked` matching `locator`, in walk order.
+
+    `walked` pairs each element with its ancestors on the accessibility
+    surface (root-first); `host_chain` is the window the walk was rooted
+    at and its ancestors (root-first), shared by every element in it.
+    `index` picks one match from the ordered list, applied last, as for
+    windows.
+    """
+    matches: list[AccessibleElement] = []
+    for element, ancestors in walked:
+        if not _element_matches(element, locator):
+            continue
+        if locator.within is not None and not _element_scope_matches(
+            ancestors, host_chain, locator.within
+        ):
+            continue
+        matches.append(element)
+    if locator.index is not None:
+        if 0 <= locator.index < len(matches):
+            return [matches[locator.index]]
+        return []
+    return matches

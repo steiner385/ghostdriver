@@ -24,6 +24,8 @@
     "*delete*",
     "*submit*",
     "*approve*",
+    "TabItem:Change Log",
+    "MenuItem#3@ToolbarWindow32",
     "*complete task*",
     "*release*"
   ],

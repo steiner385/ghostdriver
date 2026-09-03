@@ -10,10 +10,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..disturbance import INPUT_SENSITIVE_HINT
+from ..model.element import AccessibleElement
 from ..model.locator import Locator
 from ..model.result import ErrorKind, GhostdriverError
 from ..model.window import WindowNode, select_main_tree
-from ..resolve import resolve
+from ..resolve import resolve, resolve_elements
 from ..session import SessionManager
 
 #: Most elements any single result will enumerate. A locator matching more
@@ -44,8 +45,34 @@ class _Prepared:
     cadence: object
 
 
-def _element(node: WindowNode) -> dict:
+def _accessible(element: AccessibleElement) -> dict:
+    """One element that is not a window, described so a caller can find it again."""
+    left, top, right, bottom = element.rect
+    described = {
+        "type": element.control_type,
+        "name": element.name,
+        "automation_id": element.automation_id,
+        "class": element.class_name,
+        "enabled": element.enabled,
+        "visible": element.visible,
+        "patterns": list(element.patterns),
+        "rect": {"left": left, "top": top, "right": right, "bottom": bottom},
+        "host": {"class": element.host_class,
+                 "handle_ephemeral": f"0x{element.host_handle:08X}"},
+        "identities": element.identities(),
+        "locator": element.suggested_locator(),
+    }
+    if element.selected is not None:
+        described["selected"] = element.selected
+    if element.value is not None:
+        described["value"] = element.value
+    return described
+
+
+def _element(node) -> dict:
     """One element, described so a caller can find it again."""
+    if isinstance(node, AccessibleElement):
+        return _accessible(node)
     left, top, right, bottom = node.rect
     described = {
         "class": node.class_name,
@@ -122,15 +149,41 @@ class _ToolboxCore:
             ]
         )
 
-    def _resolve(
-        self, session, expression: str, all_windows: bool
-    ) -> list[WindowNode]:
+    def _resolve(self, session, expression: str, all_windows: bool) -> list:
+        """Every window or element `expression` names.
+
+        A window locator resolves against the window tree. An element
+        locator resolves on the accessibility surface, walked under the
+        window its scope names -- or under the main window when it names
+        none. A window scope narrows the walk itself, not just the matches:
+        `within=(class=SysTabControl32)` walks that control alone, which on
+        a target with a thousand windows is the difference between a query
+        and a survey.
+        """
         locator = Locator.parse(expression)
-        return [
-            node
-            for tree in self._trees(session, all_windows)
-            for node in resolve(tree, locator)
-        ]
+        trees = self._trees(session, all_windows)
+        if not locator.is_element:
+            return [node for tree in trees for node in resolve(tree, locator)]
+
+        from ..backends.windows.elements import walk_elements
+
+        # Which windows to walk: the outermost *window* scope, if any.
+        scope = locator.within
+        while scope is not None and scope.is_element:
+            scope = scope.within
+        roots: list[tuple[WindowNode, tuple[WindowNode, ...]]] = []
+        for tree in trees:
+            chains = _chains(tree)
+            if scope is None:
+                roots.append((tree, chains[tree.handle]))
+                continue
+            for node in resolve(tree, scope):
+                roots.append((node, chains[node.handle]))
+        found: list = []
+        for root, chain in roots:
+            walked = session.run(lambda r=root: walk_elements(r))
+            found.extend(resolve_elements(walked, chain, locator))
+        return found
 
     #
     # Every tool here runs the same four steps before it touches anything:
@@ -182,8 +235,10 @@ class _ToolboxCore:
         if failure is not None:
             return None, failure
 
+        identities = (node.identities() if isinstance(node, AccessibleElement)
+                      else [node.text])
         try:
-            self.sessions.check_caption(session_id, node.text)
+            self.sessions.check_identity(session_id, identities)
         except GhostdriverError as exc:
             return None, _error(exc.kind, exc.message, locator=locator)
 
@@ -332,22 +387,53 @@ class _ToolboxCore:
 
         where = expect.get("locator")
         wanted = expect.get("text")
+        selected = expect.get("selected")
         if not where:
             return None, None
         Locator.parse(where)  # raises ValueError, caught by the caller
+
+        def text_of(found) -> str:
+            # An element's text is its name, or its value when it has one;
+            # a window's is what it answers to a text query.
+            if isinstance(found, AccessibleElement):
+                return found.value if found.value is not None else found.name
+            return read_window_text(found.handle) or ""
 
         def holds() -> bool:
             found = self._resolve(session, where,
                                   expect.get("all_windows", False))
             if not found:
                 return False
+            if selected is not None:
+                # Re-read from the surface, not from the walk that found
+                # it: the state that proves a tab click worked is the one
+                # after the click.
+                from ..backends.windows.elements import is_selected
+
+                if not all(isinstance(n, AccessibleElement)
+                           and is_selected(n) == bool(selected) for n in found):
+                    return False
             if wanted is None:
                 return True
-            return any((read_window_text(n.handle) or "") == wanted
-                       for n in found)
+            return any(text_of(n) == wanted for n in found)
 
-        described = (
-            f"{where} exists" if wanted is None
-            else f"{where} reads {wanted!r}"
-        )
+        described = f"{where} exists"
+        if selected is not None:
+            described = f"{where} is {'selected' if selected else 'not selected'}"
+        if wanted is not None:
+            described = f"{where} reads {wanted!r}"
         return Condition(holds, described), described
+
+
+def _chains(tree: WindowNode) -> dict[int, tuple[WindowNode, ...]]:
+    """For every window in `tree`, the chain from the root down to it."""
+    chains: dict[int, tuple[WindowNode, ...]] = {}
+
+    def walk(node: WindowNode, above: tuple[WindowNode, ...]) -> None:
+        chain = above + (node,)
+        chains[node.handle] = chain
+        for child in node.children:
+            walk(child, chain)
+
+    walk(tree, ())
+    return chains

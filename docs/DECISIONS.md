@@ -1238,6 +1238,64 @@ finding is recorded here instead.
 **The known-unwired list is empty again.** As intended: the test that
 insists it stays true made removing the two entries part of the work.
 
+### D56. Elements that are not windows can be named, driven, and denied
+
+**Context.** The primary target's record tabs and its navigator buttons
+exist only on the accessibility surface: to the window tree a tab strip is
+one control with nothing inside. Locators named windows, so the safest
+things to drive could not be named, and the denylist, matching captions,
+could not forbid an unlabelled button at all. B1 of the roadmap.
+
+**The locator grows two keys and stays one grammar.** `type=` and `name=`
+make an *element* locator: `type=TabItem name="Components"`, or
+`type=MenuItem index=1 within=(class=ToolbarWindow32)` for a button with
+no name. `text=` is a synonym for `name=` on an element; `class=` matches
+the element's own class; `within=(...)` may name an ancestor element or
+the host window, and a window scope narrows the *walk*, not just the
+matches -- on a target with a thousand windows that is the difference
+between a query and a survey. `find`, `read`, `wait_for` and `click` take
+either kind; the typing verbs refuse an element and say why (keystrokes go
+to a window, and an element without one has nowhere to receive them).
+`AccessibleElement` is platform-neutral like `WindowNode`, and answers the
+same names (`text`, `visible`, `enabled`, `handle` -- the host) so the
+wait conditions and the actuation gate read it unchanged.
+
+**Identity, for the denylist.** An element is known by its caption, its
+type-qualified caption (`TabItem:Change Log`), its automation id
+(`Button#btnDelete`), and -- the case that motivated this -- its type and
+position under its host (`MenuItem#3@ToolbarWindow32`). The denylist
+matches any of them, so an unlabelled destructive button is deniable by
+what and where it is. Measured on the fixture's real Win32 toolbar: its
+buttons reach the surface as MenuItem elements with Invoke and no name,
+which is what the primary target's navigator buttons will look like.
+
+**The posted click goes first, and the pattern is the fallback --
+measured.** Selecting a tab item through its SelectionItem pattern marks
+it selected and the application's page never switches: programmatic
+selection on a Win32 tab control sends no change notification, so the
+handler a person's click would run does not run. It is D21's split again
+-- the surface changes, the application does not know -- and an
+expectation on the tab's selected flag *passes* while the effect a person
+would see never happens. So `click_element` ranks the button pair posted
+to the host window at the element's rectangle before the pattern, and
+`Attempt` gained a `rank` so a verb can order a tier later without
+misreporting which tier it was (`tier_used` stays the truth). The posted
+click goes through the control's own mouse handling, which notifies the
+application exactly as a person's click would, and it is the only route
+on a Profile L1 target, whose elements publish nothing. The pattern stays
+for a host that does not answer posted clicks. The measurement is kept as
+a test. The lesson generalises: an expectation should name the effect a
+person would see, not the surface's own flag.
+
+**Proven on the fixture**, which grew a real SysTabControl32 whose items
+switch its pages and a real ToolbarWindow32 of unlabelled buttons: the walk
+sees what the window tree cannot; every suggested locator resolves again;
+a tab click switches the page and re-reads as selected; an unlabelled
+button is clicked by position; the denylist refuses by typed caption, by
+position, and by plain caption pattern; and it all works on a
+hidden-desktop session, where the COM client has to be created on the
+desktop-bound thread.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

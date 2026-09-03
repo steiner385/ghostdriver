@@ -11,8 +11,9 @@ the cadence asked for.
 
 from ...actuate import Attempt, Condition, Tier
 from ...cadence import ROBOT, Cadence
+from ...model.element import AccessibleElement
+from . import elements, modality
 from . import input as win_input
-from . import modality
 
 
 def click(hwnd: int) -> list[Attempt]:
@@ -26,6 +27,32 @@ def click(hwnd: int) -> list[Attempt]:
     return [
         Attempt(Tier.UIA_PATTERN, lambda: win_input.invoke_via_uia(hwnd)),
         Attempt(Tier.WINDOW_MESSAGE, lambda: win_input.click(hwnd)),
+    ]
+
+
+def click_element(element: AccessibleElement) -> list[Attempt]:
+    """Actuate an element that is not a window.
+
+    **The posted click goes first, and the pattern is the fallback.** That
+    inverts the ladder, on a measurement. Selecting a tab item through its
+    SelectionItem pattern marks it selected -- and the application's page
+    never switches, because programmatic selection on a Win32 tab control
+    sends no change notification, so the handler a person's click would run
+    does not run. It is the Value-pattern split (D21) again: the surface
+    changes, the application does not know. The button pair posted to the
+    *host* window at the element's own rectangle goes through the control's
+    own mouse handling, which notifies the application exactly as a
+    person's click would -- and it is also the only route on a Profile L1
+    target, whose elements publish nothing at all.
+
+    The pattern stays on the ladder for the host that does not answer a
+    posted click -- a provider that draws its elements itself and reads the
+    real input queue -- where Invoke or Select is the surface it supports.
+    """
+    return [
+        Attempt(Tier.WINDOW_MESSAGE, lambda: elements.click_posted(element)),
+        Attempt(Tier.UIA_PATTERN, lambda: elements.act_via_pattern(element),
+                rank=1),
     ]
 
 

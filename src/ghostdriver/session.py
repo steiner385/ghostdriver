@@ -315,10 +315,22 @@ class SessionManager:
         locator that happens to match a denied control is caught even when
         it was not written to name one.
         """
+        self.check_identity(session_id, [caption])
+
+    def check_identity(self, session_id: str, identities: list[str]) -> None:
+        """Refuse an element the denylist names by any of its identities.
+
+        A window has one identity, its caption. An element that is not a
+        window has several -- caption, type-qualified caption, automation
+        id, and type-and-position under its host -- because an unlabelled
+        button has to be deniable by *what it is*, and a caption is the one
+        thing it does not have.
+        """
         session = self.get(session_id)
-        match = denied(caption, list(session.profile.denylist))
-        if match is not None:
-            raise GhostdriverError(
-                ErrorKind.DENIED_BY_POLICY,
-                f"refusing to act on {match.describe()}",
-            )
+        for identity in identities:
+            match = denied(identity, list(session.profile.denylist))
+            if match is not None:
+                raise GhostdriverError(
+                    ErrorKind.DENIED_BY_POLICY,
+                    f"refusing to act on {match.describe()}",
+                )

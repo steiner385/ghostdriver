@@ -2,6 +2,7 @@
 
 import base64
 
+from ..model.element import AccessibleElement
 from ..model.locator import Locator
 from ..model.result import ErrorKind, GhostdriverError
 from ..summarize import summarize
@@ -139,6 +140,17 @@ class DiscoveryTools(_ToolboxCore):
 
         values = []
         for node in matches[:MAX_ELEMENTS]:
+            if isinstance(node, AccessibleElement):
+                # An element answers with its name, or its value when it
+                # publishes one; the surface always answers, so there is no
+                # unanswered case here.
+                values.append({
+                    "type": node.control_type,
+                    "text": node.value if node.value is not None else node.name,
+                    "answered": True,
+                    **({"selected": node.selected} if node.selected is not None else {}),
+                })
+                continue
             raw = read_window_text(node.handle)
             value = {
                 "class": node.class_name,

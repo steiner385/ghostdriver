@@ -55,6 +55,23 @@ WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
 WM_TIMER = 0x0113
 WM_COMMAND = 0x0111
+WM_NOTIFY = 0x004E
+# Common controls: a tab strip and a toolbar. Their items are not windows
+# -- a tab item and a toolbar button exist only on the accessibility
+# surface -- which is exactly the class of element the target's record
+# tabs and unlabelled navigator buttons belong to.
+TCM_INSERTITEMW = 0x1300 + 62
+TCM_GETCURSEL = 0x1300 + 11
+TCN_SELCHANGE = -551
+TCIF_TEXT = 0x0001
+TB_BUTTONSTRUCTSIZE = 0x0400 + 30
+TB_SETBUTTONSIZE = 0x0400 + 31
+TB_ADDBUTTONSW = 0x0400 + 68
+TBSTATE_ENABLED = 0x04
+I_IMAGENONE = -2
+ICC_BAR_CLASSES = 0x0004
+ICC_TAB_CLASSES = 0x0008
+TOOL_COMMANDS = {201: "tool-first", 202: "tool-second", 203: "tool-third"}
 WM_COPY = 0x0301
 WM_USER = 0x0400
 
@@ -147,6 +164,38 @@ gdi32.TextOutW.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int,
 gdi32.MoveToEx.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int,
                            ctypes.c_void_p]
 gdi32.LineTo.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
+
+
+class TCITEMW(ctypes.Structure):
+    _fields_ = [("mask", wintypes.UINT), ("dwState", wintypes.DWORD),
+                ("dwStateMask", wintypes.DWORD), ("pszText", wintypes.LPWSTR),
+                ("cchTextMax", ctypes.c_int), ("iImage", ctypes.c_int),
+                ("lParam", ctypes.c_ssize_t)]
+
+
+class TBBUTTON(ctypes.Structure):
+    _fields_ = [("iBitmap", ctypes.c_int), ("idCommand", ctypes.c_int),
+                ("fsState", ctypes.c_ubyte), ("fsStyle", ctypes.c_ubyte),
+                ("bReserved", ctypes.c_ubyte * (6 if ctypes.sizeof(ctypes.c_void_p) == 8 else 2)),
+                ("dwData", ctypes.c_size_t), ("iString", ctypes.c_ssize_t)]
+
+
+class NMHDR(ctypes.Structure):
+    _fields_ = [("hwndFrom", wintypes.HWND), ("idFrom", ctypes.c_size_t),
+                ("code", ctypes.c_int)]
+
+
+# A second prototype for messages whose lParam is a pointer: the module's
+# SendMessageW is typed for integer parameters, and a 64-bit address does
+# not fit that.
+_user32_ptr = ctypes.WinDLL("user32", use_last_error=True)
+_user32_ptr.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT,
+                                    ctypes.c_size_t, ctypes.c_void_p]
+_user32_ptr.SendMessageW.restype = ctypes.c_ssize_t
+
+
+class INITCOMMONCONTROLSEX(ctypes.Structure):
+    _fields_ = [("dwSize", wintypes.DWORD), ("dwICC", wintypes.DWORD)]
 
 
 class PAINTSTRUCT(ctypes.Structure):
@@ -477,9 +526,32 @@ def _commit_bound_value(hwnd: int) -> None:
 
 # --- the shell: pages, modal, foreground grab ---------------------------
 
+def _show_page(index: int) -> None:
+    """Show one page and hide the rest -- what selecting a tab does."""
+    for i, page in enumerate(_STATE.get("pages", [])):
+        user32.ShowWindow(wintypes.HWND(page), 5 if i == index else 0)  # SW_SHOW / SW_HIDE
+    _STATE["page_index"] = index
+
+
 def _main_proc(hwnd, msg, wparam, lparam):
     if msg == WM_FIXTURE_CURRENT_PAGE:
         return _STATE.get("page_index", 0)
+    if msg == WM_NOTIFY:
+        header = ctypes.cast(lparam, ctypes.POINTER(NMHDR)).contents
+        if header.code == TCN_SELCHANGE and _STATE.get("tabs"):
+            selected = user32.SendMessageW(wintypes.HWND(_STATE["tabs"]),
+                                           TCM_GETCURSEL, 0, 0)
+            _show_page(int(selected))
+            return 0
+    if msg == WM_COMMAND and (wparam & 0xFFFF) in TOOL_COMMANDS:
+        # A toolbar button: no window of its own, no caption. The click is
+        # recorded by command name so a test can tell which one it was.
+        _STATE["clicks"] = _STATE.get("clicks", 0) + 1
+        name = TOOL_COMMANDS[wparam & 0xFFFF]
+        _STATE["last_clicked"] = name
+        user32.SetWindowTextW(wintypes.HWND(_STATE["status"]),
+                              f"clicks={_STATE['clicks']} last={name}")
+        return 0
     if msg == WM_TIMER:
         if wparam == 1:
             # Section 10 item 7: a modal that appears mid-run.
@@ -647,7 +719,37 @@ def build(options) -> dict:
                    extra=WS_BORDER | ES_PASSWORD, exstyle=WS_EX_CLIENTEDGE)
     status = child("STATIC", "clicks=0 last=", 12, 330, 600, 22)
     _STATE.update(bound_mirror=mirror, status=status,
-                  bound_value="PART-0001", page_index=0)
+                  bound_value="PART-0001", page_index=0, pages=pages)
+
+    # Elements that are not windows. A tab strip whose items switch the
+    # pages above, and a toolbar of unlabelled buttons: on the accessibility
+    # surface these are TabItem and Button elements; to the window tree they
+    # are one SysTabControl32 and one ToolbarWindow32 with nothing inside.
+    icc = INITCOMMONCONTROLSEX(ctypes.sizeof(INITCOMMONCONTROLSEX),
+                               ICC_TAB_CLASSES | ICC_BAR_CLASSES)
+    ctypes.WinDLL("comctl32").InitCommonControlsEx(ctypes.byref(icc))
+    tabs = child("SysTabControl32", "", 12, 356, 300, 28)
+    for index, label in enumerate(("Operations", "Components", "Change Log")):
+        item = TCITEMW(mask=TCIF_TEXT, pszText=label)
+        _user32_ptr.SendMessageW(wintypes.HWND(tabs), TCM_INSERTITEMW, index,
+                                 ctypes.addressof(item))
+    _STATE["tabs"] = tabs
+
+    tools = child("ToolbarWindow32", "", 320, 356, 290, 28)
+    user32.SendMessageW(wintypes.HWND(tools), TB_BUTTONSTRUCTSIZE,
+                        ctypes.sizeof(TBBUTTON), 0)
+    user32.SendMessageW(wintypes.HWND(tools), TB_SETBUTTONSIZE, 0,
+                        (24 << 16) | 44)
+    buttons = (TBBUTTON * len(TOOL_COMMANDS))()
+    for i, command in enumerate(TOOL_COMMANDS):
+        buttons[i].iBitmap = I_IMAGENONE
+        buttons[i].idCommand = command
+        buttons[i].fsState = TBSTATE_ENABLED
+        buttons[i].fsStyle = 0
+        buttons[i].iString = -1
+    _user32_ptr.SendMessageW(wintypes.HWND(tools), TB_ADDBUTTONSW,
+                             len(TOOL_COMMANDS), ctypes.addressof(buttons))
+    _STATE["toolbar_hwnd"] = tools
 
     modal = user32.CreateWindowExW(
         WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, MODAL_CLASS,
@@ -673,6 +775,8 @@ def build(options) -> dict:
         "bound_edit": bound,
         "bound_mirror": mirror,
         "status": status,
+        "tabs": tabs,
+        "toolbar_hwnd": tools,
         "modal": modal,
     }
 

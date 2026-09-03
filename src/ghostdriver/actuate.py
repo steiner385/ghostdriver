@@ -106,10 +106,17 @@ class Condition:
 
 @dataclass
 class Attempt:
-    """One tier's implementation of a verb."""
+    """One tier's implementation of a verb.
+
+    `rank` orders attempts before tier does. The default ladder runs the
+    lowest tier first; a verb that has measured a higher tier to be the
+    hazard rather than the preference can rank it later without lying
+    about which tier it is -- `tier_used` in the result stays the truth.
+    """
 
     tier: Tier
     run: Callable[[], bool]
+    rank: int = 0
 
 
 @dataclass
@@ -180,7 +187,7 @@ class Actuator:
             )
 
         attempted: list[int] = []
-        for attempt in sorted(usable, key=lambda a: a.tier):
+        for attempt in sorted(usable, key=lambda a: (a.rank, a.tier)):
             attempted.append(int(attempt.tier))
             try:
                 delivered = attempt.run()

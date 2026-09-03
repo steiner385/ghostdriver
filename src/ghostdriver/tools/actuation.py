@@ -1,10 +1,17 @@
 """Actuation: click, set_value, type_text, send_keys."""
 
 
+from ..model.element import AccessibleElement
 from ..model.result import ErrorKind
 from .core import (
     _error,
     _ToolboxCore,
+)
+
+ELEMENTS_CLICK_ONLY = (
+    "element locators (type=/name=) support click, find, read and wait_for; "
+    "to type into something, name its window (class=...) -- keystrokes go "
+    "to a window, and an element without one has nowhere to receive them"
 )
 
 
@@ -38,8 +45,11 @@ class ActuationTools(_ToolboxCore):
             after, described = self._expectation(prepared.session, expect)
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
+        attempts = (verbs.click_element(prepared.node)
+                    if isinstance(prepared.node, AccessibleElement)
+                    else verbs.click(prepared.node.handle))
         result = self._perform(prepared.session,
-            verbs.click(prepared.node.handle),
+            attempts,
             expect_before=verbs.unblocked(prepared.node.handle),
             expect_after=after,
         )
@@ -93,6 +103,9 @@ class ActuationTools(_ToolboxCore):
         )
         if failure is not None:
             return failure
+        if isinstance(prepared.node, AccessibleElement):
+            return _error(ErrorKind.NOT_ACTIONABLE, ELEMENTS_CLICK_ONLY,
+                          locator=locator)
 
         refusal = self._refuse_if_protected(prepared.node, "type into")
         if refusal is not None:
@@ -169,6 +182,9 @@ class ActuationTools(_ToolboxCore):
         )
         if failure is not None:
             return failure
+        if isinstance(prepared.node, AccessibleElement):
+            return _error(ErrorKind.NOT_ACTIONABLE, ELEMENTS_CLICK_ONLY,
+                          locator=locator)
 
         refusal = self._refuse_if_protected(prepared.node, "type into")
         if refusal is not None:
@@ -216,6 +232,9 @@ class ActuationTools(_ToolboxCore):
         )
         if failure is not None:
             return failure
+        if isinstance(prepared.node, AccessibleElement):
+            return _error(ErrorKind.NOT_ACTIONABLE, ELEMENTS_CLICK_ONLY,
+                          locator=locator)
 
         from ..backends.windows import verbs
         from ..backends.windows.input import NAMED_KEYS

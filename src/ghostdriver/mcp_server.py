@@ -86,7 +86,10 @@ LocatorArg = Annotated[
     Field(description=(
         'Declarative query, e.g. class=TPanel text="Save" visible=true. '
         "Keys: class (glob, case-sensitive), text (exact, or /regex/), "
-        "visible, index. Prefer these over handles: handles are recycled by "
+        "visible, index, within=(...) to scope by ancestor. Add type= "
+        "and/or name= to name an element that is not a window (a tab "
+        "item, a toolbar button) on the accessibility surface. Prefer "
+        "these over handles: handles are recycled by "
         "the OS and are valid only within one result."
     )),
 ]
@@ -291,7 +294,12 @@ def build_server(sessions: SessionManager | None = None) -> Any:
 
     @server.tool(annotations=READS, description=(
         "Resolve a locator to elements. Returns a re-resolvable locator for "
-        "each match alongside its properties."
+        "each match alongside its properties. Window locators (class=, "
+        "text=) resolve against the window tree; element locators (type=, "
+        "name=) resolve on the accessibility surface, where tab items, "
+        "toolbar buttons and menu entries live without a window of their "
+        "own -- e.g. type=TabItem, or type=MenuItem index=1 "
+        "within=(class=ToolbarWindow32) for an unlabelled button."
     ))
     def find(session_id: SessionId, locator: LocatorArg,
              all_windows: AllWindows = False) -> dict[str, Any]:
@@ -431,7 +439,11 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     ))]
 
     @server.tool(annotations=ACTUATES, description=(
-        "Click one control. The locator must match exactly one element -- "
+        "Click one control: a window, or an element that is not one -- a "
+        "tab item, a toolbar button -- named by type=/name= (see find). An "
+        "element is driven through the pattern it publishes, else by a "
+        "click posted to its host window at its own rectangle. The locator "
+        "must match exactly one element -- "
         "ambiguity is refused rather than guessed at. Refuses to act while "
         "a modal dialog holds the application, and reports anything else "
         "that changed around the click, such as a dialog it raised."

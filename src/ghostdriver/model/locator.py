@@ -17,8 +17,21 @@ class Locator:
     within: "Locator | None" = None
     visible: bool | None = True
     index: int | None = None
+    #: An *element* locator names something on the accessibility surface
+    #: rather than a window: `type=TabItem name="Components"`. Either key
+    #: makes it one. `class=` then matches the element's own class name,
+    #: `text=` is a synonym for `name=`, and `within=(...)` may name either
+    #: an ancestor element (an element locator) or the host window (a
+    #: window locator).
+    control_type: str | None = None
+    name: str | None = None
 
-    _KEYS = ("class", "text", "role", "visible", "index")
+    _KEYS = ("class", "text", "role", "visible", "index", "type", "name")
+
+    @property
+    def is_element(self) -> bool:
+        return self.control_type is not None or self.name is not None
+
     _WITHIN = "within=("
 
     def __post_init__(self) -> None:
@@ -120,6 +133,8 @@ class Locator:
                 )
             if key == "class":
                 fields["class_name"] = value
+            elif key == "type":
+                fields["control_type"] = value
             elif key == "visible":
                 fields["visible"] = value.strip().lower() in ("1", "true", "yes")
             elif key == "index":
@@ -140,6 +155,10 @@ class Locator:
     def describe(self) -> str:
         """Human-readable form, for error messages."""
         parts = []
+        if self.control_type:
+            parts.append(f"type={self.control_type}")
+        if self.name:
+            parts.append(f'name="{self.name}"')
         if self.class_name:
             parts.append(f"class={self.class_name}")
         if self.text:
