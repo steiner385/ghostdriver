@@ -132,8 +132,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     import json
 
     from mcp.server.mcpserver import Context, MCPServer
-    from mcp.types import (CallToolResult, ImageContent, TextContent,
-                           ToolAnnotations)
+    from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 
     box = Toolbox(sessions=sessions or SessionManager())
     server = MCPServer(
@@ -146,17 +145,17 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     # potentially destructive. `restore` is the one that changes anything a
     # person can see -- it un-minimizes a window -- so it is not marked
     # read-only, even though it changes no application state.
-    READS = ToolAnnotations(readOnlyHint=True, destructiveHint=False,
-                            idempotentHint=True, openWorldHint=True)
-    CHANGES_SCREEN = ToolAnnotations(readOnlyHint=False, destructiveHint=False,
-                                     idempotentHint=True, openWorldHint=True)
+    READS = ToolAnnotations(read_only_hint=True, destructive_hint=False,
+                            idempotent_hint=True, open_world_hint=True)
+    CHANGES_SCREEN = ToolAnnotations(read_only_hint=False, destructive_hint=False,
+                                     idempotent_hint=True, open_world_hint=True)
     # Actuation. Not idempotent: clicking twice is two clicks, and a client
     # that retried on a timeout would submit twice. destructiveHint stays
     # False because these are ordinary interactions rather than deletions --
     # what must never be actuated is the profile denylist\'s job, and it is
     # enforced on the resolved caption before anything is sent.
-    ACTUATES = ToolAnnotations(readOnlyHint=False, destructiveHint=False,
-                               idempotentHint=False, openWorldHint=True)
+    ACTUATES = ToolAnnotations(read_only_hint=False, destructive_hint=False,
+                               idempotent_hint=False, open_world_hint=True)
 
     @server.tool(annotations=READS, description=(
         "Every process that owns windows, with how many top-level windows "
@@ -337,7 +336,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         image = result.pop("base64")
         return CallToolResult(
             content=[
-                ImageContent(type="image", data=image, mimeType="image/png"),
+                ImageContent(type="image", data=image, mime_type="image/png"),
                 TextContent(type="text", text=json.dumps(result, indent=2)),
             ],
             # Without the pixels: the dimensions are worth having as data,
@@ -546,7 +545,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "How long to wait before giving up and saying so."
         ))] = 120.0,
         all_windows: AllWindows = False,
-        ctx: Context = None,
+        ctx: Context | None = None,
     ) -> dict[str, Any]:
         confirmed = False
         if ctx is not None:

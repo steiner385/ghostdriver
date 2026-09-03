@@ -46,6 +46,8 @@ def run_phase1(pid: int, *, msaa_sample: int = 40) -> ProfileDocument:
     # toolkit's off-screen proxy reports a handful of bridge-provided
     # elements as a rich provider, which classifies an L1 target as M1.
     main = select_main_tree(trees)
+    if main is None:
+        raise RuntimeError(f"pid {pid} has no window tree to describe")
     nodes = list(main.walk())
 
     # Class evidence comes from every top-level tree, not just `main`. The

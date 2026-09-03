@@ -168,7 +168,7 @@ def test_an_error_comes_back_as_a_result_not_an_exception(server):
 
 
 def test_an_unknown_tool_is_rejected(server):
-    with pytest.raises(Exception):
+    with pytest.raises(Exception, match="delete_everything"):
         call(server, "delete_everything")
 
 

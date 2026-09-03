@@ -1,7 +1,8 @@
 import pytest
-from ghostdriver.model.window import WindowNode
+
 from ghostdriver.model.locator import Locator
 from ghostdriver.model.result import ErrorKind, GhostdriverError
+from ghostdriver.model.window import WindowNode
 from ghostdriver.resolve import resolve, resolve_one
 
 

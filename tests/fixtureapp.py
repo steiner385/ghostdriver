@@ -31,7 +31,6 @@ import argparse
 import ctypes
 import json
 import os
-import sys
 from ctypes import wintypes
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)

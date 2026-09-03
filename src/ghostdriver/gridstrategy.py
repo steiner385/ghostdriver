@@ -33,9 +33,10 @@ the accessibility re-scan are the backend's; they are injected, so the
 ordering and the verdicts are testable without a desktop or a clipboard.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable
+from typing import Any
 
 
 class Strategy(str, Enum):
@@ -92,7 +93,9 @@ class GridFinding:
     attempts: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        out = {"grid_strategy": self.strategy.value, "attempts": self.attempts}
+        out: dict[str, Any] = {
+            "grid_strategy": self.strategy.value, "attempts": self.attempts,
+        }
         if self.lines:
             out["sample_lines"] = self.lines
         if self.caveat:

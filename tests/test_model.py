@@ -1,7 +1,10 @@
+from dataclasses import FrozenInstanceError
+
 import pytest
-from ghostdriver.model.window import WindowNode
+
 from ghostdriver.model.locator import Locator
-from ghostdriver.model.result import ErrorKind, ActionResult
+from ghostdriver.model.result import ActionResult, ErrorKind
+from ghostdriver.model.window import WindowNode
 
 
 def leaf(handle, class_name, text, visible=True):
@@ -36,7 +39,7 @@ def test_window_node_depth_counts_levels():
 
 def test_window_node_is_immutable():
     n = leaf(1, "A", "a")
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         n.handle = 2
 
 

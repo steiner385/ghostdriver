@@ -2,7 +2,9 @@ import json
 
 from ghostdriver.model.window import WindowNode
 from ghostdriver.probe.profile import (
-    ProfileDocument, class_census, match_profile,
+    ProfileDocument,
+    class_census,
+    match_profile,
 )
 
 
@@ -32,7 +34,7 @@ def test_class_census_counts_every_class():
 
 def test_class_census_is_sorted_by_descending_count():
     tree = node(1, "Root", [node(2, "Btn"), node(3, "Btn")])
-    assert list(class_census(tree))[0] == "Btn"
+    assert next(iter(class_census(tree))) == "Btn"
 
 
 def test_matches_m1_when_uia_is_rich():
@@ -323,6 +325,7 @@ def test_probing_over_a_different_application_is_refused(tmp_path):
     """The path is usually typed by hand, and silently rewriting one
     application's profile with another's is not recoverable."""
     import json
+
     import pytest as _pytest
 
     path = curated(tmp_path)

@@ -6,7 +6,6 @@ holding the application, everything planned from its output is planned
 against a UI that cannot answer.
 """
 
-import pytest
 
 from tests.conftest import on_windows
 

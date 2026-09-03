@@ -33,9 +33,7 @@ def _node_matches(node: WindowNode, loc: Locator) -> bool:
     # silently matching everything. Locator.parse refuses `role=` outright
     # for the same reason, so this branch is reachable only from a locator
     # built in code or loaded from a profile.
-    if loc.role is not None:
-        return False
-    return True
+    return loc.role is None
 
 
 def _walk_with_ancestors(

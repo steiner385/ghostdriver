@@ -598,8 +598,8 @@ def test_a_modal_blocks_actuation_and_names_what_is_holding_the_app():
     from ghostdriver.actuate import Actuator
     from ghostdriver.backends.windows import verbs
     from ghostdriver.backends.windows.modality import top_level_state
-    from ghostdriver.model.result import ErrorKind
     from ghostdriver.modality import find_modal_blocks
+    from ghostdriver.model.result import ErrorKind
 
     proc, handles = start_app("--modal-after", "300")
     try:
@@ -800,8 +800,7 @@ def test_typing_stops_where_the_control_stops_accepting_it(app):
     widened the field or raised its limit to get the whole string in would
     be changing the target to make its own test pass.
     """
-    from ghostdriver.backends.windows.input import (set_text_by_typing,
-                                                    set_value_via_uia)
+    from ghostdriver.backends.windows.input import set_text_by_typing, set_value_via_uia
 
     field = find(app["pid"], "GhostFixtureBoundEdit")[0]
     display = reads(field.handle)

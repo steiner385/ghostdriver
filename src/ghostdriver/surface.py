@@ -32,9 +32,9 @@ and a caller who disagrees needs to see what the answer was built on.
 """
 
 import fnmatch
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Iterator
 
 from .model.window import WindowNode
 

@@ -11,8 +11,8 @@ assesses a whole target to classify it; this one asks a narrow question
 about a single region and has to be cheap enough to ask repeatedly.
 """
 
-from ...surface import RegionEvidence
 from ...model.window import WindowNode
+from ...surface import RegionEvidence
 
 #: Depth to walk beneath a region.
 #:

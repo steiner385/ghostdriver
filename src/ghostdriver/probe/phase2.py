@@ -31,8 +31,8 @@ The aggregation here is pure, so what a class *means* can be tested without
 a desktop. The acting is injected.
 """
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Callable, Iterable
 
 #: How a tier reads in a profile document. The map is for a person deciding
 #: whether to trust it, so it names the mechanism rather than a number.

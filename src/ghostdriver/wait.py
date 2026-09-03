@@ -13,9 +13,9 @@ arithmetic rather than by sleeping through it.
 """
 
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Sequence
 
 from .model.window import WindowNode
 

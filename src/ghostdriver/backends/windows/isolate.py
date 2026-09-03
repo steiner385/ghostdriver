@@ -13,14 +13,14 @@ treats.
 """
 
 import time
+from collections.abc import Callable
 from ctypes import wintypes
-from typing import Callable
 
 from ...isolation import Action, Event, Observation, Watchdog
+from ...model.window import select_main_tree
 from . import winapi
 from .capture import CaptureError, capture_window
 from .enumerate import enumerate_process, top_level_windows
-from ...model.window import select_main_tree
 
 
 def _main_window(pid: int) -> int | None:

@@ -205,7 +205,7 @@ def capture_window(
             )
         previous = gdi32.SelectObject(memory_dc, bitmap)
 
-        if not user32.PrintWindow(
+        if not user32.PrintWindow(  # noqa: SIM102 -- the comment between the two tests is the point
             wintypes.HWND(hwnd), memory_dc, PW_RENDERFULLCONTENT
         ):
             # Some windows refuse PrintWindow. Copying their own DC is the

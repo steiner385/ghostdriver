@@ -1,6 +1,5 @@
 """Modality against a real blocked target."""
 
-import pytest
 
 from tests.conftest import on_windows
 

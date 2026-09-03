@@ -7,8 +7,6 @@ must *not* do is as much a part of its contract as what it does.
 import ctypes
 from ctypes import wintypes
 
-import pytest
-
 from tests.conftest import on_windows
 
 pytestmark = on_windows

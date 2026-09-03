@@ -5,8 +5,13 @@ judgement -- when the target has escaped, what to report, and how not to
 flap -- so that is what is tested here.
 """
 
-from ghostdriver.isolation import (Action, FLAP_LIMIT, HOLD_AFTER_ACTION_S,
-                                    Observation, Watchdog)
+from ghostdriver.isolation import (
+    FLAP_LIMIT,
+    HOLD_AFTER_ACTION_S,
+    Action,
+    Observation,
+    Watchdog,
+)
 
 
 class Clock:

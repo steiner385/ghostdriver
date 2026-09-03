@@ -37,6 +37,11 @@ pip install -e ".[dev,server]"
 pytest
 ```
 
+That one command is the whole gate: the suite includes a test that runs
+`ruff check src tests` and another that runs `mypy`, both configured in
+`pyproject.toml`, so lint and type regressions fail the tests rather than
+waiting for someone to remember a second command.
+
 The `server` extra pulls in the MCP SDK. The CLI and the library work
 without it.
 

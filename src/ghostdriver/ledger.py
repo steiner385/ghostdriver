@@ -17,8 +17,8 @@ not history. It answers exactly one question and forgets everything else.
 """
 
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 #: How many outcomes to keep per session. Generous for the question being
 #: asked -- the two attempts of a differential are usually seconds apart --

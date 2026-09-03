@@ -33,9 +33,10 @@ launch-only, and `attach` on a running pid raises `Unsupported`.
 import ctypes
 import queue
 import threading
+from collections.abc import Callable
 from ctypes import wintypes
 from dataclasses import dataclass
-from typing import Callable, TypeVar
+from typing import TypeVar
 
 from . import winapi
 
@@ -122,7 +123,7 @@ class HiddenDesktop:
     def __init__(self, name: str = "ghostdriver") -> None:
         self.name = name
         self._desktop = None
-        self._jobs: "queue.Queue[_Job | None]" = queue.Queue()
+        self._jobs: queue.Queue[_Job | None] = queue.Queue()
         self._worker: threading.Thread | None = None
         self._worker_ident: int | None = None
         self._ready = threading.Event()
@@ -182,7 +183,7 @@ class HiddenDesktop:
         # worker waiting on itself, which would deadlock.
         if threading.get_ident() == self._worker_ident:
             return fn()
-        result: "queue.Queue" = queue.Queue()
+        result: queue.Queue = queue.Queue()
         self._jobs.put(_Job(fn=fn, result=result))
         status, payload = result.get()
         if status == "error":

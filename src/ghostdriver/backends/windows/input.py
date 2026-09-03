@@ -54,8 +54,8 @@ Nothing here moves the cursor or touches the foreground.
 import ctypes
 import random
 import time
+from collections.abc import Callable
 from ctypes import wintypes
-from typing import Callable
 
 from ...cadence import ROBOT, Cadence
 from . import winapi
@@ -204,7 +204,7 @@ def set_text_by_typing(
     """
     ok = user32.PostMessageW(wintypes.HWND(hwnd), EM_SETSEL, 0, -1)
     ok = user32.PostMessageW(wintypes.HWND(hwnd), WM_CLEAR, 0, 0) and ok
-    for character, pause in zip(text, cadence.delays(text, rng)):
+    for character, pause in zip(text, cadence.delays(text, rng), strict=True):
         if pause:
             sleep(pause)
         ok = user32.PostMessageW(
@@ -235,7 +235,7 @@ def send_keys(
     rather than as the length of its name.
     """
     ok = True
-    for key, pause in zip(keys, cadence.delays("k" * len(keys), rng)):
+    for key, pause in zip(keys, cadence.delays("k" * len(keys), rng), strict=True):
         if pause:
             sleep(pause)
         lowered = key.lower()

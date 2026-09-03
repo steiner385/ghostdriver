@@ -18,11 +18,13 @@ which earlier calls were made no longer describes the session.
 import json
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
-from .model.result import ErrorKind, GhostdriverError
 from .ledger import Ledger
+from .model.result import ErrorKind, GhostdriverError
 from .policy import ConsentSource, Grant, Tier, denied, permits
 from .sensitivity import Sensitivity
 
@@ -105,7 +107,7 @@ class Session:
     #: call from anywhere else sees none of the target's windows. Kept as a
     #: plain callable so this module stays platform-neutral: it knows a
     #: session may route its calls, not how.
-    runner: object = None
+    runner: Callable[[Callable[[], Any]], Any] | None = None
 
     def run(self, fn):
         """Execute `fn` where this session's target can be seen.
@@ -228,7 +230,7 @@ class SessionManager:
         command_line: list[str],
         tier: Tier = Tier.READ_ONLY,
         profile: Profile | None = None,
-        runner: object = None,
+        runner: Callable[[Callable[[], Any]], Any] | None = None,
     ) -> Session:
         """Open a session against `pid`, if it has been consented to.
 

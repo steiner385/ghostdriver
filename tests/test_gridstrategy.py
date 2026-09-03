@@ -4,8 +4,13 @@ The routes are injected, so what is tested is judgement: the order they
 are tried in, when the probe stops, and what counts as grid text at all.
 """
 
-from ghostdriver.gridstrategy import (GridProbe, RouteResult, Strategy,
-                                      find_grid_strategy, looks_like_a_grid)
+from ghostdriver.gridstrategy import (
+    GridProbe,
+    RouteResult,
+    Strategy,
+    find_grid_strategy,
+    looks_like_a_grid,
+)
 
 
 def route(strategy, worked, lines=0, caveat=""):

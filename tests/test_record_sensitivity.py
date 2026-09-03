@@ -11,8 +11,7 @@ import pytest
 
 from ghostdriver.ledger import Outcome
 from ghostdriver.policy import ConsentSource, Tier
-from ghostdriver.sensitivity import (Note, Sensitivity, Source,
-                                     merge_into_document)
+from ghostdriver.sensitivity import Note, Sensitivity, Source, merge_into_document
 from ghostdriver.session import Profile, SessionManager
 from ghostdriver.tools import Toolbox
 

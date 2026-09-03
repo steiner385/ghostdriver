@@ -73,7 +73,7 @@ def test_a_region_is_cropped_from_the_window(win32_target):
     from ghostdriver.backends.windows.enumerate import top_level_windows
 
     hwnd = top_level_windows(win32_target)[0]
-    left, top, right, bottom = winapi.window_rect(hwnd)
+    left, top, _, _ = winapi.window_rect(hwnd)
     region = (left + 10, top + 10, left + 60, top + 40)
 
     _, width, height = capture_window(hwnd, region=region)

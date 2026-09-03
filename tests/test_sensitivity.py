@@ -3,8 +3,7 @@
 import pytest
 
 from ghostdriver.cadence import FAST_HUMAN, ROBOT
-from ghostdriver.sensitivity import (Note, Sensitivity, Source,
-                                     learned_from_differential)
+from ghostdriver.sensitivity import Note, Sensitivity, Source, learned_from_differential
 
 
 def declared(cadence="fast_human", surface="*"):

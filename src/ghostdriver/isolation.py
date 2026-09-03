@@ -18,9 +18,9 @@ flap -- testable without a desktop, and it is what keeps a module about
 focus from being able to touch focus by itself.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable
 
 
 class Isolation(str, Enum):

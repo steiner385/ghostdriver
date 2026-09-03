@@ -6,7 +6,7 @@ happens against a freshly enumerated tree (spec section 4.2).
 """
 
 import shlex
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 
 
 @dataclass(frozen=True, slots=True)

@@ -12,7 +12,6 @@ import json
 import pytest
 
 from ghostdriver.model.result import ErrorKind
-from ghostdriver.policy import ConsentSource
 from ghostdriver.session import SessionManager
 from ghostdriver.tools import MAX_ELEMENTS, Toolbox
 from tests.conftest import on_windows

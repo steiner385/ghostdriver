@@ -362,8 +362,8 @@ def cmd_find(pid: int, expr: str, all_windows: bool = False) -> int:
     for node in matches:
         print(
             f"0x{node.handle:08X}  {node.class_name:<32} "
-            f"visible={str(node.visible):<5} "
-            f"responsive={str(node.responsive):<5} "
+            f"visible={node.visible!s:<5} "
+            f"responsive={node.responsive!s:<5} "
             f"rect={node.rect}  {node.text!r}"
         )
     print(f"\n{len(matches)} match(es)")
@@ -430,8 +430,13 @@ def cmd_surfaces(
     all_windows: bool = False,
 ) -> int:
     from .backends.windows.region import region_evidence
-    from .surface import (map_digest, needs_other_mechanism,
-                          summarize_access, summarize_kinds, surface_map)
+    from .surface import (
+        map_digest,
+        needs_other_mechanism,
+        summarize_access,
+        summarize_kinds,
+        surface_map,
+    )
 
     trees = _trees(pid, all_windows)
     if trees is None:

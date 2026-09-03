@@ -62,22 +62,22 @@ async def _drive_uia(pid: int):
         command=sys.executable,
         args=["-m", "ghostdriver.mcp_server"],
     )
-    async with stdio_client(parameters) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            await session.call_tool("grant_targets", {"allow": [pid],
-                                                      "note": "stdio test"})
-            attached = await session.call_tool("attach", {"pid": pid})
-            session_id = attached.structured_content["session_id"]
-            surfaces = await session.call_tool(
-                "surfaces", {"session_id": session_id}
-            )
-            # A second call after the UIA walk: if the stream had been
-            # corrupted, this is what would fail.
-            still_alive = await session.call_tool(
-                "modals", {"session_id": session_id}
-            )
-            return surfaces.structured_content, still_alive.structured_content
+    async with (stdio_client(parameters) as (read, write),
+                ClientSession(read, write) as session):
+        await session.initialize()
+        await session.call_tool("grant_targets", {"allow": [pid],
+                                                  "note": "stdio test"})
+        attached = await session.call_tool("attach", {"pid": pid})
+        session_id = attached.structured_content["session_id"]
+        surfaces = await session.call_tool(
+            "surfaces", {"session_id": session_id}
+        )
+        # A second call after the UIA walk: if the stream had been
+        # corrupted, this is what would fail.
+        still_alive = await session.call_tool(
+            "modals", {"session_id": session_id}
+        )
+        return surfaces.structured_content, still_alive.structured_content
 
 
 async def _drive():
@@ -88,12 +88,12 @@ async def _drive():
         command=sys.executable,
         args=["-m", "ghostdriver.mcp_server"],
     )
-    async with stdio_client(parameters) as (read, write):
-        async with ClientSession(read, write) as session:
-            initialized = await session.initialize()
-            tools = await session.list_tools()
-            result = await session.call_tool("list_targets", {})
-            return initialized, tools, result
+    async with (stdio_client(parameters) as (read, write),
+                ClientSession(read, write) as session):
+        initialized = await session.initialize()
+        tools = await session.list_tools()
+        result = await session.call_tool("list_targets", {})
+        return initialized, tools, result
 
 
 def test_a_client_can_initialize_list_and_call_over_stdio():

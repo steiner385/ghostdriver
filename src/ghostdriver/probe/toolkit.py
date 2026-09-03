@@ -137,7 +137,7 @@ def _infer_from_classes(class_names: list[str]) -> tuple[str, list[str]] | None:
     lowered = [c.lower() for c in class_names]
     scored: list[tuple[str, list[str]]] = []
     for label, patterns in CLASS_SIGNATURES:
-        hits = sorted({h for h in _matches(lowered, patterns)})
+        hits = sorted(set(_matches(lowered, patterns)))
         if hits:
             scored.append((label, hits))
     if not scored:
@@ -201,6 +201,7 @@ def infer_toolkit(
         )
 
     if from_classes is None:
+        assert from_modules is not None  # the both-None case returned above
         # No class signature matched -- the table does not know this
         # application's framework. The loaded runtime is then all there is,
         # and for most frameworks it is definitive.

@@ -7,8 +7,13 @@ allowed to mean.
 
 import pytest
 
-from ghostdriver.probe.phase2 import (ControlOutcome, SafeControl,
-                                      actuation_map, focus_behavior, learn)
+from ghostdriver.probe.phase2 import (
+    ControlOutcome,
+    SafeControl,
+    actuation_map,
+    focus_behavior,
+    learn,
+)
 
 
 def outcome(class_name="TVendorButton", tier=3, verified=True, **kw):

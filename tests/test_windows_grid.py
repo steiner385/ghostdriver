@@ -51,8 +51,10 @@ def grid_node(pid):
 @pytest.fixture
 def preserved_clipboard():
     """Whatever the person had copied, put back afterwards no matter what."""
-    from ghostdriver.backends.windows.grid import (read_clipboard_text,
-                                                   write_clipboard_text)
+    from ghostdriver.backends.windows.grid import (
+        read_clipboard_text,
+        write_clipboard_text,
+    )
 
     prior = read_clipboard_text()
     yield prior
@@ -64,9 +66,11 @@ def preserved_clipboard():
 def test_the_grid_copies_its_rows_and_the_clipboard_is_put_back(
     preserved_clipboard,
 ):
-    from ghostdriver.backends.windows.grid import (copy_route,
-                                                   read_clipboard_text,
-                                                   write_clipboard_text)
+    from ghostdriver.backends.windows.grid import (
+        copy_route,
+        read_clipboard_text,
+        write_clipboard_text,
+    )
 
     sentinel = "the operator's own clipboard text"
     write_clipboard_text(sentinel)

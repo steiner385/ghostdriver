@@ -4,8 +4,8 @@ Backends produce these; everything above the backend boundary consumes them.
 No Win32 types appear here by design (spec section 3.2).
 """
 
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import Iterator, Sequence
 
 
 @dataclass(frozen=True, slots=True)

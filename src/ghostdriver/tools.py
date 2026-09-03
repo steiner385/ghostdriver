@@ -21,22 +21,25 @@ Everything that can return many rows caps them and says what it capped.
 
 import base64
 import time
-from dataclasses import dataclass, field, replace
 import uuid
+from dataclasses import dataclass, field, replace
 from typing import Any
 
+from .disturbance import INPUT_SENSITIVE_HINT
+from .hosting import classify_process, hosted_frame_note, is_frame_host
 from .model.locator import Locator
-from .probe.profile import merge_learned
 from .model.result import ErrorKind, GhostdriverError
 from .model.window import WindowNode, select_main_tree
-from .hosting import classify_process, hosted_frame_note, is_frame_host
 from .policy import (
-    ConsentSource, Tier, describe_target, extract_endpoints,
+    ConsentSource,
+    Tier,
+    describe_target,
+    extract_endpoints,
 )
+from .probe.profile import merge_learned
 from .resolve import resolve
 from .session import ConsentRequired, Profile, SessionManager
 from .summarize import summarize
-from .disturbance import INPUT_SENSITIVE_HINT
 from .wait import Condition, wait_for
 
 #: Most elements any single result will enumerate. A locator matching more
@@ -712,8 +715,11 @@ class Toolbox:
 
         from .backends.windows.region import region_evidence
         from .surface import (
-            map_digest, needs_other_mechanism, summarize_access,
-            summarize_kinds, surface_map,
+            map_digest,
+            needs_other_mechanism,
+            summarize_access,
+            summarize_kinds,
+            surface_map,
         )
 
         trees = self._trees(session, all_windows)
@@ -806,7 +812,17 @@ class Toolbox:
         result = restore_process(session.pid)
         return {
             "ok": True,
-            "restored": [f"0x{h:08X}" for h in result.restored],
+            # Named, not just counted: a restore that found something minimized
+            # when the caller believed nothing was is a question, and the
+            # class and visibility of what it found is the answer's first
+            # half. (A full-suite run has twice found a fixture window
+            # minimized that nothing minimized; alone it never reproduces.)
+            "restored": [
+                {"handle_ephemeral": f"0x{h:08X}",
+                 "class": winapi.class_name(h),
+                 "visible_style": winapi.is_visible_style(h)}
+                for h in result.restored
+            ],
             "now_visible": [
                 {"handle_ephemeral": f"0x{h:08X}",
                  "class": winapi.class_name(h)}
@@ -1020,7 +1036,7 @@ class Toolbox:
             after, described = self._expectation(prepared.session, expect)
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
-        result = self._perform(prepared.session, 
+        result = self._perform(prepared.session,
             verbs.click(prepared.node.handle),
             expect_before=verbs.unblocked(prepared.node.handle),
             expect_after=after,
@@ -1100,7 +1116,7 @@ class Toolbox:
                 f"the field shows {wanted!r} and {commit.description}",
             )
 
-        result = self._perform(prepared.session, 
+        result = self._perform(prepared.session,
             verbs.set_text(handle, text, cadence=prepared.cadence,
                            allow_pattern=commit is not None),
             expect_before=verbs.unblocked(handle),
@@ -1162,7 +1178,7 @@ class Toolbox:
             after, described = self._expectation(prepared.session, expect)
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
-        result = self._perform(prepared.session, 
+        result = self._perform(prepared.session,
             verbs.send_keys(prepared.node.handle, list(text),
                             cadence=prepared.cadence),
             expect_before=verbs.unblocked(prepared.node.handle),
@@ -1223,7 +1239,7 @@ class Toolbox:
             after, described = self._expectation(prepared.session, expect)
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
-        result = self._perform(prepared.session, 
+        result = self._perform(prepared.session,
             verbs.send_keys(prepared.node.handle, keys,
                             cadence=prepared.cadence),
             expect_before=verbs.unblocked(prepared.node.handle),
@@ -1530,7 +1546,7 @@ class Toolbox:
         except GhostdriverError as exc:
             return _error(exc.kind, exc.message)
 
-        from .probe.phase2 import ControlOutcome, SafeControl, learn
+        from .probe.phase2 import SafeControl, learn
 
         try:
             listed = [SafeControl.from_dict(raw)
@@ -1586,10 +1602,8 @@ class Toolbox:
         reached and the disturbances around it, and it must refuse rather
         than fall back on anything the tool surface would forgive.
         """
-        from .actuate import Actuator, Condition
         from .backends.windows import verbs
-        from .backends.windows.modality import snapshot, surface_of
-        from .backends.windows.text import read_window_text
+        from .backends.windows.modality import snapshot
         from .probe.phase2 import ControlOutcome
 
         def refused(reason: str, class_name: str = "") -> ControlOutcome:

@@ -365,8 +365,8 @@ def test_an_unknown_cadence_is_refused(box, app):
 def test_a_modal_stops_every_actuation_tool():
     """Posted messages do not respect modality, so without the precondition
     a driver would operate an application the user cannot touch."""
-    from ghostdriver.tools import Toolbox
     from ghostdriver.session import SessionManager
+    from ghostdriver.tools import Toolbox
 
     proc = subprocess.Popen(
         [sys.executable, "-m", "tests.fixtureapp", "--modal-after", "300"],

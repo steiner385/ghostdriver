@@ -3,7 +3,7 @@
 import pytest
 
 from ghostdriver.model.window import WindowNode
-from ghostdriver.wait import Condition, WaitResult, holds, wait_for
+from ghostdriver.wait import Condition, holds, wait_for
 
 
 def node(visible=True, enabled=True, responsive=True, handle=1):

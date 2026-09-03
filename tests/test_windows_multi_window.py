@@ -10,7 +10,6 @@ and two owned top-level forms -- so it can prove the difference without
 depending on any particular application.
 """
 
-import pytest
 
 from tests.conftest import on_windows
 

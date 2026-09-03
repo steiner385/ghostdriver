@@ -215,7 +215,7 @@ def copy_route(node: WindowNode, *, want_text: bool = False) -> RouteResult:
         lines=lines,
         caveat=caveat,
         detail=(
-            (text if want_text else f"{lines} line(s) of tab-delimited text")
+            ((text or "") if want_text else f"{lines} line(s) of tab-delimited text")
             if ok else
             ("the control did not change the clipboard" if text is None
              else "the control copied something, but not grid-shaped text")

@@ -8,7 +8,6 @@ the whole reason the strategy exists.
 
 import ctypes
 import sys
-from ctypes import wintypes
 
 import pytest
 
@@ -53,8 +52,10 @@ def test_a_target_launched_here_is_invisible_from_the_input_desktop(desktop):
 def test_the_target_is_fully_visible_from_the_bound_thread(desktop):
     """The working half: everything the tool does to a target works, as long
     as it runs on the thread bound to the target's desktop."""
-    from ghostdriver.backends.windows.enumerate import (enumerate_process,
-                                                        top_level_windows)
+    from ghostdriver.backends.windows.enumerate import (
+        enumerate_process,
+        top_level_windows,
+    )
     from ghostdriver.model.window import select_main_tree
 
     pid = desktop.launch(fixture_command(), announces_pid=True)

@@ -11,7 +11,6 @@ It is load-bearing. An unresponsive control reports empty text that is
 that a field is empty when the target simply never replied.
 """
 
-import pytest
 
 from tests.conftest import on_windows
 
@@ -70,8 +69,7 @@ def test_read_prints_no_answer_rather_than_a_blank_line(silent_target, capsys):
 
 def test_a_responsive_control_is_not_flagged(win32_target):
     """The other direction, so the flag is not simply always False."""
-    from ghostdriver.backends.windows.enumerate import build_tree
-    from ghostdriver.backends.windows.enumerate import top_level_windows
+    from ghostdriver.backends.windows.enumerate import build_tree, top_level_windows
 
     hwnd = top_level_windows(win32_target)[0]
     node = build_tree(hwnd)

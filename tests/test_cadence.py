@@ -10,8 +10,7 @@ import random
 
 import pytest
 
-from ghostdriver.cadence import (CADENCES, FAST_HUMAN, ROBOT, Cadence,
-                                 by_name)
+from ghostdriver.cadence import CADENCES, FAST_HUMAN, ROBOT, Cadence, by_name
 
 
 def test_a_robot_waits_for_nothing():

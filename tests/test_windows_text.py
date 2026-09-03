@@ -1,4 +1,3 @@
-import pytest
 
 from tests.conftest import main_tree, on_windows
 

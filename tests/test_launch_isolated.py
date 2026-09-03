@@ -9,7 +9,6 @@ disturb anyone, which is the point.
 
 import ctypes
 import sys
-from ctypes import wintypes
 
 import pytest
 
@@ -84,7 +83,7 @@ def test_a_launched_target_is_driven_through_the_normal_tools(box):
     assert described["windows"], "the tree is visible through the session"
 
     # A click, through the same routing, lands on the hidden desktop.
-    before = box.read(session, 'class=Static text="/clicks=/"')
+    assert box.read(session, 'class=Static text="/clicks=/"')["ok"]
     clicked = box.click(
         session, 'class=GhostFixtureCommandButton text="Expand All"',
         expect={"locator": 'class=Static text="/clicks=1 last=Expand All/"'})

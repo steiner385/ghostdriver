@@ -173,7 +173,7 @@ def summarize(
         # truncated=False, and a caller trusting that flag -- which is
         # exactly what a tool schema does -- concluded the editor contained
         # a panel and a status bar.
-        truncated=(
+        truncated=bool(
             state["capped"]
             or state["elided"] > 0
             or state["depth_elided"] > 0

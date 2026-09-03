@@ -35,9 +35,9 @@ fallback and the condition logic are all testable without a desktop.
 """
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Callable
 
 from .disturbance import Snapshot, compare
 from .model.result import ActionResult, ErrorKind
@@ -238,7 +238,7 @@ class Actuator:
                 "message": (
                     (
                         "every tier delivered but none produced the expected "
-                        f"result: {expect_after.description}"
+                        f"result: {expect_after.description if expect_after else '?'}"
                     )
                     if failed_after else
                     f"no tier could act on this element (tried {attempted})"
