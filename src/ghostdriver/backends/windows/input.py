@@ -87,6 +87,12 @@ NAMED_KEYS = {
     "enter": VK_RETURN, "return": VK_RETURN, "tab": VK_TAB,
     "escape": VK_ESCAPE, "esc": VK_ESCAPE,
     "backspace": VK_BACK, "delete": VK_DELETE,
+    # Caret movement: what clears a field in a host that ignores the
+    # edit-control selection messages (an embedded web engine does).
+    # Named keys carry nothing, so they are allowed where characters
+    # are refused.
+    "home": 0x24, "end": 0x23, "left": 0x25, "up": 0x26, "right": 0x27,
+    "down": 0x28, "pageup": 0x21, "pagedown": 0x22, "insert": 0x2D,
 }
 
 user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT,

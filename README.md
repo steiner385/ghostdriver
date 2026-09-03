@@ -76,6 +76,7 @@ ghostdriver describe --pid 1234 --depth 5 --all-windows
 ghostdriver find --pid 1234 --locator 'class=VendorButton text="Expand All"'
 ghostdriver find --pid 1234 --locator 'type=TabItem'                 # elements that are not windows
 ghostdriver find --pid 1234 --locator 'type=MenuItem index=1 within=(class=ToolbarWindow32)'
+ghostdriver find --pid 1234 --locator 'type=Button name="Save" within=(type=Document)'  # inside an embedded web document
 ghostdriver read --pid 1234 --locator 'class=VendorEdit visible=true'
 ghostdriver surfaces --pid 1234
 ghostdriver modals --pid 1234

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ghostdriver Web Fixture</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 16px; }
+  .tabs button[aria-selected="true"] { font-weight: bold; }
+  .page { display: none; padding: 8px; border: 1px solid #999; }
+  .page.active { display: block; }
+</style>
+</head>
+<body>
+<h1 id="title">Ghostdriver Web Fixture</h1>
+
+<!-- Elements that behave like the target's embedded document: buttons
+     whose effect is only visible in the page, an input whose script sees
+     keystrokes (or not), and tabs that switch panels. -->
+<p>
+  <button id="expand" onclick="clicked('Expand All')">Expand All</button>
+  <button id="complete" onclick="clicked('Complete Task')">Complete Task</button>
+  <button id="delete" onclick="clicked('Delete Record')">Delete Record</button>
+</p>
+
+<p>
+  <label for="part">Part number</label>
+  <input id="part" value="PART-0001">
+  <span id="mirror" aria-live="polite">committed:PART-0001</span>
+  <span id="events">events:0</span>
+</p>
+
+<p>
+  <label for="secret">Password</label>
+  <input id="secret" type="password" value="hunter2">
+</p>
+
+<div class="tabs" role="tablist" aria-label="Record views">
+  <button role="tab" aria-selected="true" aria-controls="p1" onclick="pick(this, 'p1')">Operations</button>
+  <button role="tab" aria-selected="false" aria-controls="p2" onclick="pick(this, 'p2')">Components</button>
+  <button role="tab" aria-selected="false" aria-controls="p3" onclick="pick(this, 'p3')">Change Log</button>
+</div>
+<div id="p1" class="page active" role="tabpanel">Operations page</div>
+<div id="p2" class="page" role="tabpanel">Components page</div>
+<div id="p3" class="page" role="tabpanel">Change Log page</div>
+
+<p id="status">clicks=0 last=</p>
+
+<script>
+  let clicks = 0;
+  function clicked(name) {
+    clicks += 1;
+    document.getElementById('status').textContent = 'clicks=' + clicks + ' last=' + name;
+  }
+  function pick(tab, panel) {
+    document.querySelectorAll('[role=tab]').forEach(t => t.setAttribute('aria-selected', 'false'));
+    tab.setAttribute('aria-selected', 'true');
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById(panel).classList.add('active');
+  }
+  // The mirror follows the *input events* the field receives, not its value:
+  // a value set behind the script's back leaves the mirror unchanged, which
+  // is the split the tool has to be able to see (D21).
+  let events = 0;
+  const part = document.getElementById('part');
+  part.addEventListener('input', () => {
+    events += 1;
+    document.getElementById('events').textContent = 'events:' + events;
+  });
+  part.addEventListener('change', () => {
+    document.getElementById('mirror').textContent = 'committed:' + part.value;
+  });
+</script>
+</body>
+</html>

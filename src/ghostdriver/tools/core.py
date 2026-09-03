@@ -165,7 +165,7 @@ class _ToolboxCore:
         if not locator.is_element:
             return [node for tree in trees for node in resolve(tree, locator)]
 
-        from ..backends.windows.elements import walk_elements
+        from ..backends.windows.elements import walk_elements_awake
 
         # Which windows to walk: the outermost *window* scope, if any.
         scope = locator.within
@@ -181,7 +181,7 @@ class _ToolboxCore:
                 roots.append((node, chains[node.handle]))
         found: list = []
         for root, chain in roots:
-            walked = session.run(lambda r=root: walk_elements(r))
+            walked = session.run(lambda r=root: walk_elements_awake(r))
             found.extend(resolve_elements(walked, chain, locator))
         return found
 
@@ -264,7 +264,10 @@ class _ToolboxCore:
         """
         from ..backends.windows.text import is_protected
 
-        if not is_protected(node.handle):
+        if isinstance(node, AccessibleElement):
+            if not node.is_password:
+                return None
+        elif not is_protected(node.handle):
             return None
         return _error(
             ErrorKind.DENIED_BY_POLICY,

@@ -8,10 +8,9 @@ from .core import (
     _ToolboxCore,
 )
 
-ELEMENTS_CLICK_ONLY = (
-    "element locators (type=/name=) support click, find, read and wait_for; "
-    "to type into something, name its window (class=...) -- keystrokes go "
-    "to a window, and an element without one has nowhere to receive them"
+ELEMENT_NO_VALUE = (
+    "this element publishes no value to replace; to type at its caret use "
+    "type_text, or name a field (type=Edit ...)"
 )
 
 
@@ -103,10 +102,6 @@ class ActuationTools(_ToolboxCore):
         )
         if failure is not None:
             return failure
-        if isinstance(prepared.node, AccessibleElement):
-            return _error(ErrorKind.NOT_ACTIONABLE, ELEMENTS_CLICK_ONLY,
-                          locator=locator)
-
         refusal = self._refuse_if_protected(prepared.node, "type into")
         if refusal is not None:
             return refusal
@@ -117,7 +112,19 @@ class ActuationTools(_ToolboxCore):
 
         handle = prepared.node.handle
         wanted = text if expect_text is None else expect_text
-        shows = lambda: (read_window_text(handle) or "") == wanted  # noqa: E731
+        element = prepared.node if isinstance(prepared.node, AccessibleElement) else None
+        if element is not None and "Value" not in element.patterns:
+            return _error(ErrorKind.NOT_ACTIONABLE, ELEMENT_NO_VALUE, locator=locator)
+
+        def current_display() -> str | None:
+            # An element's display is its value on the surface, re-read; a
+            # window's is what it answers to a text query.
+            if element is not None:
+                from ..backends.windows.elements import _current_value
+                return prepared.session.run(lambda: _current_value(element))
+            return read_window_text(handle)
+
+        shows = lambda: (current_display() or "") == wanted  # noqa: E731
 
         try:
             commit, described = self._expectation(prepared.session, expect)
@@ -131,15 +138,20 @@ class ActuationTools(_ToolboxCore):
                 f"the field shows {wanted!r} and {commit.description}",
             )
 
-        result = self._perform(prepared.session,
+        attempts = (
+            verbs.set_text_element(element, text, cadence=prepared.cadence,
+                                   allow_pattern=commit is not None)
+            if element is not None else
             verbs.set_text(handle, text, cadence=prepared.cadence,
-                           allow_pattern=commit is not None),
+                           allow_pattern=commit is not None)
+        )
+        result = self._perform(prepared.session, attempts,
             expect_before=verbs.unblocked(handle),
             expect_after=after,
         )
 
         self._remember(session_id, "set_value", locator, prepared, result)
-        shown = read_window_text(handle)
+        shown = current_display()
         reported = self._reported(
             result, prepared, locator,
             verified=("committed" if commit is not None and result.ok
@@ -182,10 +194,6 @@ class ActuationTools(_ToolboxCore):
         )
         if failure is not None:
             return failure
-        if isinstance(prepared.node, AccessibleElement):
-            return _error(ErrorKind.NOT_ACTIONABLE, ELEMENTS_CLICK_ONLY,
-                          locator=locator)
-
         refusal = self._refuse_if_protected(prepared.node, "type into")
         if refusal is not None:
             return refusal
@@ -196,9 +204,12 @@ class ActuationTools(_ToolboxCore):
             after, described = self._expectation(prepared.session, expect)
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
-        result = self._perform(prepared.session,
-            verbs.send_keys(prepared.node.handle, list(text),
-                            cadence=prepared.cadence),
+        attempts = (
+            verbs.type_text_element(prepared.node, text, cadence=prepared.cadence)
+            if isinstance(prepared.node, AccessibleElement) else
+            verbs.send_keys(prepared.node.handle, list(text), cadence=prepared.cadence)
+        )
+        result = self._perform(prepared.session, attempts,
             expect_before=verbs.unblocked(prepared.node.handle),
             expect_after=after,
         )
@@ -232,10 +243,6 @@ class ActuationTools(_ToolboxCore):
         )
         if failure is not None:
             return failure
-        if isinstance(prepared.node, AccessibleElement):
-            return _error(ErrorKind.NOT_ACTIONABLE, ELEMENTS_CLICK_ONLY,
-                          locator=locator)
-
         from ..backends.windows import verbs
         from ..backends.windows.input import NAMED_KEYS
 
@@ -261,8 +268,10 @@ class ActuationTools(_ToolboxCore):
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
         result = self._perform(prepared.session,
-            verbs.send_keys(prepared.node.handle, keys,
-                            cadence=prepared.cadence),
+            (verbs.send_keys_element(prepared.node, keys, cadence=prepared.cadence)
+             if isinstance(prepared.node, AccessibleElement) else
+             verbs.send_keys(prepared.node.handle, keys,
+                            cadence=prepared.cadence)),
             expect_before=verbs.unblocked(prepared.node.handle),
             expect_after=after,
         )

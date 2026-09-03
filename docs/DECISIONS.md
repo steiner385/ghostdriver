@@ -1358,6 +1358,83 @@ directory, run with the command above, asserted against the
 application's own audit trail. The template in that directory is the
 fixture workflow, so the shape is at hand.
 
+### D58. An embedded web document is driven through the surface it already has
+
+**Context.** C1 of the roadmap. The region model (D41) classified an
+embedded Chromium region as `web-document` and could say whether its
+accessibility surface was live, and nothing drove its content. The plan
+said: reach it through the accessibility tree first, under the same
+tiered discipline, and add a browser protocol only for an engine that
+cannot be woken. Measured against a real Chromium engine launched onto a
+hidden desktop with a fixture page, so nothing could reach the operator's
+screen. No browser protocol was needed.
+
+**The first question wakes the engine.** Before anything asked, the
+region model reported the document with `access: none` and nothing
+reachable: a Chromium host keeps its accessibility tree dormant until an
+assistive client asks. The first element walk *is* the ask -- it reaches
+the engine as a WM_GETOBJECT -- and the walk a second later carried the
+page. So `walk_elements_awake` repeats a walk under a web host until a
+Document appears or a three-second budget is spent; outside a web host the
+first walk is the answer. `surfaces` then reports the region live, and
+B1's element locators name the page's buttons, tabs and inputs unchanged:
+`type=Button name="Expand All"`, `type=TabItem name="Components"`,
+`type=Edit name="Part number"`.
+
+**Clicks and tabs: the posted click on the host, as on a native target.**
+A page button and an ARIA tab were both driven by the button pair posted
+to the host window at the element's rectangle, verified by the page's own
+effect (its status text, its panel). The Invoke pattern also works on
+Chromium; the B1 ladder order stands.
+
+**Typing reaches the page's own script -- measured, one input event per
+character.** Characters posted to the host go to whatever the host has
+focused, and a posted click focuses the element. So `type_text`,
+`set_value` and `send_keys` now accept an element: focus by posted click,
+then keys to the host. Three measurements shaped it:
+
+- A web host ignores the edit-control selection messages `set_text` uses
+  to clear a field, so `replace_value` clears with keys the host must
+  honour: End, then one Backspace per character held. A posted Ctrl+A is
+  no use -- posted keys carry no modifier state.
+- At machine speed the engine applied one Backspace *after* the text that
+  followed it, leaving the field a character short: key-downs and
+  characters travel different paths to the renderer. So the clearing is
+  waited for -- typing starts only once the field reads empty -- and the
+  order is a fact rather than a race.
+- The Value pattern *does* commit on Chromium -- SetValue fired the page's
+  input and change events -- unlike the native HWND bridge (D21). The
+  D30 rule needed no change: offered only under a commit expectation, it
+  is taken and verified on Chromium and falls through to typing on a
+  bridge. `NAMED_KEYS` gained the caret-movement keys; named keys carry
+  nothing, so they stay allowed where characters are refused.
+
+**A finding for B3, recorded so it is not re-measured.** Posting
+KEYDOWN, CHAR and KEYUP per character double-typed on Chromium: the
+engine runs TranslateMessage, so the posted key-down produced its own
+character alongside the posted one, and without shift state the letter
+came out lower-case. On a target that translates its own keys, the bare
+WM_CHAR is the right shape, which is what the tool sends.
+
+**The boundaries hold on the web too.** A web password field publishes
+`IsPassword` on the surface; `AccessibleElement` carries it, and the same
+refusal that protects a native password box refuses it: a person types
+it, never this. The denylist matches a page button by caption exactly as
+it would a native one.
+
+**Proven** on a real engine, launched through `launch_isolated` onto a
+hidden desktop and driven through the ordinary session: wake, resolve,
+click, tab, replace a value and see the page commit it after a tab-out,
+take tier 1 under a commit expectation, refuse the password field. The
+test skips where no Chromium engine is installed; the fixture page is
+the only web content any test in this repository names.
+
+**What this does not cover.** A host that does not answer posted clicks
+or characters -- one that draws its own elements and reads the real input
+queue -- would need the pattern route alone, which is on the ladder, or
+the browser protocol the plan deferred, which is still deferred: nothing
+measured here asked for it.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

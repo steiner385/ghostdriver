@@ -144,3 +144,36 @@ def unblocked(hwnd: int) -> Condition:
             "(a modal dialog is the usual cause)"
         ),
     )
+
+
+def set_text_element(element: AccessibleElement, text: str, *,
+                     cadence: Cadence = ROBOT,
+                     allow_pattern: bool = True) -> list[Attempt]:
+    """Replace an element's value: the same ladder and the same rule as
+    `set_text`. Typing through the host is what runs the page's own input
+    handling; the Value pattern is offered first only when a commit
+    expectation would catch it not committing (D30). On Chromium it does
+    commit -- measured -- but the rule does not depend on that."""
+    typed = Attempt(
+        Tier.WINDOW_MESSAGE,
+        lambda: elements.replace_value(element, text, cadence=cadence),
+    )
+    if not cadence.is_robot or not allow_pattern:
+        return [typed]
+    return [
+        Attempt(Tier.UIA_PATTERN,
+                lambda: elements.set_value_via_pattern(element, text)),
+        typed,
+    ]
+
+
+def type_text_element(element: AccessibleElement, text: str, *,
+                      cadence: Cadence = ROBOT) -> list[Attempt]:
+    return [Attempt(Tier.WINDOW_MESSAGE,
+                    lambda: elements.type_into(element, text, cadence=cadence))]
+
+
+def send_keys_element(element: AccessibleElement, keys: list[str], *,
+                      cadence: Cadence = ROBOT) -> list[Attempt]:
+    return [Attempt(Tier.WINDOW_MESSAGE,
+                    lambda: elements.send_keys_into(element, keys, cadence=cadence))]

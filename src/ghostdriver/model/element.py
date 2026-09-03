@@ -48,6 +48,9 @@ class AccessibleElement:
     #: The element's own value, when it publishes one (Value pattern).
     value: str | None = None
     pid: int = 0
+    #: The surface says this field hides its contents. A web password box
+    #: is the same boundary as a native one: a person types it, never this.
+    is_password: bool = False
 
     # --- the names shared with WindowNode ----------------------------------
 

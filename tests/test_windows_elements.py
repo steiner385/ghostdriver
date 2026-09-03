@@ -201,14 +201,16 @@ def test_an_ambiguous_element_locator_is_refused_with_candidates(box, app):
         ["Operations", "Components", "Change Log"]
 
 
-def test_typing_into_an_element_is_refused_with_the_reason(box, app):
+def test_replacing_the_value_of_an_element_that_has_none_is_refused(box, app):
+    """A tab item publishes no value, so there is nothing to replace; the
+    refusal says what to do instead."""
     session = session_on(box, app["pid"])
 
-    result = box.type_text(session, 'type=TabItem name="Components"', "x")
+    result = box.set_value(session, 'type=TabItem name="Components"', "x")
 
     assert not result["ok"]
     assert result["error"]["kind"] == "not_actionable"
-    assert "class=" in result["error"]["message"]
+    assert "type_text" in result["error"]["message"]
 
 
 # --- the denylist names elements by what they are ----------------------------------

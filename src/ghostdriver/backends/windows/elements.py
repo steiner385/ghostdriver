@@ -15,13 +15,17 @@ one thread and used on another is the kind of failure that reports as
 """
 
 import ctypes
+import time
 from ctypes import wintypes
 
 from ...model.element import AccessibleElement
 from ...model.window import WindowNode
+from . import input as win_input
 from . import winapi
 from .input import WM_LBUTTONDOWN, WM_LBUTTONUP, _lparam_for_point, user32
 from .uia import CONTROL_TYPE_NAMES, PATTERN_IDS
+
+UIA_IS_PASSWORD_PROPERTY = 30019
 
 #: Enough for a busy window; a walk that hits this reports it.
 MAX_ELEMENTS = 2000
@@ -92,7 +96,15 @@ def _describe(element, UIA, *, host_handle: int, host_class: str,
         selected=selected,
         value=value,
         pid=pid,
+        is_password=_is_password(element),
     )
+
+
+def _is_password(element) -> bool:
+    try:
+        return bool(element.GetCurrentPropertyValue(UIA_IS_PASSWORD_PROPERTY))
+    except Exception:
+        return False
 
 
 def walk_elements(
@@ -251,3 +263,123 @@ def is_selected(element: AccessibleElement) -> bool | None:
                     .CurrentIsSelected)
     except Exception:
         return None
+
+
+# --- an embedded engine wakes on the first question -----------------------------
+
+#: How long to give a dormant engine to publish its document after the
+#: first walk asked for it. Measured on Chromium: the first walk returned
+#: the browser chrome alone, the next one a second later carried the page.
+WAKE_TIMEOUT_S = 3.0
+CLEAR_TIMEOUT_S = 1.0
+WAKE_POLL_S = 0.25
+
+
+def walk_elements_awake(node: WindowNode, **kw) -> list[tuple[AccessibleElement, tuple[AccessibleElement, ...]]]:
+    """`walk_elements`, giving an embedded engine time to wake.
+
+    A Chromium-based host keeps its accessibility tree dormant until an
+    assistive client asks -- the region model reports it as `web-document`
+    with nothing reachable. The first walk *is* the ask: it reaches the
+    engine as a WM_GETOBJECT, the engine enables accessibility, and about
+    a second later the page is there. So under a web host, a walk that
+    finds no Document is repeated until one appears or the wake budget is
+    spent. Outside a web host the first walk is the answer.
+    """
+    from ...surface import is_web_host
+
+    walked = walk_elements(node, **kw)
+    if not is_web_host(node.class_name) or _has_document(walked):
+        return walked
+    deadline = time.monotonic() + WAKE_TIMEOUT_S
+    while time.monotonic() < deadline:
+        time.sleep(WAKE_POLL_S)
+        walked = walk_elements(node, **kw)
+        if _has_document(walked):
+            break
+    return walked
+
+
+def _has_document(walked) -> bool:
+    return any(e.control_type == "Document" for e, _ in walked)
+
+
+# --- typing into an element, through its host ------------------------------------
+
+def _current_value(element: AccessibleElement) -> str:
+    """The element's value now, re-read from the surface; "" if it has none."""
+    if "Value" not in element.patterns:
+        return ""
+    try:
+        UIA, live = _live(element)
+        return live.GetCurrentPattern(PATTERN_IDS["Value"]) \
+            .QueryInterface(UIA.IUIAutomationValuePattern).CurrentValue or ""
+    except Exception:
+        return element.value or ""
+
+
+def type_into(element: AccessibleElement, text: str, *, cadence) -> bool:
+    """Focus the element with a posted click, then post its host the characters.
+
+    The characters go to the *host* window: an element has no window of
+    its own, and the host routes keyboard input to whatever it has
+    focused. Measured on Chromium: posted characters reach the page's own
+    script, one input event per character. The edit-control selection
+    messages `set_text_by_typing` sends first are not used here because a
+    web host ignores them; this appends at the caret.
+    """
+    if not click_posted(element):
+        return False
+    time.sleep(0.15)
+    return win_input.send_keys(element.host_handle, list(text), cadence=cadence)
+
+
+def replace_value(element: AccessibleElement, text: str, *, cadence) -> bool:
+    """Clear what the element holds with keys it must honour, then type.
+
+    No select-all: a posted Ctrl+A carries no modifier state (the target
+    reads the real keyboard for that), so the field is cleared the only
+    way posted keys can -- End, then one Backspace per character it holds
+    -- and the new text typed after. Every key here is one a person's
+    keyboard would send, which is the point.
+    """
+    if not click_posted(element):
+        return False
+    time.sleep(0.15)
+    held = len(_current_value(element))
+    if held:
+        if not win_input.send_keys(element.host_handle,
+                                   ["end"] + ["backspace"] * held, cadence=cadence):
+            return False
+        # Wait for the clearing to land before typing. Measured on Chromium
+        # at machine speed: key-downs and characters travel different paths
+        # to the renderer, and one backspace was applied *after* the text
+        # that followed it, leaving the field one character short. Typing
+        # only once the field reads empty makes the order a fact rather
+        # than a race.
+        deadline = time.monotonic() + CLEAR_TIMEOUT_S
+        while _current_value(element) and time.monotonic() < deadline:
+            time.sleep(0.05)
+    return win_input.send_keys(element.host_handle, list(text), cadence=cadence)
+
+
+def send_keys_into(element: AccessibleElement, keys: list[str], *, cadence) -> bool:
+    if not click_posted(element):
+        return False
+    time.sleep(0.15)
+    return win_input.send_keys(element.host_handle, list(keys), cadence=cadence)
+
+
+def set_value_via_pattern(element: AccessibleElement, text: str) -> bool:
+    """Tier 1: the Value pattern. Commits on Chromium (measured: one input
+    event and a change event); does not on the native HWND bridge (D21).
+    Which is why it is offered only under a commit expectation."""
+    if "Value" not in element.patterns:
+        return False
+    try:
+        UIA, live = _live(element)
+        live.GetCurrentPattern(PATTERN_IDS["Value"]) \
+            .QueryInterface(UIA.IUIAutomationValuePattern).SetValue(text)
+        return True
+    except Exception:
+        return False
