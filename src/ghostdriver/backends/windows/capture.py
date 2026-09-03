@@ -144,6 +144,13 @@ def _png(width: int, height: int, rgb: bytes) -> bytes:
 def capture_window(
     hwnd: int, *, region: tuple[int, int, int, int] | None = None
 ) -> tuple[bytes, int, int]:
+    rgb, out_w, out_h = render_pixels(hwnd, region=region)
+    return _png(out_w, out_h, rgb), out_w, out_h
+
+
+def render_pixels(
+    hwnd: int, *, region: tuple[int, int, int, int] | None = None
+) -> tuple[bytes, int, int]:
     """PNG bytes for `hwnd`, plus its width and height.
 
     `region` is a (left, top, right, bottom) rectangle in *screen*
@@ -255,7 +262,7 @@ def capture_window(
                 rgb[at + 1] = green
                 rgb[at + 2] = blue
                 at += 3
-        return _png(out_w, out_h, bytes(rgb)), out_w, out_h
+        return bytes(rgb), out_w, out_h
     finally:
         if previous:
             gdi32.SelectObject(memory_dc, previous)
@@ -264,3 +271,27 @@ def capture_window(
         if memory_dc:
             gdi32.DeleteDC(memory_dc)
         user32.ReleaseDC(wintypes.HWND(hwnd), window_dc)
+
+
+def ink_fraction(hwnd: int, *, region: tuple[int, int, int, int] | None = None,
+                 stride: int = 2) -> float:
+    """How much of the window's rendering is not its background colour.
+
+    A control that answers "" to a text query and paints rows is one whose
+    read path does not work, not one that is empty; a session reported a
+    success as a failure that way (D66). The most common colour is taken
+    as the background; every pixel of another colour is ink. Sampled every
+    `stride` pixels, since the question is "blank or not", not "what".
+    """
+    rgb, width, height = render_pixels(hwnd, region=region)
+    counts: dict[bytes, int] = {}
+    total = 0
+    for y in range(0, height, stride):
+        row = y * width * 3
+        for x in range(0, width, stride):
+            pixel = rgb[row + x * 3: row + x * 3 + 3]
+            counts[pixel] = counts.get(pixel, 0) + 1
+            total += 1
+    if not total:
+        return 0.0
+    return round(1.0 - max(counts.values()) / total, 3)

@@ -676,6 +676,13 @@ def _main_proc(hwnd, msg, wparam, lparam):
             user32.KillTimer(wintypes.HWND(hwnd), ctypes.c_void_p(2))
             user32.SetForegroundWindow(wintypes.HWND(hwnd))
             return 0
+        if wparam == 4:
+            # A thread that stops pumping: the application is frozen, and
+            # the system says so after five seconds (D66).
+            user32.KillTimer(wintypes.HWND(hwnd), ctypes.c_void_p(4))
+            import time as _time
+            _time.sleep(_STATE.get("hang_s", 30))
+            return 0
         if wparam == 3:
             # A window in a child process: the shape of a browser's file
             # dialog, which lives in a helper process of its own. A second
@@ -910,6 +917,10 @@ def build(options) -> dict:
     if options.child_after:
         user32.SetTimer(wintypes.HWND(main), ctypes.c_void_p(3),
                         options.child_after, None)
+    if options.hang_after:
+        _STATE["hang_s"] = options.hang_for
+        user32.SetTimer(wintypes.HWND(main), ctypes.c_void_p(4),
+                        options.hang_after, None)
 
     return {
         "pid": os.getpid(),
@@ -940,6 +951,10 @@ def main(argv=None) -> None:
                         metavar="MS",
                         help="Pull the window to the foreground this long "
                              "after a click. 0 disables it.")
+    parser.add_argument("--hang-after", type=int, default=0, metavar="MS",
+                        help="stop pumping messages this long after start")
+    parser.add_argument("--hang-for", type=float, default=30.0, metavar="S",
+                        help="how long the hang lasts")
     parser.add_argument("--grid-needs-active", action="store_true",
                         help="grids ignore clicks unless their top-level window "
                              "is the thread's active window")

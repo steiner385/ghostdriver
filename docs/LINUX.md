@@ -23,6 +23,8 @@ decision holds the measurement the Linux one must repeat.
 | `process_facts`, `descendants`, `parent_map` | `CreateToolhelp32Snapshot`, `IsWow64Process`, DPI awareness | `/proc/<pid>` (exe, cmdline, maps for toolkit detection: libgtk, libQt, libwx, Electron) | D2 (toolkit inference from loaded modules) |
 | `read_window_text` | `SendMessageTimeout(WM_GETTEXT)` | AT-SPI `Text` interface, or `Name` for controls without one; timeout per call because a hung application hangs the bus call | D4 (the unresponsive control), D47 |
 | `read_clipboard_text` | `OpenClipboard` / `GetClipboardData(CF_UNICODETEXT)` | `wl-paste` / `xclip -o`: the same tool the person uses, so the same clipboard | D65 (a target's own Copy is the one exact read some grids have) |
+| `ink_fraction` | `PrintWindow` pixels; the most common colour is the background | the same over the AT-SPI screenshot of the window (`org.gnome.Shell.Screenshot` / `grim -g`) | D66 (a control that answers empty and renders content) |
+| `deepest_child_at` | `ChildWindowFromPointEx` | the deepest accessible with a bounding box under the point | D66 (a click goes to the window under the pointer) |
 | `is_protected` | `EM_GETPASSWORDCHAR` | AT-SPI `STATE_PROTECTED`, role `PASSWORD_TEXT` | D33 (constraint 4) |
 | `capture_window`, `CaptureError` | `PrintWindow` | `XGetImage` on the window (composited: `XCompositeNameWindowPixmap`); never a screen grab | D46 |
 | `top_level_state`, `blocking_ancestor` | `IsWindowEnabled` per window, owner chain | `_NET_WM_STATE_MODAL`, `WM_TRANSIENT_FOR`; AT-SPI `STATE_MODAL` on dialogs | D38, D48 (link vs victim) |

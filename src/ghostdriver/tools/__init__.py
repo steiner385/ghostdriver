@@ -44,6 +44,10 @@ class Toolbox(LifecycleTools, DiscoveryTools, StatusTools, ActuationTools,
     """
 
 
+#: Tools that wait: their start is traced, not only their end.
+LONG_WAITS = frozenset({"await_human", "wait_for"})
+
+
 def _traced_and_reporting(fn, *, session_tool: bool):
     """Record every call in the trace; append watchdog events to session tools.
 
@@ -67,6 +71,12 @@ def _traced_and_reporting(fn, *, session_tool: bool):
             bound = {"args": list(args), **kwargs}
         session_id = bound.get("session_id") if session_tool else None
         result = None
+        if fn.__name__ in LONG_WAITS:
+            # Recorded on the way in as well: a server that dies during a
+            # wait leaves no result, and the next run can at least say what
+            # the person was in the middle of (D66).
+            self._tracer().record({"tool": fn.__name__, "phase": "began",
+                                   "session_id": session_id, "args": dict(bound)})
         try:
             result = fn(self, *args, **kwargs)
             if session_tool and isinstance(result, dict) and fn.__name__ != "release":

@@ -7,7 +7,7 @@ from .core import (
     _error,
     _ToolboxCore,
 )
-from .guidance import BLOCKED_HINT, PIXELS_HINT
+from .guidance import BLOCKED_HINT, HUNG_HINT, PIXELS_HINT
 
 
 class StatusTools(_ToolboxCore):
@@ -134,10 +134,14 @@ class StatusTools(_ToolboxCore):
 
         state = session.run(lambda: top_level_state(session.pid))
         blocks, unexplained = find_modal_blocks(state)
+        hung = [t for t in state if t.hung]
         return {
             "ok": True,
             "blocked": bool(blocks or unexplained),
             "top_level_windows": len(state),
+            **({"hung_windows": [{"window": t.text or t.class_name, "class": t.class_name}
+                                 for t in hung],
+                "hint": HUNG_HINT} if hung else {}),
             "dialogs": [
                 {
                     "dialog": b.dialog.text or b.dialog.class_name,

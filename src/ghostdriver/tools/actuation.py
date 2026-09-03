@@ -28,6 +28,7 @@ class ActuationTools(_ActingCore):
         modifiers: list[str] | None = None,
         at: dict | None = None,
         count: int = 1,
+        frame: str = "logical",
     ) -> dict:
         """Actuate one control.
 
@@ -70,12 +71,17 @@ class ActuationTools(_ActingCore):
             return _error(ErrorKind.NOT_ACTIONABLE,
                           f"count must be 1 or 2, not {count!r}", locator=locator)
         point = None
+        if frame not in ("logical", "physical"):
+            return _error(ErrorKind.NOT_ACTIONABLE,
+                          f"frame must be 'logical' or 'physical', not {frame!r}", locator=locator)
         if at is not None:
             try:
                 point = (int(at["x"]), int(at["y"]))
             except (KeyError, TypeError, ValueError):
                 return _error(ErrorKind.NOT_ACTIONABLE,
                               "at must be {x, y} in pixels inside the element", locator=locator)
+            if frame == "physical":
+                point = self._to_logical(point)
             left, top, right, bottom = prepared.node.rect
             width, height = right - left, bottom - top
             if not (0 <= point[0] < max(width, 1) and 0 <= point[1] < max(height, 1)):
@@ -88,6 +94,7 @@ class ActuationTools(_ActingCore):
                     if isinstance(prepared.node, AccessibleElement)
                     else verbs.click(prepared.node.handle, button=button, modifiers=held,
                                      at=point, count=count))
+        delivered = self._delivery(prepared, point)
         result = self._perform(prepared.session,
             attempts,
             expect_before=verbs.unblocked(prepared.node.handle),
@@ -101,6 +108,7 @@ class ActuationTools(_ActingCore):
             expected=described,
             button=button, modifiers=held, at=point, count=count,
             focus=self._focus_report(prepared),
+            **delivered,
         )
 
     def set_value(
@@ -213,7 +221,15 @@ class ActuationTools(_ActingCore):
                 "and then pasting were both tried; a target that drops typed "
                 "characters is worth recording with record_input_sensitivity"
             )
-            if shown == "" and wanted:
+            if shown == "" and wanted and self._renders_content(prepared):
+                reported["read_unreliable"] = True
+                reported["error"]["message"] += (
+                    ". The control answers empty to a text query but renders "
+                    "content, so the value may well have landed and the read "
+                    "path be the failure: verify by capture, or through the "
+                    "value's effect elsewhere, before retrying"
+                )
+            elif shown == "" and wanted:
                 appeared = [d.get("class") or d.get("kind") for d in result.disturbances
                             if isinstance(d, dict)]
                 seen = f" (a window appeared while typing: {appeared[:3]})" if appeared else ""

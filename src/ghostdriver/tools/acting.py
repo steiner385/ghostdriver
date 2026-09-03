@@ -219,6 +219,65 @@ class _ActingCore(_ToolboxCore):
             report["note"] = FOCUS_NOTE
         return report
 
+    def _delivery(self, prepared, point) -> dict:
+        """Which window a posted click reaches: the innermost one under the
+        point, which is the located window itself only when nothing of its
+        own sits there. Said whenever it differs, so "delivered" names the
+        control that got it and never a panel that dropped it (D66)."""
+        from ..backends import current
+
+        node = prepared.node
+        winapi, deepest = current().winapi, current().deepest_child_at
+        if isinstance(node, AccessibleElement):
+            host = node.host_handle
+            left, top, right, bottom = node.rect
+
+            def read():
+                p = ((left + right) // 2, (top + bottom) // 2) if point is None else (
+                    left + point[0], top + point[1])
+                cx, cy = winapi.screen_to_client(host, p)
+                return deepest(host, cx, cy)
+        else:
+            host = node.handle
+
+            def read():
+                cx, cy = winapi.client_centre(host) if point is None else point
+                return deepest(host, cx, cy)
+
+        try:
+            target, tx, ty = prepared.session.run(read)
+        except Exception:
+            return {}
+        if target == host:
+            return {}
+        return {"delivered_to": {
+            "class": winapi.class_name(target), "handle_ephemeral": f"0x{target:08X}",
+            "at": {"x": tx, "y": ty},
+            "note": "the innermost window under the point; a click posted to "
+                    "the located window itself would have been dropped there",
+        }}
+
+    def _renders_content(self, prepared) -> bool:
+        """Whether the control has painted anything but its background."""
+        from ..backends import current
+        from .discovery import INK_THRESHOLD
+
+        node = prepared.node
+        handle = node.host_handle if isinstance(node, AccessibleElement) else node.handle
+        region = node.rect if isinstance(node, AccessibleElement) else None
+        try:
+            ink = prepared.session.run(lambda: current().ink_fraction(handle, region=region))
+        except Exception:
+            return False
+        return ink > INK_THRESHOLD
+
+    def _to_logical(self, point):
+        """A point read off a physical-pixel screenshot, in this tool's frame."""
+        from ..backends import current
+
+        scale = current().winapi.display_scale()
+        return (round(point[0] / scale), round(point[1] / scale))
+
     def _reported(self, result, prepared, locator: str, **extra) -> dict:
         """One shape for every actuation outcome, successful or not.
 

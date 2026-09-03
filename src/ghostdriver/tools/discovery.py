@@ -2,6 +2,7 @@
 
 import base64
 
+from ..backends import current
 from ..model.element import AccessibleElement
 from ..model.locator import Locator
 from ..model.result import ErrorKind, GhostdriverError
@@ -15,7 +16,12 @@ from .core import (
     _top_level_holding,
     _top_level_overlapping,
 )
-from .guidance import BLOCKED_HINT
+from .guidance import BLOCKED_HINT, HUNG_HINT
+
+#: Above this fraction of non-background pixels a control has painted
+#: something, whatever it says when asked for its text.
+INK_THRESHOLD = 0.02
+
 
 #: The longest one wait_for call will wait. A screen that takes forty
 #: seconds to fill is one sixty-second wait, not four ten-second ones.
@@ -63,12 +69,14 @@ class DiscoveryTools(_ToolboxCore):
             )
             if not summary.node_count:
                 continue
+            hung = session.run(lambda h=tree.handle: current().winapi.is_hung(h))
             windows.append({
                 "class": tree.class_name,
                 "text": tree.text,
                 "visible": tree.visible,
                 "role": "main" if index == 0 else "other",
                 "pid": tree.pid,
+                **({"hung": True, "hint": HUNG_HINT} if hung else {}),
                 "tree": summary.text,
             })
             remaining -= summary.node_count
@@ -141,7 +149,6 @@ class DiscoveryTools(_ToolboxCore):
         except GhostdriverError as exc:
             return _error(exc.kind, exc.message)
 
-        from ..backends import current
         read_window_text = current().read_window_text
 
         try:
@@ -149,7 +156,6 @@ class DiscoveryTools(_ToolboxCore):
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, str(exc), locator=locator)
 
-        from ..backends import current
         is_protected = current().is_protected
 
         values = []
@@ -182,6 +188,21 @@ class DiscoveryTools(_ToolboxCore):
             # off diagnosing a hang that is not happening. Only asked when
             # the read came back empty-handed, so the ordinary path pays
             # nothing.
+            if raw == "" and node.visible:
+                # Empty answer, painted content: the read path does not work
+                # on this control, and saying "empty" would be wrong (D66).
+                try:
+                    ink = session.run(lambda h=node.handle: current().ink_fraction(h))
+                except Exception:
+                    ink = 0.0
+                if ink > INK_THRESHOLD:
+                    value["read_unreliable"] = True
+                    value["rendered_ink"] = ink
+                    value["note"] = (
+                        "answers empty to a text query but renders content; the "
+                        "read path is unreliable on this control. Verify by "
+                        "capture, or through the value's effect elsewhere"
+                    )
             if raw is None and is_protected(node.handle):
                 value["protected"] = True
                 value["reason"] = (
@@ -206,14 +227,17 @@ class DiscoveryTools(_ToolboxCore):
         locator: str | None = None,
         region: dict | None = None,
         save_as: str | None = None,
+        frame: str = "logical",
     ) -> dict:
         """A PNG of the target's window, or of one region of it."""
         try:
             session = self.sessions.authorize(session_id, "capture")
         except GhostdriverError as exc:
             return _error(exc.kind, exc.message)
+        if frame == "physical" and region is not None:
+            scale = current().winapi.display_scale()
+            region = {k: round(v / scale) for k, v in region.items()}
 
-        from ..backends import current
         CaptureError = current().CaptureError
         capture_window = current().capture_window
 

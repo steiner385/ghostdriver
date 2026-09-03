@@ -22,7 +22,7 @@ from ...model.element import AccessibleElement
 from ...model.window import WindowNode
 from . import input as win_input
 from . import winapi
-from .input import post_click, user32
+from .input import deepest_child_at, post_click, user32
 from .uia import CONTROL_TYPE_NAMES, PATTERN_IDS
 
 UIA_IS_PASSWORD_PROPERTY = 30019
@@ -291,8 +291,10 @@ def click_posted(element: AccessibleElement, *, button: str = "left",
         point = wintypes.POINT(left + int(at[0]), top + int(at[1]))
     if not user32.ScreenToClient(wintypes.HWND(element.host_handle), ctypes.byref(point)):
         return False
-    return post_click(element.host_handle, point.x, point.y, button=button,
-                      modifiers=modifiers, count=count)
+    # The window under the point, not the host as such: an element drawn on
+    # a windowed child of its host is reached through that child (D66).
+    target, tx, ty = deepest_child_at(element.host_handle, point.x, point.y)
+    return post_click(target, tx, ty, button=button, modifiers=modifiers, count=count)
 
 
 def is_selected(element: AccessibleElement) -> bool | None:

@@ -18,6 +18,11 @@ class Locator:
     within: "Locator | None" = None
     visible: bool | None = True
     index: int | None = None
+    #: `enabled=true|false`: every element reports it, so it filters (D66).
+    enabled: bool | None = None
+    #: `handle=0x0001ABCD`: the `handle_ephemeral` of one result, valid
+    #: until the window goes -- one control, named exactly (D66).
+    handle: int | None = None
     #: An *element* locator names something on the accessibility surface
     #: rather than a window: `type=TabItem name="Components"`. Either key
     #: makes it one. `class=` then matches the element's own class name,
@@ -27,7 +32,8 @@ class Locator:
     control_type: str | None = None
     name: str | None = None
 
-    _KEYS = ("class", "text", "role", "visible", "index", "type", "name")
+    _KEYS = ("class", "text", "role", "visible", "index", "type", "name",
+             "enabled", "handle")
 
     @property
     def is_element(self) -> bool:
@@ -143,6 +149,15 @@ class Locator:
                     "would match nothing rather than fail. Select on "
                     "class= or text= instead."
                 )
+            if key == "enabled":
+                fields["enabled"] = _parse_bool(key, value)
+                continue
+            if key == "handle":
+                try:
+                    fields["handle"] = int(value, 0)
+                except ValueError:
+                    raise ValueError(f"handle= takes the handle_ephemeral of a result, not {value!r}") from None
+                continue
             if key == "class":
                 fields["class_name"] = value
             elif key == "type":
@@ -187,3 +202,11 @@ class Locator:
             # and one that cannot be copied out of a message is friction.
             parts.append(f"within=({self.within.describe()})")
         return " ".join(parts) or "<empty locator>"
+
+
+def _parse_bool(key: str, value: str) -> bool:
+    if value.lower() in ("true", "1", "yes"):
+        return True
+    if value.lower() in ("false", "0", "no"):
+        return False
+    raise ValueError(f"{key}= takes true or false, not {value!r}")

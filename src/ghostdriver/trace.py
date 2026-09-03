@@ -104,6 +104,8 @@ def read(path: Path, *, tail: int | None = None, session_id: str | None = None) 
 
 
 def describe(event: dict) -> str:
+    if event.get("phase") == "began":
+        event = {**event, "ok": None, "result": "began"}
     """One line a person can read: time, session, tool, outcome, elapsed."""
     when = time.strftime("%H:%M:%S", time.localtime(event.get("at", 0)))
     session = (event.get("session_id") or "-")[:12]
@@ -139,7 +141,15 @@ def lost_session_hint(session_id: str) -> str | None:
     files = sorted(logs.glob("ghostdriver-*.jsonl"), key=lambda f: f.stat().st_mtime,
                    reverse=True)
     for path in files:
-        for event in read(path, session_id=session_id):
+        events = read(path, session_id=session_id)
+        unfinished = ""
+        if events and events[-1].get("phase") == "began":
+            last = events[-1]
+            ask = (last.get("args") or {}).get("ask")
+            unfinished = (f" That run was in {last['tool']} when it went"
+                          + (f" (the ask: {ask!r})" if ask else "")
+                          + "; the person may still be acting on it.")
+        for event in events:
             if event.get("tool") != "attach" or not event.get("ok"):
                 continue
             args = event.get("args") or {}
@@ -153,5 +163,5 @@ def lost_session_hint(session_id: str) -> str | None:
                     f"server run (trace {path.name}) against pid {pid} at tier "
                     f"{tier!r}; that server is gone and its sessions with it. "
                     f"attach(pid={pid}, tier={tier!r}) opens a new one; the "
-                    "approval is kept while that process lives")
+                    "approval is kept while that process lives." + unfinished)
     return None

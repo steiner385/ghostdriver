@@ -24,6 +24,15 @@ PIXELS_HINT = (
 )
 
 
+#: Said by modals and describe when the system reports a window's thread
+#: hung: it has pumped no message for five seconds.
+HUNG_HINT = (
+    "the application has stopped pumping messages: the system reports it "
+    "hung. Nothing sent to it will be handled until it recovers or is "
+    "ended. Stop acting on it and tell the person; a capture still shows "
+    "its last rendering"
+)
+
 #: Carried by a click result when the target's window is not its thread's
 #: active window -- which a second top-level window of the same thread
 #: need not be.

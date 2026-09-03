@@ -1895,6 +1895,93 @@ physical pixels while an unaware target still takes client coordinates
 in its own logical ones -- a conversion at every posted click, deferred
 until a target needs it.
 
+### D66. The fourth field report: a click goes to the window under the pointer, an empty answer is not an empty control, a frozen application says so
+
+**Context.** A working day against two targets of the same toolkit --
+the primary target and its configuration tool -- around a hundred and
+fifty calls, four session losses, two hand-offs to a person that the
+tool could have avoided. Written before D64 and D65 reached the running
+server, so the first, fourth and fifth items and most of the tenth were
+already answered; what follows is the rest, in the report's order.
+
+**A click posted to a panel over a windowed child is dropped.** Four
+clicks on a toolbar reported delivered and did nothing. The toolbar's
+buttons were speed buttons -- no window of their own -- on a panel, and
+the toolbar itself a window of its own inside another panel: a click
+posted to the outer panel at the button's position reaches the outer
+panel, whose toolkit hands mouse messages to its *non-windowed* children
+only, and a child that is a window never sees a message addressed to
+its parent. A person's click goes to the window under the pointer, so
+this does too: the innermost visible child under the point, found with
+`ChildWindowFromPointEx` down the tree, gets the message in its own
+client coordinates, and the result says `delivered_to` whenever that is
+not the located window. Proven on the fixture: a click on a page over
+the Apply button reaches Apply. The report's other suggestion, real
+input through `SendInput` when nothing is under the point, is refused
+on the first constraint: real input moves the person's pointer and goes
+to the foreground window, which is theirs. A click with nothing under
+the point is delivered to the panel and says so; whether the panel does
+anything with it is the panel's.
+
+**A write that landed, reported as a failure.** A memo answered `""` to
+a text query after a value visibly went in; the read path does not work
+on that control while the write path does, and the tool reported the
+success as a failure. A control that answers empty and *paints* content
+is one whose read path is unreliable, not one that is empty, and the
+two are told apart with pixels: the fraction of the control's rendering
+that is not its background colour (`ink_fraction`, the most common
+colour taken as background, sampled). `read` flags such a control
+`read_unreliable` with the fraction; `set_value`, on an empty read-back
+from a control that renders content, says the value may well have landed
+and the read be the failure, and to verify by capture -- rather than
+saying the field was cleared. Proven with the fixture's grid, which
+answers empty and paints rows; the set_value path is the same test
+applied at a different moment, and unproven against a memo. OCR was
+asked for and is not done: the question here is "blank or not", which
+pixels answer without reading them.
+
+**A frozen application reported healthy.** `describe` returned every
+window with an empty title and `find` said responsive. A hung window's
+cached title still reads, so nothing the tool asked distinguished frozen
+from busy; the system has that verdict -- `IsHungAppWindow`, a thread
+that has pumped no message for five seconds -- and now `modals` lists
+`hung_windows` with a hint, and `describe` marks the window. Proven on
+the fixture with a thread that stops pumping on a timer.
+
+**A wait that died with the server.** The server restarted during an
+`await_human`; the wait died silently while the person was acting on it
+and the client timed out later. A dead server returns nothing, so
+"fail fast with `server_gone`" cannot be done from the server's side;
+what can be done is to leave a mark. A wait's *start* is traced as well
+as its end, and the lost-session hint (D65) now says when the previous
+run was in a wait when it went, and what the person had been asked. Two
+more things a person needed: to know the notice was shown (`notice_shown`
+in the result) and to say "not now": the notice has a "Later" drawn on
+it -- drawn, not a button control, since a child button takes focus on a
+click and focus is what this window must never take -- and clicking it
+returns the wait early as `deferred`, a kind of its own, neither refusal
+nor timeout. `until` still takes a locator: a free-form "results grid
+appears" is not a condition this tool can check, and pretending to would
+verify nothing.
+
+**A point read off a physical screenshot.** `display_scale` is on every
+`find` and `capture` result now (D65); this adds `frame="physical"` on
+`click` and `capture`, which divides `at` or `region` by the scale, so a
+coordinate read off a DPI-aware tool's screenshot can be used directly.
+
+**`enabled=` and `handle=`.** Both are reported on every element and were
+refused as locator keys. `enabled=true|false` filters; `handle=0x...`
+takes a result's `handle_ephemeral` and names one window exactly, valid
+until that window goes.
+
+**Not done.** Detecting an autocomplete edit by class and routing
+`set_value` around it: the classes are the target's and belong in its
+profile, where `record_input_sensitivity` already puts what a session
+learns. Tooltips for unlabelled buttons: the toolkit keeps a hint on the
+control and shows it only on hover, and nothing cross-process reads it
+without the hover; a session that meets such a toolbar reads its
+buttons off a capture, and a profile can name them.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

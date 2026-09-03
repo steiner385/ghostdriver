@@ -253,7 +253,44 @@ def click(hwnd: int, *, button: str = "left", modifiers=(), at=None,
     and this clicks there, still without activating anything.
     """
     x, y = client_centre(hwnd) if at is None else (int(at[0]), int(at[1]))
-    return post_click(hwnd, x, y, button=button, modifiers=modifiers, count=count)
+    target, tx, ty = deepest_child_at(hwnd, x, y)
+    return post_click(target, tx, ty, button=button, modifiers=modifiers, count=count)
+
+
+#: `ChildWindowFromPointEx` flags: skip children that are hidden, or that
+#: let the mouse through (WS_EX_TRANSPARENT).
+CWP_SKIPINVISIBLE = 0x0001
+CWP_SKIPTRANSPARENT = 0x0004
+user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
+user32.ScreenToClient.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
+user32.ChildWindowFromPointEx.argtypes = [wintypes.HWND, wintypes.POINT, wintypes.UINT]
+user32.ChildWindowFromPointEx.restype = wintypes.HWND
+
+
+def deepest_child_at(hwnd: int, x: int, y: int) -> tuple[int, int, int]:
+    """The innermost visible child window under client point (x, y) of
+    `hwnd`, with the point in that window's own client coordinates.
+
+    A click posted to a panel over a *windowed* child is dropped: the
+    panel's toolkit hands mouse messages to its non-windowed children only,
+    and a child that is a window of its own never sees a message addressed
+    to its parent. Four clicks on a toolbar reported delivered and did
+    nothing that way (D66). A person's click goes to the window under the
+    pointer; so does this. (`hwnd`, x, y) comes back when nothing is under
+    the point but `hwnd` itself.
+    """
+    current, cx, cy = hwnd, x, y
+    for _ in range(32):  # a window tree is not that deep; a loop here is a bug
+        child = user32.ChildWindowFromPointEx(
+            wintypes.HWND(current), wintypes.POINT(cx, cy),
+            CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT)
+        if not child or child == current:
+            break
+        point = wintypes.POINT(cx, cy)
+        user32.ClientToScreen(wintypes.HWND(current), ctypes.byref(point))
+        user32.ScreenToClient(wintypes.HWND(child), ctypes.byref(point))
+        current, cx, cy = int(child), point.x, point.y
+    return current, cx, cy
 
 
 def set_text_by_typing(

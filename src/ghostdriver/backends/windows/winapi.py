@@ -344,3 +344,29 @@ def popup_menu_items(hwnd: int, *, timeout_ms: int = 500) -> list[dict]:
             "enabled": not (state & MF_DISABLED_OR_GRAYED),
         })
     return items
+
+
+def screen_to_client(hwnd: int, point: tuple[int, int]) -> tuple[int, int]:
+    """A screen point in `hwnd`'s client coordinates."""
+    pt = wintypes.POINT(int(point[0]), int(point[1]))
+    user32.ScreenToClient(wintypes.HWND(hwnd), ctypes.byref(pt))
+    return pt.x, pt.y
+
+
+def client_centre(hwnd: int) -> tuple[int, int]:
+    rect = wintypes.RECT()
+    user32.GetClientRect(wintypes.HWND(hwnd), ctypes.byref(rect))
+    return (rect.right - rect.left) // 2, (rect.bottom - rect.top) // 2
+
+
+user32.ScreenToClient.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
+user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+user32.IsHungAppWindow.argtypes = [wintypes.HWND]
+user32.IsHungAppWindow.restype = wintypes.BOOL
+
+
+def is_hung(hwnd: int) -> bool:
+    """Whether the system considers the window's thread hung: no message
+    pumped for five seconds. The one signal that tells a frozen application
+    from a busy one (D66)."""
+    return bool(user32.IsHungAppWindow(wintypes.HWND(hwnd)))

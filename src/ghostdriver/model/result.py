@@ -14,6 +14,8 @@ class ErrorKind(str, Enum):
     TIER_EXHAUSTED = "tier_exhausted"
     POSTCONDITION_FAILED = "postcondition_failed"
     TIMEOUT = "timeout"
+    #: The person chose "Later" on the notice: the ask stands, for later.
+    DEFERRED = "deferred"
 
 
 class GhostdriverError(Exception):

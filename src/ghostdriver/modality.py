@@ -30,6 +30,10 @@ class TopLevel:
     #: The window this one is owned by, or 0. Not a parent: an owned window
     #: is top-level in its own right.
     owner: int = 0
+    #: The system's own verdict: its thread has pumped no message for five
+    #: seconds. A frozen application still answers a cached title, so
+    #: nothing else here tells it from a busy one (D66).
+    hung: bool = False
 
 
 @dataclass(frozen=True, slots=True)

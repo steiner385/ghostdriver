@@ -21,6 +21,10 @@ def _text_matches(pattern: str, value: str) -> bool:
 
 
 def _node_matches(node: WindowNode, loc: Locator) -> bool:
+    if loc.handle is not None and node.handle != loc.handle:
+        return False
+    if loc.enabled is not None and node.enabled != loc.enabled:
+        return False
     if loc.visible is not None and node.visible != loc.visible:
         return False
     if loc.class_name is not None and not fnmatch.fnmatchcase(
@@ -115,6 +119,10 @@ def resolve_one(tree: WindowNode, locator: Locator) -> WindowNode:
 # --- elements that are not windows ------------------------------------------
 
 def _element_matches(element: AccessibleElement, loc: Locator) -> bool:
+    if loc.handle is not None and element.host_handle != loc.handle:
+        return False
+    if loc.enabled is not None and element.enabled != loc.enabled:
+        return False
     if loc.visible is not None and element.visible != loc.visible:
         return False
     if loc.control_type is not None and not fnmatch.fnmatchcase(

@@ -200,7 +200,9 @@ class HumanTools(_ToolboxCore):
         started = time.monotonic()
         deadline = started + max(0.0, timeout_s)
         met = False
+        deferred = False
         shown = self._notice(asked) if notice else None
+        notice_shown = bool(shown is not None and shown.hwnd)
         try:
             while True:
                 try:
@@ -210,6 +212,9 @@ class HumanTools(_ToolboxCore):
                     met = False
                     break
                 if met:
+                    break
+                if shown is not None and shown.deferred:
+                    deferred = True
                     break
                 now = time.monotonic()
                 if now >= deadline:
@@ -233,6 +238,25 @@ class HumanTools(_ToolboxCore):
                 "waited_ms": waited_ms,
                 "verified": True,
                 "expected": described,
+                "notice_shown": notice_shown,
+            }
+        if deferred:
+            return {
+                "ok": False,
+                "asked": asked,
+                "deferred": True,
+                "waited_ms": waited_ms,
+                "verified": False,
+                "expected": described,
+                "notice_shown": notice_shown,
+                "error": {
+                    "kind": ErrorKind.DEFERRED.value,
+                    "message": (
+                        "the person chose Later on the notice: the ask stands, "
+                        "for when they are free. Not a refusal and not a "
+                        "timeout; ask again later, or ask in chat when to"
+                    ),
+                },
             }
         return {
             "ok": False,
@@ -241,6 +265,7 @@ class HumanTools(_ToolboxCore):
             "waited_ms": waited_ms,
             "verified": False,
             "expected": described,
+            "notice_shown": notice_shown,
             "error": {
                 "kind": ErrorKind.TIMEOUT.value,
                 "message": (

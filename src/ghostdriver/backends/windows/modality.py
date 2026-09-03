@@ -28,6 +28,7 @@ def top_level_state(pid: int) -> list[TopLevel]:
                 visible=bool(winapi.user32.IsWindowVisible(hwnd)),
                 enabled=bool(winapi.user32.IsWindowEnabled(hwnd)),
                 owner=winapi.owner_window(hwnd),
+                hung=winapi.is_hung(hwnd),
             )
         )
     return state

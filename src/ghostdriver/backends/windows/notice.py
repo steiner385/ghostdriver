@@ -70,6 +70,9 @@ user32.CreateWindowExW.argtypes = [wintypes.DWORD, wintypes.LPCWSTR, wintypes.LP
                                    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                    wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID]
 user32.CreateWindowExW.restype = wintypes.HWND
+user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+user32.FrameRect.argtypes = [wintypes.HDC, ctypes.POINTER(wintypes.RECT), wintypes.HBRUSH]
+user32.InvalidateRect.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.BOOL]
 user32.DrawTextW.argtypes = [wintypes.HDC, wintypes.LPCWSTR, ctypes.c_int,
                              ctypes.POINTER(wintypes.RECT), wintypes.UINT]
 user32.SystemParametersInfoW.argtypes = [wintypes.UINT, wintypes.UINT, ctypes.c_void_p, wintypes.UINT]
@@ -79,11 +82,38 @@ _registered = False
 _proc_ref = None  # keeps the callback alive for the class's lifetime
 
 
+#: The strip below the text that holds "Later", and the box itself.
+LATER_STRIP = 30
+LATER_W, LATER_H = 72, 22
+WM_LBUTTONUP = 0x0202
+DT_CENTER = 0x0001
+DT_VCENTER = 0x0004
+DT_SINGLELINE = 0x0020
+
+
+def later_rect(hwnd) -> tuple[int, int, int, int]:
+    """Where "Later" is drawn, in client coordinates: bottom-right corner."""
+    rect = wintypes.RECT()
+    user32.GetClientRect(wintypes.HWND(hwnd), ctypes.byref(rect))
+    right, bottom = rect.right - PAD, rect.bottom - (LATER_STRIP - LATER_H) // 2
+    return right - LATER_W, bottom - LATER_H, right, bottom
+
+
 def _wndproc_factory(text_holder: dict):
     def proc(hwnd, msg, wparam, lparam):
         if msg == WM_MOUSEACTIVATE:
             # A click on the notice must not activate it either.
             return MA_NOACTIVATE
+        if msg == WM_LBUTTONUP:
+            # "Later", painted rather than a button control: a child button
+            # takes focus on a click, and focus is what this window must
+            # never take. The person's click defers the ask (D66).
+            x, y = lparam & 0xFFFF, (lparam >> 16) & 0xFFFF
+            left, top, right, bottom = later_rect(hwnd)
+            if left <= x < right and top <= y < bottom:
+                text_holder["deferred"] = True
+                user32.InvalidateRect(wintypes.HWND(hwnd), None, True)
+            return 0
         if msg == WM_PAINT:
             ps = PAINTSTRUCT()
             hdc = user32.BeginPaint(wintypes.HWND(hwnd), ctypes.byref(ps))
@@ -92,9 +122,15 @@ def _wndproc_factory(text_holder: dict):
             user32.FillRect(hdc, ctypes.byref(rect), user32.GetSysColorBrush(COLOR_INFOBK))
             gdi32.SetBkMode(hdc, 1)
             gdi32.SetTextColor(hdc, user32.GetSysColor(COLOR_INFOTEXT))
-            inner = wintypes.RECT(rect.left + PAD, rect.top + PAD, rect.right - PAD, rect.bottom - PAD)
+            inner = wintypes.RECT(rect.left + PAD, rect.top + PAD, rect.right - PAD,
+                                  rect.bottom - PAD - LATER_STRIP)
             body = text_holder["text"]
             user32.DrawTextW(hdc, body, -1, ctypes.byref(inner), DT_WORDBREAK)
+            left, top, right, bottom = later_rect(hwnd)
+            box = wintypes.RECT(left, top, right, bottom)
+            user32.FrameRect(hdc, ctypes.byref(box), user32.GetSysColorBrush(COLOR_INFOTEXT))
+            label = "Deferred" if text_holder.get("deferred") else "Later"
+            user32.DrawTextW(hdc, label, -1, ctypes.byref(box), DT_CENTER | DT_VCENTER | DT_SINGLELINE)
             user32.EndPaint(wintypes.HWND(hwnd), ctypes.byref(ps))
             return 0
         if msg == WM_CLOSE:
@@ -141,7 +177,8 @@ class OperatorNotice:
     @property
     def text(self) -> str:
         return (f"{self.heading}\n\n{self.ask}\n\n"
-                "It continues on its own once the application shows this done.")
+                "It continues on its own once the application shows this done. "
+                "Not now? Later defers the ask.")
 
     def show(self) -> None:
         self._thread = threading.Thread(target=self._run, daemon=True,
@@ -149,8 +186,20 @@ class OperatorNotice:
         self._thread.start()
         self._ready.wait(timeout=3)
 
+    @property
+    def deferred(self) -> bool:
+        """Whether the person clicked "Later" on this notice."""
+        return bool(self.hwnd) and bool(_TEXT.get("deferred"))
+
+    @property
+    def later_at(self) -> tuple[int, int]:
+        """The centre of "Later", in the notice's client coordinates."""
+        left, top, right, bottom = later_rect(self.hwnd)
+        return (left + right) // 2, (top + bottom) // 2
+
     def _run(self) -> None:
         _TEXT["text"] = self.text
+        _TEXT["deferred"] = False
         _register(_TEXT)
         self._thread_id = kernel32.GetCurrentThreadId()
         work = wintypes.RECT()
@@ -160,7 +209,7 @@ class OperatorNotice:
         measure = wintypes.RECT(0, 0, WIDTH - 2 * PAD, 0)
         user32.DrawTextW(hdc, self.text, -1, ctypes.byref(measure), DT_WORDBREAK | DT_CALCRECT)
         user32.ReleaseDC(None, hdc)
-        height = (measure.bottom - measure.top) + 2 * PAD + 2
+        height = (measure.bottom - measure.top) + 2 * PAD + 2 + LATER_STRIP
         x = work.right - WIDTH - MARGIN
         y = work.bottom - height - MARGIN
         hwnd = user32.CreateWindowExW(

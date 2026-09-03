@@ -117,6 +117,8 @@ runs -- across relaunches of the operator app and redeploys of this server
 A restriction is kept the same way. Without an operator directory a
 decision lives for one server run.
 
+**A click goes to the window under the pointer.** A click posted to a panel over a windowed child is dropped by the panel; this tool posts to the innermost window under the point and says so (`delivered_to`). A control that answers empty and renders content is flagged `read_unreliable`; a window the system reports hung is reported hung; the notice a person sees during `await_human` has a Later that returns the wait as `deferred`.
+
 **Context menus are readable.** A popup menu's items come from the menu
 itself: `find` lists them with rectangles and captions, an owner-drawn
 item by position, and `click` takes either. `read_clipboard` reads back

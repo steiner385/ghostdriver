@@ -59,7 +59,11 @@ Four things about this class of target are worth knowing before you plan:
    captured as pixels.
 
 4. A control that did not answer is not the same as a control that is
-   empty. `read` distinguishes them; treat a null value as unknown.
+   empty. `read` distinguishes them; treat a null value as unknown. A
+   control that answers empty and renders content is flagged
+   `read_unreliable`: verify by capture, not by read. A window the system
+   reports `hung` will handle nothing until it recovers: stop and tell the
+   person.
 
 Actuation is available only to a session opened at the `interactive` tier,
 and only for a target the operator approved. Four things about it:
@@ -362,8 +366,13 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "Also keep the PNG on disk under the operator directory's "
             "captures/ folder, by this file name; the result says where."
         ))] = None,
+        frame: Annotated[str, Field(description=(
+            "The frame `region` is in: logical (default) or physical (pixels "
+            "of a DPI-aware screenshot)."
+        ))] = "logical",
     ) -> CallToolResult:
-        result = box.capture(session_id, locator=locator, region=region, save_as=save_as)
+        result = box.capture(session_id, locator=locator, region=region, save_as=save_as,
+                             frame=frame)
         if not result.get("ok"):
             return CallToolResult(
                 content=[TextContent(
@@ -391,7 +400,8 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         )
 
     @server.tool(annotations=READS, description=(
-        "Poll until a condition holds. Conditions: present, absent, "
+        "Poll until a condition holds. Its start is traced as well as its "
+        "end. Conditions: present, absent, "
         "visible, enabled, responsive, settled. Use `settled` after "
         "navigating — a screen that is still filling answers accurately and "
         "uselessly."
@@ -476,7 +486,11 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "click posted to its host window at its own rectangle; `at` aims "
         "the click at a point inside it (a grid row, a column header, a "
         "tree expander) and `button`/`count` make it a right- or double-"
-        "click. The locator must match exactly one element -- "
+        "click; frame=\"physical\" takes `at` in the pixels of a DPI-aware "
+        "screenshot. The click goes to the innermost window under the point "
+        "and the result says which (`delivered_to`). After a Copy command, "
+        "`read_clipboard` reads what it put there. The locator must match "
+        "exactly one element -- "
         "ambiguity is refused rather than guessed at. Refuses to act while "
         "a modal dialog holds the application, and reports anything else "
         "that changed around the click, such as a dialog it raised."
@@ -502,13 +516,18 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "where the row or link is, and click there. Still posted; still "
             "activates nothing."
         ))] = None,
+        frame: Annotated[str, Field(description=(
+            "The frame `at` is in: logical (default; this tool's own "
+            "rectangles) or physical (pixels of a DPI-aware screenshot, "
+            "divided by the result's display_scale)."
+        ))] = "logical",
         count: Annotated[int, Field(description=(
             "1 for a click, 2 for a double-click (how most grids open a row)."
         ))] = 1,
     ) -> dict[str, Any]:
         return box.click(session_id, locator, all_windows=all_windows,
                          expect=expect, button=button, modifiers=modifiers,
-                         at=at, count=count)
+                         at=at, count=count, frame=frame)
 
     @server.tool(annotations=ACTUATES, description=(
         "Replace a field's contents by typing them. Always reads the field "
