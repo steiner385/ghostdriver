@@ -1093,6 +1093,98 @@ be usable end to end. A Store-activated target cannot be isolated this way
 at all, and there is no workaround at this layer -- activation is the
 shell's, not ours to redirect.
 
+### D54. Phase A: the gate is one command, the tool surface is a package, and strays cannot hide
+
+**Context.** The audit of iteration 5 found the design sound and the
+hygiene behind it: no linter or type checker ran, `tools.py` had reached
+1,767 lines, two draft modules had been left beside their real versions in
+one session, and tool test coverage was uneven and listed by hand. These
+four are Phase A of the roadmap, done before Phase B because Phase B will
+generate change and a gate has to be watching first.
+
+**The gate is `pytest`, and nothing else.** ruff and mypy are dev
+dependencies with explicit configuration in pyproject.toml, and
+`tests/test_quality.py` runs both as tests. A separate lint command is a
+command someone forgets; a test cannot be forgotten by anyone who runs the
+tests. The rule set is correctness and modernisation (F, B, E, W, I, UP,
+SIM, C4, RUF) with five stylistic rules ignored and stated; the security
+and blind-except families are deliberately absent, because the backends
+catch broad exceptions around Win32 calls on purpose. mypy runs with
+`check_untyped_defs` over `src`. The first run found 25 type errors, and
+several were real: camelCase keyword arguments to the MCP annotation and
+image types (accepted by aliases, so never noticed), an implicit-Optional
+context parameter, `truncated` typed as int, and the phase-1 runner using
+an Optional tree unguarded.
+
+**The tool surface is a package, composed from one core.** `tools.py`
+became `tools/`: `core.py` holds the dataclass fields and every shared
+helper (`_trees`, `_resolve`, `_one`, `_prepared`, `_perform`, ...), and
+six family modules -- lifecycle, discovery, status, actuation, human,
+learning -- each subclass it and hold only their tools. `Toolbox` in the
+package root inherits from all six and defines nothing. Every method moved
+verbatim; the only change is which class it lands in. Largest module 340
+lines; the seam that routes calls onto a hidden desktop still has exactly
+one definition. A reader opens the file named for what they are looking
+at; a caller still holds one object.
+
+**Strays cannot hide, and the guard found something on its first run.**
+`tests/test_structure.py` asserts every module under `src/ghostdriver` is
+reachable from an entry point -- transitively, over the source tree,
+because "imported by something" lets two dead modules vouch for each
+other. Its first run reported that the `minimized` isolation strategy
+(`isolation.py` and `backends/windows/isolate.py`) is reachable from
+nothing: proven against the fixture in D49, never wired into `attach`;
+only `hidden_desktop` was (D52). That is not a stray. It is the strategy
+that fits a target which is already running and needs a person to sign
+in, which is to say the primary target, and today it cannot be selected.
+It is carried as an explicit known-unwired list with the reason beside
+each entry, a second test insists the list stays true, and wiring it is
+the first item of Phase B. Tests import only from `src`: a module kept
+alive by its own test is the case this is meant to catch.
+
+**Coverage by enumeration, not by hand.** `tests/test_tool_contracts.py`
+derives the tool list from `Toolbox` itself and checks three promises over
+every tool: an unknown or released session is refused first, a lower tier
+cannot call a higher tier's tool, and the tool surface and the policy's
+tier table name the same tools. A tool added tomorrow is in every
+parametrisation the moment it exists; one whose required arguments the
+file cannot guess fails loudly rather than being skipped. `release` is
+the one exemption from the first promise, by design (idempotent teardown),
+and has its own test saying so.
+
+**The suite itself was stealing the operator's focus, and now cannot.**
+Reported by the operator mid-run: a window briefly took their focus while
+they typed. Measured with a foreground monitor correlated to per-test
+timestamps: four ungated tests -- one in the launch tests, three in the
+isolation tests -- launched the fixture with `--onscreen`, and that option
+showed the window with `SW_SHOWNORMAL` and no `WS_EX_NOACTIVATE`. A new
+top-level window shown that way activates itself, and Windows permitted
+it because the test runner descends from the process the operator was
+typing into (the foreground-lock rule's exception). The operator's focus
+went to fixture windows for about four seconds in a row. Nothing under
+`src` was involved -- no code there activates a window, and the
+tool-driven tests assert the foreground handle unchanged -- but the
+promise the tool makes was being broken by the suite that tests it, and
+nothing in the suite noticed before a person did.
+
+Two changes. The fixture is now non-activating on-screen as well as off:
+`WS_EX_NOACTIVATE` always, `SW_SHOWNOACTIVATE` always; a fixture that
+must take the foreground says so with `--grab-foreground-after`, which
+calls `SetForegroundWindow` and works regardless. And
+`tests/focusguard.py` watches `GetForegroundWindow` for the whole session,
+records every change to a window owned by a process descended from the
+runner (the operator switching to their own windows is not ours to
+record), and `tests/test_zz_focus_guard.py`, last in the run, asserts the
+record is empty. It stands down under `GHOSTDRIVER_ALLOW_FOCUS_TESTS`,
+whose tests take the foreground on purpose. The watch's logic is proven
+with a fed sequence and a real child process rather than by stealing a
+real operator's focus to show the guard would notice.
+
+**One flake, made self-explaining.** A full-suite run found a fixture
+window minimized that nothing minimized, for the second time; alone it
+never reproduces. `restore` now names what it restored -- class and
+visibility -- so the next occurrence says which window it was.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

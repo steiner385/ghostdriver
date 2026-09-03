@@ -80,7 +80,6 @@ ES_PASSWORD = 0x0020
 FIELD_CAPACITY = 20
 
 SW_SHOWNOACTIVATE = 4
-SW_SHOWNORMAL = 1
 GWL_WNDPROC = -4
 GWL_STYLE = -16
 COLOR_BTNFACE = 15
@@ -581,7 +580,15 @@ def build(options) -> dict:
 
     x = OFFSCREEN if options.offscreen else 140
     style = WS_OVERLAPPEDWINDOW | WS_VISIBLE
-    ex = (WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW) if options.offscreen else 0
+    # Never activating, on-screen or off. An on-screen window shown the
+    # ordinary way activates itself, and because the test runner is a
+    # descendant of whatever the operator is typing into, Windows lets
+    # it: an operator watching the suite had their focus taken for
+    # seconds at a time by fixtures that were merely meant to be
+    # visible. A fixture that must take the foreground says so with
+    # --grab-foreground-after, which calls SetForegroundWindow
+    # explicitly and works regardless of this style.
+    ex = WS_EX_NOACTIVATE | (WS_EX_TOOLWINDOW if options.offscreen else 0)
     main = user32.CreateWindowExW(ex, MAIN_CLASS, "Ghostdriver Fixture",
                                   style, x, x, 640, 460, None, None,
                                   INSTANCE, None)
@@ -648,9 +655,7 @@ def build(options) -> dict:
         x + 80, x + 80, 300, 140, main, None, INSTANCE, None)
     _STATE["modal"] = modal
 
-    user32.ShowWindow(wintypes.HWND(main),
-                      SW_SHOWNOACTIVATE if options.offscreen
-                      else SW_SHOWNORMAL)
+    user32.ShowWindow(wintypes.HWND(main), SW_SHOWNOACTIVATE)
     if options.modal_after:
         user32.SetTimer(wintypes.HWND(main), ctypes.c_void_p(1),
                         options.modal_after, None)

@@ -772,3 +772,26 @@ def modal_target():
                 pass
         proc.terminate()
         proc.wait(timeout=5)
+
+
+# --- the foreground watch --------------------------------------------------
+# Started here so it covers every test; asserted in test_zz_focus_guard.py.
+
+def pytest_configure(config):
+    from tests.focusguard import ForegroundWatch
+
+    watch = ForegroundWatch()
+    watch.start()
+    config._ghostdriver_focus_watch = watch
+
+
+def pytest_runtest_logstart(nodeid, location):
+    from tests import focusguard
+
+    focusguard.CURRENT["test"] = nodeid
+
+
+def pytest_unconfigure(config):
+    watch = getattr(config, "_ghostdriver_focus_watch", None)
+    if watch is not None:
+        watch.stop()

@@ -146,7 +146,14 @@ def test_an_ordinary_session_is_unaffected_by_the_routing(box):
 
     from ghostdriver.policy import ConsentSource
 
-    proc = subprocess.Popen(COMMAND, stdout=subprocess.PIPE, text=True)
+    # The off-screen, non-activating fixture: this one runs on the
+    # operator's desktop, and `--onscreen` (which the hidden-desktop
+    # sessions above need for real pixels) shows a window with
+    # SW_SHOWNORMAL, which activates it -- a focus steal by the test,
+    # not the tool, and exactly what an operator watching the suite
+    # should never see.
+    offscreen = [a for a in COMMAND if a != "--onscreen"]
+    proc = subprocess.Popen(offscreen, stdout=subprocess.PIPE, text=True)
     handles = json.loads(proc.stdout.readline())
     time.sleep(0.4)
     try:

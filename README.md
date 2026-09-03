@@ -113,7 +113,7 @@ ghostdriver restore --pid 1234
 - **Pure logic separated from platform calls.** The Windows backend
   produces plain `WindowNode` trees; matching, summarization, inference,
   policy and waiting operate on those and are testable on any platform.
-- **The protocol layer holds no decisions.** `tools.py` returns plain data
+- **The protocol layer holds no decisions.** the `tools` package returns plain data
   and carries every rule; `mcp_server.py` is an adapter over it. Anything
   that can be wrong is wrong somewhere testable without a protocol client.
 - **Menus, dropdowns and dialogs are separate top-level windows.** On a
