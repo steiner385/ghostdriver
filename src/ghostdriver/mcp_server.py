@@ -15,13 +15,15 @@ bare `dict` for structured output, and without a concrete annotation a
 client receives JSON text it has to parse rather than a structured result.
 """
 
+import sys
 from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
+from .devreload import LiveToolbox
+from .devreload import enabled as dev_reload_enabled
 from .policy import ConsentSource
 from .session import SessionManager
-from .tools import Toolbox
 
 SERVER_INSTRUCTIONS = """\
 Drives desktop applications that predate modern accessibility APIs, by
@@ -152,7 +154,9 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     from mcp.server.mcpserver import Context, MCPServer
     from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 
-    box = Toolbox(sessions=sessions or SessionManager())
+    # The closures below call through this; with GHOSTDRIVER_DEV set it
+    # rebuilds the toolbox from freshly imported modules on change (D68).
+    box = LiveToolbox(sessions or SessionManager())
     server = MCPServer(
         name="ghostdriver",
         instructions=SERVER_INSTRUCTIONS,
@@ -823,6 +827,10 @@ def build_server(sessions: SessionManager | None = None) -> Any:
 
 def main() -> None:
     """Entry point for `ghostdriver-mcp`."""
+    if dev_reload_enabled():
+        print("ghostdriver: dev reload on (GHOSTDRIVER_DEV). Implementation modules "
+              "re-import when their files change; session, policy, consent, model "
+              "and the server itself need a reconnect.", file=sys.stderr, flush=True)
     build_server().run(transport="stdio")
 
 

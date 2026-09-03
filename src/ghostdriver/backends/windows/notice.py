@@ -153,7 +153,10 @@ def _register(text_holder: dict) -> None:
     wc.hInstance = kernel32.GetModuleHandleW(None)
     wc.hCursor = user32.LoadCursorW(None, wintypes.LPCWSTR(32512))  # IDC_ARROW
     wc.lpszClassName = CLASS_NAME
-    if not user32.RegisterClassW(ctypes.byref(wc)):
+    # ERROR_CLASS_ALREADY_EXISTS (1410): an earlier generation of this module
+    # registered it (dev reload, D68). The reloader keeps that generation's
+    # callback alive, so the class stays valid; reuse it.
+    if not user32.RegisterClassW(ctypes.byref(wc)) and ctypes.get_last_error() != 1410:
         raise ctypes.WinError(ctypes.get_last_error())
     _registered = True
 

@@ -2050,6 +2050,52 @@ there would cry wolf on every grid click. `delivered_to` still names an
 intercepting child when there is one (D66); the container check is a tool
 a caller reaches for, not a warning on every click.
 
+### D68. Hot reload for development: implementation re-imported on change, live state kept
+
+**Context.** The host spawns this server once and takes its tool list
+once, at `initialize`. After that an edit reaches a chat only through a
+host restart -- which also drops every open session, the loss the field
+reports kept counting. Asked: can the server pick up changes without a
+restart?
+
+**Three layers, and only one can reload.** The implementation -- `tools/`,
+`backends/`, the pure modules they use -- can be re-imported in-process.
+State and the types it is made of -- `session`, `policy`, `consent`,
+`model`, the ledger and sensitivity records -- must not be: a new class for
+an old instance is a bug waiting, and every reloaded module re-importing
+the *same* stable modules is what keeps `isinstance` and enum comparisons
+true across generations. The tool list and schemas are the host's cache
+from `initialize`; a new tool or parameter needs a reconnect, and no
+process-side trick changes that.
+
+**The mechanism.** With `GHOSTDRIVER_DEV` set, the server's tool closures
+call through a `LiveToolbox` that resolves the current toolbox on every
+call. A reloader stats the package's files (throttled to four times a
+second) and, on a change to a reloadable module, purges every reloadable
+module from `sys.modules` and imports `ghostdriver.tools` again -- whole,
+not file by file, because a `from x import y` elsewhere keeps the old `y`
+otherwise. The new toolbox is built on the same `SessionManager`, and its
+live state (`_desktops`, `_watches`, `_tree_cache`, the trace) is carried
+from the old instance, so an isolated session's desktop thread and a
+minimized-watch keep running. Retired modules are kept referenced, never
+released: the notice's window class points at a callback the old module
+owns, and freeing it would leave the class pointing at nothing (the notice
+now also reuses a class an earlier generation registered). An edit that
+does not import -- a typo, a mid-save -- leaves the previous generation in
+place and says so. Every result after an event carries `dev_reload`: what
+changed, what reloaded, what needs a reconnect, or what failed and which
+generation was kept. Outside dev mode the proxy is a pass-through.
+
+**What it costs, and where it stops.** A stat sweep per call in dev mode
+only; a re-import of some sixty modules on change, a few hundred
+milliseconds; leaked generations, in development. Edits to the stable
+modules or to the server file are reported as needing a reconnect, which
+in Claude Code is `/mcp` on this server rather than a relaunch. Proven on
+a scratch package: an edit takes effect on the next check, state is
+carried, a syntax error keeps the old generation and restores
+`sys.modules`, a stable-module edit reloads nothing and asks for a
+reconnect.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

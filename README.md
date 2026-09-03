@@ -117,6 +117,14 @@ runs -- across relaunches of the operator app and redeploys of this server
 A restriction is kept the same way. Without an operator directory a
 decision lives for one server run.
 
+**Developing it: hot reload.** Set `GHOSTDRIVER_DEV=1` in the server's
+environment and an edit to `tools/` or `backends/` takes effect on the next
+tool call, with open sessions kept. The next result says what reloaded.
+Edits to `session`, `policy`, `consent`, `model` or the server itself are
+reported as needing a reconnect (`/mcp` in Claude Code); a new tool or
+parameter always does, since the host caches the tool list at connect.
+An edit that fails to import keeps the previous generation running.
+
 **A result does not say ok for nothing.** A click delivered to a window
 that is not active carries a `warning` and reads `delivered_inactive`,
 since a control that checks focus would ignore it; `require_active` refuses
