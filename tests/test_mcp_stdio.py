@@ -27,6 +27,7 @@ READ_TOOLS = {
     "list_targets", "attach", "release", "grant_targets",
     "describe", "find", "read", "capture", "wait_for",
     "probe", "surfaces", "modals", "restore", "await_human",
+    "hit_targets", "read_clipboard",
 }
 
 #: Reachable only from a session opened at the interactive tier. Registered
@@ -40,7 +41,7 @@ CURATION_TOOLS = {"record_input_sensitivity"}
 
 #: The `full` tier, which nothing grants by default. It actuates
 #: controls an operator listed, to learn how they respond.
-LEARNING_TOOLS = {"probe_phase2", "probe_grid"}
+LEARNING_TOOLS = {"probe_phase2", "probe_grid", "grid_seek"}
 
 #: Session-creating / consent tools for the launch path. Gated by
 #: command approval, not by a session tier.

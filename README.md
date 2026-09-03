@@ -117,6 +117,14 @@ runs -- across relaunches of the operator app and redeploys of this server
 A restriction is kept the same way. Without an operator directory a
 decision lives for one server run.
 
+**A result does not say ok for nothing.** A click delivered to a window
+that is not active carries a `warning` and reads `delivered_inactive`,
+since a control that checks focus would ignore it; `require_active` refuses
+rather than delivering blind. `await_human` refuses a hand-off with no
+condition and takes `until_change` to watch the surface move when you
+cannot name what will appear. `hit_targets` lists a container's child
+windows so a point click aims at a real target.
+
 **A click goes to the window under the pointer.** A click posted to a panel over a windowed child is dropped by the panel; this tool posts to the innermost window under the point and says so (`delivered_to`). A control that answers empty and renders content is flagged `read_unreliable`; a window the system reports hung is reported hung; the notice a person sees during `await_human` has a Later that returns the wait as `deferred`.
 
 **Context menus are readable.** A popup menu's items come from the menu

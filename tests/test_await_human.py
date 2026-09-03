@@ -123,16 +123,16 @@ def test_a_person_who_never_does_it_is_reported_as_a_timeout(box, app):
     assert "do not attempt the step yourself" in result["error"]["message"]
 
 
-def test_without_a_condition_it_claims_nothing(box, app):
-    """"I asked" and "it happened" are as different here as everywhere else
-    in this tool, so the result says which one it has."""
+def test_without_a_condition_it_is_refused(box, app):
+    """A hand-off that watches for nothing did nothing -- not even show the
+    notice -- so it is refused, naming the two ways to give it a condition
+    (D67)."""
     session = read_only(box, app["pid"])
 
     result = box.await_human(session, "Have a think about it.")
 
-    assert result["ok"]
-    assert result["verified"] is False
-    assert "nothing was checked against the target" in result["note"]
+    assert result["ok"] is False
+    assert "until_change" in result["error"]["message"]
 
 
 def test_an_empty_ask_is_refused(box, app):
@@ -168,7 +168,8 @@ def test_the_ask_comes_back_exactly_as_written(box, app):
     session = read_only(box, app["pid"])
     ask = "Type the password for account SVC-7 and press Tab. Do not tell me."
 
-    result = box.await_human(session, ask)
+    result = box.await_human(session, ask, until_change=True, timeout_s=0.3,
+                             notice=False)
 
     assert result["asked"] == ask
 
@@ -249,7 +250,8 @@ def test_asking_a_person_needs_no_more_than_a_read_only_session(box, app):
     case there is."""
     session = read_only(box, app["pid"])
 
-    result = box.await_human(session, "Please bring the window up.")
+    result = box.await_human(session, "Please bring the window up.",
+                             until="class=GhostFixtureShell", timeout_s=3, notice=False)
 
     assert result["ok"]
 

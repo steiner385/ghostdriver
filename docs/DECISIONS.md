@@ -1982,6 +1982,74 @@ control and shows it only on hover, and nothing cross-process reads it
 without the hover; a session that meets such a toolbar reads its
 buttons off a capture, and a profile can name them.
 
+### D67. The fifth field report: tightening the results that said ok for nothing
+
+**Context.** A short run after the third and fourth reports landed. The
+fixes from those held and two caught real errors within minutes -- a
+capture that named the window it rendered, a coordinate note that stopped
+a scale mistake. The report's through-line: the diagnosis layer is now
+reliable, and what is left is that several results read `ok: true` for a
+call that accomplished nothing, each documented in a prose note a
+status-skimmer skips. Four such, tightened; two features; one thing not
+built, and why.
+
+**A click delivered to an inactive window read as success.** On this
+target -- always in the background, never foreground -- a click's window
+is never the thread's active one, and most controls act on a posted
+click anyway (grids, tabs, buttons), so `ok: true` there is right and
+must stay, or the tool reports failure for every working click. But a
+control that *checks* focus drops the click, and `ok: true` with
+`verified: "delivery_only"` buried the reason in the focus note. Now,
+when the window is inactive and no `expect` confirmed an effect, the
+result carries a top-level `warning` and `verified` reads
+`"delivered_inactive"` -- the two fields a skimmer does read. Two opt-ins
+join it: `require_active=true` refuses before delivering into a window
+that would ignore the click, and `expect` (already there) confirms an
+effect after. Not built: an `activate` that brings the window forward.
+It is the one thing asked for that the tool cannot do without the thing
+it exists to prevent -- a window is made active either by
+`SetForegroundWindow`, which a background process cannot reliably do
+(it flashes the taskbar and no more), or by `AttachThreadInput`, which
+merges the target's input queue with this one and moves the keyboard
+focus the operator is typing into (D64). A reliable `activate` is the
+keyboard theft, so the honest answer to "act on a focus-requiring
+control" stays: hand it to a person, which is why `await_human` was
+made to work in the same report.
+
+**`await_human` without a condition did nothing, silently.** It returned
+`ok: true`, waited zero milliseconds, and -- the real defect -- never
+showed the notice: the no-condition path returned before the notice was
+raised. A hand-off that watches for nothing is refused now, naming the
+two ways to give it something to watch. And the exploratory case the
+report named -- asking a person to do a thing whose result you cannot
+name a locator for, because you have never seen it -- gets
+`until_change=true`: it baselines the surface digest `surfaces` already
+computes and returns when it moves. That is the case that matters most on
+this target, and it was the one `until` could not express.
+
+**A `region` was dropped when a `locator` was also passed.** The smaller
+form of the very bug the `rendered` field was added to catch: a parameter
+discarded in silence. A region alongside a locator now crops within the
+located window rather than being ignored.
+
+**`expect` refused a string.** It is typed as `{locator, text}` and the
+name invites a sentence; a bare locator string is now accepted as "this
+is present now", the common case.
+
+**A native container hid its addressable parts, and a point click that
+missed reported `ok`.** A panel of toggle bars answers `find` with one
+match, itself; its bars are either child windows or painted, and a caller
+reduced to reading coordinates off a screenshot clicked left of a
+twelve-pixel target and spent real time theorising about permissions.
+`hit_targets` lists a container's child windows with their rectangles, so
+a point click aims at a real one; none listed means the parts are painted,
+and the answer is capture-and-offset or a person. The click itself does
+*not* flag a point that finds no child window -- on an owner-drawn grid,
+whose rows are painted, that is the normal and correct case, and a flag
+there would cry wolf on every grid click. `delivered_to` still names an
+intercepting child when there is one (D66); the container check is a tool
+a caller reaches for, not a warning on every click.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

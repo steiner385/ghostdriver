@@ -97,7 +97,8 @@ class HumanTools(_ToolboxCore):
         session_id: str,
         ask: str,
         *,
-        until: dict | None = None,
+        until: dict | str | None = None,
+        until_change: bool = False,
         timeout_s: float = 120.0,
         poll_s: float = 0.5,
         all_windows: bool = False,
@@ -128,9 +129,13 @@ class HumanTools(_ToolboxCore):
         observed rather than something asserted. Both together are better
         still: the person confirms, and the application agrees.
 
-        Without `until` this returns immediately, having asked and verified
-        nothing -- said plainly in the result, because "I asked" and "it
-        happened" are as different here as everywhere else in this tool.
+        A condition is required, because a hand-off with nothing to watch
+        for did nothing but return -- the notice was never even shown (D67).
+        Name it one of two ways: `until` naming a control that will appear,
+        change or vanish, or `until_change=true` for the exploratory case,
+        where the point of asking a person is that you do not yet know what
+        will appear. `until_change` watches the target's surface shape (the
+        same digest `surfaces` reports) and returns when it moves.
 
         Bounded, and reports a timeout as a timeout. A person may be away
         from the machine, and a tool that waited indefinitely would take the
@@ -154,48 +159,54 @@ class HumanTools(_ToolboxCore):
                 "as written, so an empty ask reaches them as an empty ask",
             )
 
-        if until is None:
-            return {
-                "ok": True,
-                "asked": asked,
-                "confirmed_by_operator": confirmed,
-                "waited_ms": 0,
-                "verified": False,
-                "note": (
-                    "nothing was checked against the target, because no "
-                    "`until` was given. Pass one naming what will be true "
-                    "once the person has done it, and this waits for the "
-                    "application to show it rather than taking anyone\'s word"
-                ),
-            }
+        if isinstance(until, str):
+            until = {"locator": until}
+        if until is None and not until_change:
+            return _error(
+                ErrorKind.NOT_ACTIONABLE,
+                "name what completion will look like: until={\"locator\": ...} "
+                "for a control that will appear, change or vanish, or "
+                "until_change=true to wait for the target's surface to change "
+                "when you do not yet know what will appear. Without a condition "
+                "this can watch for nothing, and a hand-off that watches for "
+                "nothing does nothing -- ask in chat instead.")
 
-        where = until.get("locator")
-        if not where:
-            return _error(ErrorKind.NOT_ACTIONABLE,
-                          "`until` needs a locator naming what to wait for")
-        try:
-            Locator.parse(where)
-        except ValueError as exc:
-            return _error(ErrorKind.NOT_FOUND, f"until is unusable: {exc}")
+        if until_change:
+            surfaces = self.surfaces  # type: ignore[attr-defined]
+            baseline = surfaces(session_id, all_windows=all_windows).get("shape_digest")
+            described = "the target's surface shape changed"
 
-        from ..backends import current
-        read_window_text = current().read_window_text
+            def satisfied() -> bool:
+                return surfaces(session_id, all_windows=all_windows).get("shape_digest") != baseline
+        else:
+            assert isinstance(until, dict)
+            where = until.get("locator")
+            if not where:
+                return _error(ErrorKind.NOT_ACTIONABLE,
+                              "`until` needs a locator naming what to wait for")
+            try:
+                Locator.parse(where)
+            except ValueError as exc:
+                return _error(ErrorKind.NOT_FOUND, f"until is unusable: {exc}")
 
-        wanted = until.get("text")
-        # "gone" is as common a signal as "there": a sign-in dialog closing
-        # is how you know someone signed in.
-        absent = bool(until.get("absent", False))
+            from ..backends import current
+            read_window_text = current().read_window_text
 
-        def satisfied() -> bool:
-            found = self._resolve(session, where, all_windows)
-            if absent:
-                return not found
-            if not found:
-                return False
-            if wanted is None:
-                return True
-            return any((read_window_text(n.handle) or "") == wanted
-                       for n in found)
+            wanted = until.get("text")
+            # "gone" is as common a signal as "there": a sign-in dialog
+            # closing is how you know someone signed in.
+            absent = bool(until.get("absent", False))
+
+            def satisfied() -> bool:
+                found = self._resolve(session, where, all_windows)
+                if absent:
+                    return not found
+                if not found:
+                    return False
+                if wanted is None:
+                    return True
+                return any((read_window_text(n.handle) or "") == wanted
+                           for n in found)
 
         started = time.monotonic()
         deadline = started + max(0.0, timeout_s)
@@ -225,11 +236,12 @@ class HumanTools(_ToolboxCore):
                 shown.close()
 
         waited_ms = int((time.monotonic() - started) * 1000)
-        described = (
-            f"{where} is gone" if absent
-            else f"{where} exists" if wanted is None
-            else f"{where} reads {wanted!r}"
-        )
+        if not until_change:
+            described = (
+                f"{where} is gone" if absent
+                else f"{where} exists" if wanted is None
+                else f"{where} reads {wanted!r}"
+            )
         if met:
             return {
                 "ok": True,

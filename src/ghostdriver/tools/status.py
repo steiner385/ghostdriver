@@ -1,9 +1,11 @@
 """Target status: probe, surfaces, modals, restore."""
 
 
+from ..model.element import AccessibleElement
 from ..model.result import ErrorKind, GhostdriverError
 from .core import (
     MAX_ELEMENTS,
+    _element,
     _error,
     _ToolboxCore,
 )
@@ -163,6 +165,66 @@ class StatusTools(_ToolboxCore):
             ],
         }
 
+
+    def hit_targets(self, session_id: str, locator: str, *,
+                    all_windows: bool = False) -> dict:
+        """The child windows inside a container, with their rectangles.
+
+        A native container -- a panel of toggle bars, a toolbar of speed
+        buttons -- answers `find` with one match: itself. Its parts may be
+        child windows (addressable) or painted (not). This lists the child
+        windows there are, so a caller aims a point click at a real target
+        instead of reading coordinates off a screenshot by eye and missing a
+        twelve-pixel bar (D67). None listed means the parts are painted:
+        capture the container and click at an offset, or hand it to a person.
+        """
+        try:
+            session = self.sessions.authorize(session_id, "hit_targets")
+        except GhostdriverError as exc:
+            return _error(exc.kind, exc.message)
+        try:
+            matches = self._resolve(session, locator, all_windows)
+        except ValueError as exc:
+            return _error(ErrorKind.NOT_FOUND, str(exc), locator=locator)
+        matches = [m for m in matches if not isinstance(m, AccessibleElement)]
+        if not matches:
+            return _error(ErrorKind.NOT_FOUND,
+                          f"no window matches {locator!r}", locator=locator)
+        if len(matches) > 1:
+            return _error(ErrorKind.AMBIGUOUS,
+                          f"{len(matches)} windows matched {locator!r}; name one "
+                          "with within= or index=", locator=locator)
+        container = matches[0]
+
+        def descend(node, depth):
+            out = []
+            for child in node.children:
+                left, top, right, bottom = child.rect
+                out.append({
+                    "class": child.class_name,
+                    "text": child.text if child.responsive else None,
+                    "handle_ephemeral": f"0x{child.handle:08X}",
+                    "rect": {"left": left, "top": top, "right": right, "bottom": bottom},
+                    "depth": depth,
+                })
+                out.extend(descend(child, depth + 1))
+            return out
+
+        targets = descend(container, 1)
+        report = {
+            "ok": True,
+            "locator": locator,
+            "container": _element(container),
+            "hit_targets": targets,
+            "count": len(targets),
+        }
+        if not targets:
+            report["note"] = (
+                "this container has no child windows: its hit targets are "
+                "painted, not windowed. `capture` it to see them and `click` "
+                "at={x, y} at an offset, or hand the step to a person"
+            )
+        return report
     def restore(self, session_id: str) -> dict:
         """Un-minimize the target, reporting whether that took the foreground.
 

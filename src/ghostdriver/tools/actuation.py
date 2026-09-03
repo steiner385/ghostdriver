@@ -23,12 +23,13 @@ class ActuationTools(_ActingCore):
         locator: str,
         *,
         all_windows: bool = False,
-        expect: dict | None = None,
+        expect: dict | str | None = None,
         button: str = "left",
         modifiers: list[str] | None = None,
         at: dict | None = None,
         count: int = 1,
         frame: str = "logical",
+        require_active: bool = False,
     ) -> dict:
         """Actuate one control.
 
@@ -37,16 +38,15 @@ class ActuationTools(_ActingCore):
         the input was delivered and claims nothing about its effect, because
         on this class of target those are genuinely different statements.
 
-        `at` is a point {x, y} inside the element -- client-relative for a
-        window, relative to the top-left for an element -- for a region
-        that paints its own rows and exposes none of them: a capture shows
-        where the row is, this clicks there, and nothing is activated.
-        `count` 2 is a double-click. `button` is left, right or middle;
-        `modifiers` may hold ctrl and shift. A right-click opens a context menu, which arrives as a new
-        top-level window (all_windows=true reaches it). Modifiers travel in
-        the message's own flags, the only place a posted message can carry
-        them: a target that reads those flags sees them, one that asks the
-        keyboard does not, and the result's `expect` is how to tell which.
+        `at` is a point {x, y} inside the element, for a region that paints
+        its own rows: a capture shows where the row is, this clicks there,
+        nothing is activated. `count` 2 double-clicks; `button` is left,
+        right or middle (a right-click's context menu is a new top-level
+        window, all_windows=true reaches it); `modifiers` (ctrl, shift)
+        ride the message's own flags, which a target that reads them sees
+        and one that asks the keyboard does not -- `expect` tells which.
+        `require_active` refuses when the window is not active rather than
+        delivering a click a focus-checking control would drop.
         """
         prepared, failure = self._prepared(
             session_id, "click", locator, all_windows, None
@@ -94,6 +94,17 @@ class ActuationTools(_ActingCore):
                     if isinstance(prepared.node, AccessibleElement)
                     else verbs.click(prepared.node.handle, button=button, modifiers=held,
                                      at=point, count=count))
+        if require_active:
+            before = self._focus_report(prepared)
+            if before.get("target_window_active") is False:
+                refusal = _error(
+                    ErrorKind.NOT_ACTIONABLE,
+                    "require_active: the target's window is not active, so a "
+                    "focus-checking control would ignore this click; nothing "
+                    "delivered. Hand it to a person (await_human), or drop "
+                    "require_active to deliver anyway.", locator=locator)
+                refusal["focus"] = before
+                return refusal
         delivered = self._delivery(prepared, point)
         result = self._perform(prepared.session,
             attempts,
@@ -101,15 +112,29 @@ class ActuationTools(_ActingCore):
             expect_after=after,
         )
         self._remember(session_id, "click", locator, prepared, result)
-        return self._reported(
+        focus = self._focus_report(prepared)
+        inactive = focus.get("target_window_active") is False
+        verified = ("effect" if after is not None and result.ok
+                    else "delivered_inactive" if inactive and result.ok
+                    else "delivery_only")
+        reported = self._reported(
             result, prepared, locator,
-            verified=("effect" if after is not None and result.ok
-                      else "delivery_only"),
+            verified=verified,
             expected=described,
             button=button, modifiers=held, at=point, count=count,
-            focus=self._focus_report(prepared),
+            focus=focus,
             **delivered,
         )
+        if inactive and after is None and result.ok:
+            # ok:true (delivered), but a status-skimmer must see it (D67).
+            reported["warning"] = (
+                "delivered to a window that is not its thread's active window: "
+                "a control that checks focus will have ignored this click, and "
+                "nothing here confirms an effect. Pass expect to confirm one, "
+                "require_active=true to refuse instead of delivering blind, or "
+                "hand the step to a person with await_human."
+            )
+        return reported
 
     def set_value(
         self,
@@ -119,7 +144,7 @@ class ActuationTools(_ActingCore):
         *,
         all_windows: bool = False,
         expect_text: str | None = None,
-        expect: dict | None = None,
+        expect: dict | str | None = None,
         cadence: str | None = None,
     ) -> dict:
         """Replace a field\'s contents, and check what actually landed.
@@ -138,15 +163,11 @@ class ActuationTools(_ActingCore):
         becomes something asserted rather than something skimmed past.
 
         **The application may not have accepted it.** A field can display a
-        value the application never received. Nothing here can see that --
-        it shows up in a mirror label, a grid cell, a change log -- so
-        `expect` is how a caller names where to look. Only then does the
-        result say `verified: "committed"`.
-
-        With `expect`, a pattern-based tier is offered first and falls
-        through if it does not commit. Without it, this types and only
-        types: an unverifiable shortcut whose failure is invisible is not
-        worth the milliseconds it saves.
+        value the application never received -- it shows in a mirror label,
+        a grid cell, a change log -- so `expect` names where to look, and
+        only then is the result `verified: "committed"`. With `expect` a
+        pattern tier is tried first; without it this only types, an
+        unverifiable shortcut not worth the milliseconds.
         """
         prepared, failure = self._prepared(
             session_id, "set_value", locator, all_windows, cadence
@@ -256,7 +277,7 @@ class ActuationTools(_ActingCore):
         *,
         all_windows: bool = False,
         cadence: str | None = None,
-        expect: dict | None = None,
+        expect: dict | str | None = None,
     ) -> dict:
         """Type into a control at the caret, without clearing it first.
 
@@ -305,7 +326,7 @@ class ActuationTools(_ActingCore):
         *,
         all_windows: bool = False,
         cadence: str | None = None,
-        expect: dict | None = None,
+        expect: dict | str | None = None,
     ) -> dict:
         """Send named keys to a control.
 

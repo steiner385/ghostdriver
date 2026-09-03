@@ -46,7 +46,7 @@ TIER_TOOLS: dict[Tier, frozenset[str]] = {
     Tier.READ_ONLY: frozenset({
         "list_targets", "attach", "release", "grant_targets",
         "describe", "find", "read", "capture", "wait_for",
-        "probe", "surfaces", "modals", "restore",
+        "probe", "surfaces", "modals", "restore", "hit_targets",
         # Asks a person to do something and watches for them to have done
         # it. It changes nothing itself, and a read-only session has as much
         # need of it as any other -- "please sign in so I can see the

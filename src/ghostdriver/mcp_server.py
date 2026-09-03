@@ -74,7 +74,12 @@ and only for a target the operator approved. Four things about it:
 6. Delivering input is not the same as the input having an effect, and on
    this class of target they come apart routinely. `expect` is how you say
    what should be true afterwards; without it, a result claims only that
-   the message went out.
+   the message went out. A click into a window that is not active carries
+   a `warning` and reads `delivered_inactive`, because a control that
+   checks focus ignores it; `require_active` refuses instead. A step that
+   truly needs an active window is a step for a person: `await_human`,
+   which now refuses a hand-off with no condition and takes `until_change`
+   for the case where you cannot yet name what will appear.
 
 7. `set_value` always reads the field back, because a control can silently
    accept only part of a long value. A field displaying what you typed is
@@ -454,6 +459,18 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     def modals(session_id: SessionId) -> dict[str, Any]:
         return box.modals(session_id)
 
+    @server.tool(annotations=READS, description=(
+        "The child windows inside a native container -- a panel of "
+        "toggle bars, a toolbar of speed buttons -- with their "
+        "rectangles, so a point click can be aimed at a real target "
+        "instead of a coordinate read off a screenshot by eye. None "
+        "listed means the parts are painted, not windowed: capture and "
+        "click at an offset, or hand it to a person."
+    ))
+    def hit_targets(session_id: SessionId, locator: LocatorArg,
+                    all_windows: AllWindows = False) -> dict[str, Any]:
+        return box.hit_targets(session_id, locator, all_windows=all_windows)
+
     @server.tool(annotations=CHANGES_SCREEN, description=(
         "Un-minimize the target so it can be read. Changes no application "
         "state; does nothing if the target is already visible. It CAN bring "
@@ -466,8 +483,9 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     def restore(session_id: SessionId) -> dict[str, Any]:
         return box.restore(session_id)
 
-    ExpectArg = Annotated[dict | None, Field(description=(
-        "How to tell that this worked, as {locator, text}. Checked after the "
+    ExpectArg = Annotated[dict | str | None, Field(description=(
+        "How to tell that this worked: {locator, text}, or a bare locator "
+        "string as shorthand for \"this is now present\". Checked after the "
         "action, and re-resolved at that point -- so it can name something "
         "that does not exist until the action succeeds. Without it the "
         "result reports only that the input was delivered."
@@ -521,13 +539,19 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "rectangles) or physical (pixels of a DPI-aware screenshot, "
             "divided by the result's display_scale)."
         ))] = "logical",
+        require_active: Annotated[bool, Field(description=(
+            "Refuse rather than deliver when the target's window is not "
+            "its thread's active window -- a control that checks focus "
+            "would ignore the click. Default false: deliver anyway (many "
+            "controls do not check), with a warning when it is inactive."
+        ))] = False,
         count: Annotated[int, Field(description=(
             "1 for a click, 2 for a double-click (how most grids open a row)."
         ))] = 1,
     ) -> dict[str, Any]:
         return box.click(session_id, locator, all_windows=all_windows,
                          expect=expect, button=button, modifiers=modifiers,
-                         at=at, count=count, frame=frame)
+                         at=at, count=count, frame=frame, require_active=require_active)
 
     @server.tool(annotations=ACTUATES, description=(
         "Replace a field's contents by typing them. Always reads the field "
@@ -629,8 +653,10 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "waits, the ask is also shown in a small always-on-top notice in the "
         "corner of their screen, which never takes focus and closes when "
         "the wait ends. Use it for anything a person must do themselves -- "
-        "a password, a sign-in, a judgement call. `until` is what proves it "
-        "happened; without it nothing is verified. Never carries a value."
+        "a password, a sign-in, a judgement call. A condition is required: "
+        "`until` names a control that will appear or vanish; "
+        "`until_change` waits for the target's surface to change when you "
+        "do not yet know what will. Never carries a value."
     ))
     async def await_human(
         session_id: SessionId,
@@ -639,12 +665,16 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "exactly as written, so write it to be read by them and not by "
             "you."
         ))],
-        until: Annotated[dict | None, Field(description=(
-            "What proves it is done: {locator, text?, absent?}. `absent` "
-            "waits for the element to be gone, which is how a sign-in "
-            "dialog closing tells you someone signed in. Omit only when "
-            "nothing observable would change."
+        until: Annotated[dict | str | None, Field(description=(
+            "What proves it is done: {locator, text?, absent?}, or a bare "
+            "locator string. `absent` waits for the element to be gone, "
+            "which is how a sign-in dialog closing tells you someone "
+            "signed in. Use until_change instead when you cannot name it."
         ))] = None,
+        until_change: Annotated[bool, Field(description=(
+            "Wait for the target's surface shape to change, for the "
+            "exploratory case where you do not yet know what will appear."
+        ))] = False,
         timeout_s: Annotated[float, Field(description=(
             "How long to wait before giving up and saying so."
         ))] = 120.0,
@@ -666,6 +696,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
                 # which is why the condition is the part that matters.
                 confirmed = False
         return box.await_human(session_id, ask, until=until,
+                               until_change=until_change,
                                timeout_s=timeout_s, all_windows=all_windows,
                                confirmed=confirmed)
 

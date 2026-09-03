@@ -249,6 +249,10 @@ class _ActingCore(_ToolboxCore):
         except Exception:
             return {}
         if target == host:
+            # No child window under the point. On an owner-drawn grid that is
+            # the normal, correct case (the rows are painted), so this is not
+            # flagged here -- hit_targets is where a caller checks whether a
+            # container has addressable children (D67).
             return {}
         return {"delivered_to": {
             "class": winapi.class_name(target), "handle_ephemeral": f"0x{target:08X}",
@@ -307,7 +311,7 @@ class _ActingCore(_ToolboxCore):
             reported["error"] = error
         return reported
 
-    def _expectation(self, session, expect: dict | None):
+    def _expectation(self, session, expect: dict | str | None):
         """Turn a caller\'s `expect` into a condition, re-resolved each time.
 
         Re-resolving rather than holding a handle is the point: the element
@@ -326,6 +330,12 @@ class _ActingCore(_ToolboxCore):
         """
         if not expect:
             return None, None
+        if isinstance(expect, str):
+            # `expect` names how to tell the action worked. The common case
+            # is "this locator is now present", and a bare string is the
+            # natural way to say it -- the name invites a sentence, so at
+            # least let a locator string through (D67).
+            expect = {"locator": expect}
 
         from ..actuate import Condition
         from ..backends import current

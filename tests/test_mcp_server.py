@@ -27,6 +27,7 @@ READ_TOOLS = {
     "list_targets", "attach", "release", "grant_targets",
     "describe", "find", "read", "capture", "wait_for",
     "probe", "surfaces", "modals", "restore", "await_human",
+    "hit_targets", "read_clipboard",
 }
 
 #: Reachable only from a session opened at the interactive tier. Registered
@@ -40,7 +41,7 @@ CURATION_TOOLS = {"record_input_sensitivity"}
 
 #: The `full` tier, which nothing grants by default. It actuates
 #: controls an operator listed, to learn how they respond.
-LEARNING_TOOLS = {"probe_phase2", "probe_grid"}
+LEARNING_TOOLS = {"probe_phase2", "probe_grid", "grid_seek"}
 
 #: Session-creating / consent tools for the launch path. Gated by
 #: command approval, not by a session tier.
@@ -273,8 +274,9 @@ def test_the_pixels_are_not_repeated_in_the_text_payload(win32_target):
     result = captured(win32_target)
 
     text = " ".join(b.text for b in result.content if b.type == "text")
-    assert "base64" not in text
-    assert len(text) < 500, "metadata only"
+    assert "base64" not in text and "iVBOR" not in text, "no pixels in the text"
+    # Metadata only -- kilobytes at most, never the megabytes the base64 was.
+    assert len(text) < 2000, "metadata only, not pixels"
 
 
 @on_windows

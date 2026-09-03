@@ -273,7 +273,14 @@ class DiscoveryTools(_ToolboxCore):
             if holder is None:
                 return _error(ErrorKind.NOT_FOUND,
                               f"{locator!r} matched a window no top-level window holds")
-            target, crop = holder, match.rect
+            # A region alongside a locator crops within the located window,
+            # rather than being silently dropped (D67). Screen coordinates,
+            # like every region, so a rect from find() is used as-is.
+            if region:
+                target, crop = holder, (region["left"], region["top"],
+                                        region["right"], region["bottom"])
+            else:
+                target, crop = holder, match.rect
         elif region:
             crop = (region["left"], region["top"],
                     region["right"], region["bottom"])
