@@ -2422,6 +2422,95 @@ Linux half of the route issue #1 is opening on Windows, and it is the first
 evidence anywhere in this project that a copy route gives exact text out of a
 control that has no children to read.
 
+### D76. The six validation gates, run against a real Profile L1 target
+
+**Context.** `docs/VALIDATION.md` is a six-gate, read-only runbook, and
+D60 scored real-target testing "thin" because no part of it had been run
+against a real application -- "the row keeps its score." It was run, in an
+operator session, against a live Delphi/VCL x86 target (Profile L1). All
+six gates were exercised. Five pass cleanly; one carries a finding that
+qualifies a claim the whole classification rests on.
+
+**Gate 1 -- discovery. Pass.** Two Delphi/VCL x86 targets appear, 94 and 91
+top-level windows. One was probed for the rest.
+
+**Gate 2 -- profile correctness. Pass on the classification, with one
+significant finding.** `matched_profile` is `L1`; `toolkit.inferred` is
+`delphi-vcl` (confidence `medium`, evidence a set of `TAdv*` window
+classes); `executable.bitness` is `x86` under WOW64; `dpi.awareness` is
+`unaware`; `msaa.verdict` is `identification-only` (11 of 40 sampled
+controls named, none with a default action); `window_count` 108;
+`unresponsive_count` 0; `class_census` is all VCL classes. None of the
+runbook's fail conditions is met.
+
+The finding is `uia.verdict = "partial"` and
+`uia.control_view.with_patterns = 25` -- where the runbook's Gate 2 table
+says, for a target expected to have no UIA provider, "exactly `0` ... any
+non-zero value means the target exposes real automation patterns and is
+not the profile you assumed -- stop and re-read the tree." Re-read, the 25
+resolve entirely onto *standard* Win32 controls: `SelectionItem` on the 21
+`TabItem`s, `Value` on the 3 `Edit`s, `Selection` on the one `Tab`. Every
+one of the 72 `Pane`-classed controls -- the application's own vendor-drawn
+buttons, panels and grids -- carries no pattern at all.
+
+So the patterns are the OS's generic HWND-to-UIA provider doing its job
+for standard controls, not evidence of an accessibility implementation by
+the application. The classifier concluded `L1` correctly, on the low
+`richness` (0.2577) and the pattern-less vendor controls, not fooled by
+the synthesized patterns on the standard ones. What is wrong is the
+model's blanket phrasing -- "no element anywhere supports any pattern" --
+and the runbook's "`with_patterns` must be exactly `0`." The true
+statement is narrower and is the one the actuation ladder already relies
+on (D56): a standard tab control's `SelectionItem` is present but inert
+for the application, so a posted click drives the page and the pattern
+does not; pattern-*emptiness* is a property of the vendor-drawn controls,
+never of the whole tree. A Profile L1 target with any standard tab or edit
+control will show a non-zero `with_patterns`, and that is not a
+contradiction of L1. `docs/VALIDATION.md` is corrected to say so.
+
+**Gate 3 -- scale. Pass, on a small instance.** The whole tree at depth 12
+is 82 nodes / 112 lines; runs of same-class siblings collapse to
+`[N x Class]`; `--max-nodes 60` ends with an explicit truncation line;
+suggested `class=... text="..."` locators are usable. But this instance is
+one loaded editor view -- 108 windows -- not the ~1,100-window whole
+application the gate imagines, so the summarizer's scale limits were not
+stressed. `describe` behaves and is bounded; the scalability question
+itself remains open against a full-size target.
+
+**Gate 4 -- locator correctness and ancestor scoping. Pass.** A plain
+`class=` find returns exactly one, fully populated. A repeated caption
+matched six controls of one toolbar class; `within=(class=<frame>)`
+narrowed it to exactly one handle, a different ancestor selected a
+different subset, and an impossible nested `within` chain returned nothing
+rather than over-matching. The runbook's ideal test -- the same caption on
+two *tab pages* -- was not available, because only one page was loaded;
+the ancestor-scoping capability it is meant to prove was proven on the
+repeated toolbar caption instead.
+
+**Gate 5 -- text reading. Pass, with the branch that matters still
+unexercised.** Standard edit controls returned their real values; a combo
+edit answered with a genuine empty string (answered, not silent). Every
+control answered -- `unresponsive_count` was 0 and nothing reported
+`<no answer>` -- so the `responsive=False` path the runbook flags as
+never having run anywhere *still has not run*. Confirming it needs a target
+with a control that does not answer, which this session did not have.
+
+**Gate 6 -- non-interference. Pass.** Across the whole exercise, including
+a 60-control read batch, the foreground window did not change, the target
+never became foreground, and the cursor did not move.
+
+**What this moves.** Real-target testing is no longer unrun: the
+read-only diagnosis half of the tool -- discovery, classification, scale,
+locator and ancestor scoping, text reading, non-interference -- is
+confirmed against a real Profile L1 target, and the one surprise it turned
+up is written down here rather than smoothed over. The row moves from
+"thin -- nothing has run" to "diagnosis verified on a real target; the
+finding recorded." What has still not run is the *actuation* half: no
+workflow has driven a control end to end against the real application
+under the interference watch (D57, D62). That remains the operator's, and
+the scorecard keeps that part of the row open.
+
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on
