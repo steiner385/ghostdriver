@@ -18,7 +18,10 @@ keeps visible rather than a permission to forget it.
 """
 
 import ast
+import re
 from pathlib import Path
+
+import pytest
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent / "src" / "ghostdriver"
 PACKAGE = "ghostdriver"
@@ -171,7 +174,8 @@ TESTS = Path(__file__).resolve().parent
 #: Run as subprocesses (`python -m tests.fixtureapp`, `... .fixtureapp_gtk`)
 #: and never imported by the test process, so each is its platform's toolkit at
 #: module scope on purpose.
-IMPORT_TIME_PLATFORM_ALLOWED = {"fixtureapp.py", "fixtureapp_gtk.py"}
+IMPORT_TIME_PLATFORM_ALLOWED = {"fixtureapp.py", "fixtureapp_gtk.py",
+                                "linux_atspi_probe.py"}
 
 #: Modules that exist on one platform only. `ctypes.WinDLL` raises
 #: AttributeError off Windows; `gi` and `pyatspi` are simply absent off a
@@ -248,4 +252,147 @@ def test_no_test_module_binds_a_platform_at_import_time():
         "host. Move the binding inside the function that uses it, the way "
         "tests/test_windows_actuate.py does: "
         + ", ".join(f"{n} ({w} at line {ln})" for n, (w, ln) in sorted(offenders.items()))
+    )
+
+
+# --- the decision log numbers each entry once ---------------------------------
+
+DECISIONS = REPO / "docs" / "DECISIONS.md"
+
+#: The frozen series. `### D73.` / `### R5.`, numbered from a counter, kept
+#: because several hundred references across the source tree point at them.
+_SEQUENTIAL = re.compile(r"^### ([DR])(\d+)\.", re.M)
+
+#: The live series. `### D#34.` -- numbered from the issue the decision came
+#: out of, so GitHub allocates it and two branches cannot pick the same one.
+_BY_ISSUE = re.compile(r"^### D#(\d+)\.", re.M)
+
+#: Where the counter stopped. Nothing may extend it.
+LAST_SEQUENTIAL_DECISION = 77
+
+
+def _text():
+    return DECISIONS.read_text(encoding="utf-8")
+
+
+def _series(kind):
+    return [int(n) for k, n in _SEQUENTIAL.findall(_text()) if k == kind]
+
+
+def test_no_new_decision_extends_the_frozen_counter():
+    """The rule that makes the change stick, rather than relying on everyone
+    remembering it.
+
+    A hand-kept counter cannot be made safe: every branch reads the highest
+    number before any branch writes one, so two sessions that start together
+    pick the same number and both are right. It happened three times in a
+    day. Issue numbers are handed out by GitHub once, so the question does
+    not arise -- but only if new entries actually use them, which is what
+    this checks.
+    """
+    over = sorted(n for n in _series("D") if n > LAST_SEQUENTIAL_DECISION)
+    assert not over, (
+        "docs/DECISIONS.md has "
+        + ", ".join(f"D{n}" for n in over)
+        + f", but the sequential series is frozen at D{LAST_SEQUENTIAL_DECISION}. "
+        "Number a new decision from the issue it came out of -- `### D#34.` "
+        "for issue 34 -- and open an issue for it first if it has none."
+    )
+
+
+def test_no_issue_numbered_decision_is_used_twice():
+    """One issue, one decision. If an issue genuinely produced two, suffix
+    them (`D#34a`, `D#34b`) rather than heading two entries the same, or a
+    reader following a reference lands on whichever comes first."""
+    numbers = _BY_ISSUE.findall(_text())
+    seen, repeated = set(), []
+    for n in numbers:
+        (repeated.append(n) if n in seen else None)
+        seen.add(n)
+    assert not repeated, (
+        "docs/DECISIONS.md heads two entries D#"
+        + ", D#".join(sorted(set(repeated)))
+        + ". One issue, one decision -- suffix them D#Na / D#Nb if an issue "
+        "really did produce two."
+    )
+
+
+@pytest.mark.parametrize("kind", ["D", "R"])
+def test_the_frozen_series_gives_each_number_to_one_entry(kind):
+    """Still worth checking, because the frozen entries are what the source
+    tree's several hundred references point at. A duplicate there sends a
+    reader to the wrong decision."""
+    numbers = _series(kind)
+    seen, repeated = set(), []
+    for n in numbers:
+        (repeated.append(n) if n in seen else None)
+        seen.add(n)
+    assert not repeated, (
+        f"{kind}{repeated[0]} heads two entries in docs/DECISIONS.md. These are "
+        f"frozen and referenced from source; renumbering one breaks those "
+        f"references, so the fix is to merge or retitle the duplicate. "
+        "All: " + ", ".join(f"{kind}{n}" for n in repeated)
+    )
+
+
+def test_numbers_may_skip_and_may_arrive_out_of_order():
+    """Deliberately asserting the *absence* of two rules, because both look
+    like obvious guards and both are wrong.
+
+    Issue numbers skip by nature -- issue 8 and issue 34 with nothing
+    between -- and arrive in whatever order the work finished, so neither
+    contiguity nor sorting can be required. A contiguity check was written
+    and removed the same afternoon: while another branch held a number, this
+    checkout was legitimately missing it and the check false-failed.
+
+    The frozen series is not sorted either: the 2026-09-02 revision section
+    holds D42-D48 after the iteration that reached D73.
+    """
+    assert _BY_ISSUE.findall(_text()), "no issue-numbered decisions yet"
+    sequential = _series("D")
+    assert sequential != sorted(sequential), (
+        "the frozen series is now in ascending order. Fine, but do not add a "
+        "test requiring it -- see this test's docstring."
+    )
+
+
+
+
+# --- nothing ships a half-finished merge --------------------------------------
+
+#: Git's markers. Written split so this file does not trip its own check.
+_CONFLICT = tuple("<" * 7), tuple(">" * 7)
+
+
+def test_no_tracked_file_carries_a_merge_conflict_marker():
+    """`git add` does not care whether you finished resolving. Staging a file
+    that still has markers and running `rebase --continue` commits them, with
+    no warning -- which is exactly how a decision-log entry reached this
+    branch cut in half.
+
+    Cheap to check, and it catches the whole class: a resolution that looked
+    done, a script whose replacement silently did not match, a bad merge that
+    nobody re-read.
+    """
+    opener, closer = "".join(_CONFLICT[0]), "".join(_CONFLICT[1])
+    offenders = []
+    for path in REPO.rglob("*"):
+        parts = {p.lower() for p in path.relative_to(REPO).parts}
+        if parts & {".git", ".venv", "venv", "__pycache__", ".pytest_cache", "node_modules"}:
+            continue
+        if not path.is_file() or path.suffix not in {".py", ".md", ".toml", ".json", ".cfg"}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if line.startswith(opener) or line.startswith(closer):
+                offenders.append(f"{path.relative_to(REPO)}:{lineno}")
+                break
+    assert not offenders, (
+        "unresolved merge conflict markers are committed in: "
+        + ", ".join(offenders)
+        + " -- finish the resolution and amend, rather than leaving a file "
+        "cut in half."
     )
