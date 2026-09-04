@@ -32,6 +32,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 import gi
 
@@ -243,6 +244,22 @@ def _raise_modal(main, status):
     return False
 
 
+def _hang(seconds):
+    """Stop servicing the main loop, without exiting.
+
+    D4's unresponsive control, in the shape Linux gives it. On Windows a
+    window whose thread never pumps cannot service WM_GETTEXT and a
+    cross-process send hits its timeout. Here the equivalent is worse in
+    kind: AT-SPI is D-Bus, so an application that stops running its main
+    loop stops answering the *bus*, and a caller with no per-call timeout
+    waits on it rather than on one control.
+    """
+    _event(event="hanging", seconds=seconds)
+    time.sleep(seconds)
+    _event(event="resumed")
+    return False
+
+
 def _grab_foreground(main, status):
     """The one place present() is called. This is what a foreground grab *is*,
     and it is here so L6 can measure a real one rather than assume."""
@@ -273,6 +290,12 @@ def build(options):
     secret.set_text("hunter2")
     _label(secret, "password entry")
 
+    # Two ways to hide a value, because they may not look the same to AT-SPI:
+    # an Entry told not to show its characters, and the dedicated widget.
+    secret2 = Gtk.PasswordEntry()
+    secret2.set_text("hunter3")
+    _label(secret2, "password widget")
+
     bound = _bound_entry(mirror)
     drawn = _drawn_button(status)
     grid = _grid(status)
@@ -281,7 +304,7 @@ def build(options):
     toolbar = _toolbar()
 
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-    for child in (toolbar, plain, secret, bound, mirror, drawn, grid,
+    for child in (toolbar, plain, secret, secret2, bound, mirror, drawn, grid,
                   stack, tabs, status):
         box.append(child)
     main.set_child(box)
@@ -296,6 +319,8 @@ def build(options):
         GLib.timeout_add(options.modal_after, _raise_modal, main, status)
     if options.present_after:
         GLib.timeout_add(options.present_after, _grab_foreground, main, status)
+    if options.hang_after:
+        GLib.timeout_add(options.hang_after, _hang, options.hang_for)
 
     # The grid holds focus from the start, so the copy route can be measured
     # without a window manager to route focus for us.
@@ -304,7 +329,7 @@ def build(options):
     STATE.update(main=main, status=status, grid=grid, bound=bound,
                  mirror=mirror, page_buttons=page_buttons,
                  widgets={"drawn_button": drawn, "grid": grid, "plain_edit": plain,
-                          "password": secret, "bound_edit": bound,
+                          "password": secret, "password_widget": secret2, "bound_edit": bound,
                           "bound_mirror": mirror, "status": status,
                           "tabs": tabs, "toolbar": toolbar, "pages": stack})
     return main
@@ -341,6 +366,7 @@ def announce(main):
             "status": "status",
             "plain_edit": "plain entry",
             "password": "password entry",
+            "password_widget": "password widget",
             "bound_edit": "bound entry",
             "bound_mirror": "bound mirror",
             "drawn_button": "Recalculate",
@@ -366,6 +392,12 @@ def main(argv=None):
     parser.add_argument("--grid-no-copy", dest="grid_copies", action="store_false",
                         help="make the grid ignore Ctrl+C, so an honest "
                              "'no route works' verdict can be tested")
+    parser.add_argument("--hang-after", type=int, default=0, metavar="MS",
+                        help="stop servicing the main loop this long after start; "
+                             "0 disables. The application stops answering the bus, "
+                             "not just one control.")
+    parser.add_argument("--hang-for", type=float, default=20.0, metavar="S",
+                        help="how long the hang lasts")
     parser.add_argument("--quit-after", type=int, default=0, metavar="MS",
                         help="exit this long after start; for unattended runs")
     parser.set_defaults(offscreen=True, grid_copies=True)

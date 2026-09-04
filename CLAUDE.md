@@ -11,12 +11,19 @@ not just the outcome. New decisions go at the end of the current iteration,
 numbered, with the evidence.
 
 **Check the highest number on `origin/main`, not in your checkout, before
-taking one.** Two sessions on two machines both took D76 within a minute of
-each other, and one had to be renumbered after it was already pushed. The
-numbers are unique and gap-free, and `tests/test_structure.py` enforces both
-— on your branch, which is the cheap moment. What it deliberately does *not*
-enforce is order: the log is not sorted, and the 2026-09-02 revision section
-holds D42–D48 after the iteration that reached D73.
+taking one — and expect to lose the race anyway.** It has happened twice:
+D76 and D77 were each allocated by two machines within a minute, and the
+same entry was renumbered both times. `tests/test_structure.py` enforces
+that a number appears once *in one file*, which is the cheap half; it cannot
+see across branches, so a collision surfaces at the second merge.
+
+Two rules it deliberately does **not** enforce, both because the obvious
+guard is wrong:
+
+- **Gaps are fine.** While another branch holds D77, your checkout is
+  legitimately missing it. A gap-free check false-fails constantly.
+- **Order is not required.** The log is not sorted: the 2026-09-02 revision
+  section holds D42–D48 after the iteration that reached D73.
 
 ## Environment-gated issues
 

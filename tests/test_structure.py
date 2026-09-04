@@ -290,38 +290,31 @@ def test_the_decision_log_gives_each_number_to_one_entry(kind):
         f"{kind}{repeated[0]} is used twice in docs/DECISIONS.md. Two sessions "
         f"probably allocated it in parallel; renumber the one that has not "
         f"merged yet -- the merged one keeps the number -- and say so in the "
-        f"entry, the way D77 does. All duplicates: "
+        f"entry, the way D78 does. All duplicates: "
         + ", ".join(f"{kind}{n}" for n in repeated)
     )
 
 
-@pytest.mark.parametrize("kind", ["D", "R"])
-def test_the_decision_log_skips_no_numbers(kind):
-    """A gap means an entry was renumbered or dropped and its old number never
-    reused. That is worth catching for the same reason the log leaves what it
-    overturned in place: the reader who goes looking for the missing number
-    should find something, not a hole."""
-    numbers = _series(kind)
-    highest, count = max(numbers), len(set(numbers))
-    missing = sorted(set(range(1, highest + 1)) - set(numbers))
-    if not missing:
-        return
+def test_a_gap_in_the_numbering_is_tolerated():
+    """Deliberately asserting the *absence* of a rule, like the ordering test
+    below, because the obvious guard is wrong and this one was written, run,
+    and removed inside a single afternoon.
 
-    # One mistyped high number would otherwise report every number under it as
-    # missing, burying the actual cause. Say the likely cause first.
-    shown = ", ".join(f"{kind}{n}" for n in missing[:5])
-    if len(missing) > 5:
-        shown += f", and {len(missing) - 5} more"
-    hint = (
-        f"the highest is {kind}{highest} but there are only {count} entries, "
-        f"so {kind}{highest} is more likely a typo than {len(missing)} lost "
-        f"decisions -- check it first. "
-    ) if highest > count + 1 else ""
-    raise AssertionError(
-        f"docs/DECISIONS.md skips {shown}. {hint}"
-        f"Either restore the entry, or give the free number to the next one "
-        f"rather than adding to the end."
-    )
+    A gap-free check looks right and false-fails constantly. Two branches
+    open at once is the normal state here: one takes D77, the other reads the
+    same `main`, takes D78, and its own checkout is now missing D77 -- which
+    exists, on a branch this test cannot see. That happened within an hour of
+    the check being added, on the branch that added it.
+
+    A permanently lost decision is a real but small problem, and a reader
+    hunting a missing number will find it. A duplicate costs rework on a
+    pushed branch, twice so far. So uniqueness is the guard and contiguity is
+    not; the numbers are still allocated contiguously by convention, and
+    `CLAUDE.md` says to read the highest from `origin/main` rather than from
+    your checkout.
+    """
+    numbers = _series("D")
+    assert numbers, "the decision log has no numbered decisions at all"
 
 
 def test_the_decision_log_is_not_required_to_be_in_order():

@@ -20,13 +20,36 @@ import gi
 gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi  # noqa: E402
 
+#: States L2 cares about. Note what is *not* here: AT-SPI has no PROTECTED
+#: state at all -- 45 members and none of them names one -- which is why
+#: `is_protected` cannot be answered the way the Windows backend answers it.
+_STATES = ("EDITABLE", "FOCUSABLE", "SENSITIVE", "SHOWING", "VISIBLE",
+           "READ_ONLY", "SINGLE_LINE")
+
+
+def _text_of(node, interfaces):
+    """What the Text interface gives back, or why it gave nothing."""
+    if "Text" not in interfaces:
+        return None
+    try:
+        count = Atspi.Text.get_character_count(node)
+        return Atspi.Text.get_text(node, 0, count)
+    except Exception as exc:
+        return f"<{type(exc).__name__}>"
+
 
 def _walk(node, depth=0, out=None):
     out = out if out is not None else []
     try:
+        interfaces = sorted(node.get_interfaces())
+        states = node.get_state_set()
         out.append({"depth": depth, "role": node.get_role_name(),
                     "name": node.get_name(),
-                    "children": node.get_child_count()})
+                    "children": node.get_child_count(),
+                    "interfaces": interfaces,
+                    "text": _text_of(node, interfaces),
+                    "states": [s for s in _STATES
+                               if states.contains(getattr(Atspi.StateType, s))]})
     except Exception:
         return out
     for i in range(node.get_child_count()):

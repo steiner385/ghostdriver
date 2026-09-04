@@ -2553,11 +2553,16 @@ session, not a line of code.
 
 ### D#8. L1 stands up, and the isolation needs a session bus of its own
 
-*(Two machines allocated D76 within the same minute -- the real-target
-validation run on the Windows box, and this. That one kept the number and
-this one moved, which is the cheap resolution once, and a standing hazard
-of numbering a shared log by hand. Recorded because the next pair of
-parallel sessions will hit it again.)*
+*(This entry has now been renumbered twice. It was D76 until the real-target
+validation run took that, and D77 until the click-surface work took that.
+Both times two machines branched from the same `main`, read the same highest
+number, and both were right. `tests/test_structure.py` catches a duplicate
+inside one file, which is the easy half; it cannot see across branches, so
+the collision surfaces at the second merge. The remaining guard is the
+convention in CLAUDE.md -- read the highest number from `origin/main`, not
+from your checkout -- and even that loses a race this tight. Left here as
+the evidence that hand-numbering a shared log does not survive two parallel
+sessions.)*
 
 **Correcting D75 first.** D75 said no window manager was installed and that
 `at-spi-bus-launcher` and the AT-SPI bindings were missing. All three were
@@ -2610,9 +2615,84 @@ operator's applications ever appear, which is the check that makes
   password one is not a distinct role, so `is_protected` cannot be answered
   from the role and must read `STATE_PROTECTED` (D33's constraint 4, D37,
   D38). Confirming that state is L2's job.
+  **Wrong, corrected by D79: there is no `STATE_PROTECTED`.** AT-SPI's
+  `StateType` has 45 members and none of them names one. The sentence was
+  written from the Windows model rather than from a measurement, which is
+  the mistake this document exists to prevent.
 
 **Cost.** The nested stack takes several seconds to stand up, so the L1 tests
 share one and are marked slow.
+
+### D79. AT-SPI gives out the password, and hides which field is one
+
+**Context.** L2 asks which controls answer `Text` and which only `Name`
+(`docs/LINUX.md` measurement 2). The answer is dull -- entries answer
+`Text`, buttons do not -- and on the way to it two things turned up that
+are not about reading at all. Measured against GTK 4.14.5.
+
+**First: there is no `PROTECTED` state.** D78 said `is_protected` would have
+to read `STATE_PROTECTED`. It cannot: AT-SPI's `StateType` has 45 members
+and none of them is one. That sentence was written from the Windows model
+(`EM_GETPASSWORDCHAR`, D33 constraint 4) rather than from a measurement.
+Corrected in place there.
+
+**Second: one of the two ways to make a password field is invisible.**
+
+| Widget | role | states | interfaces |
+|---|---|---|---|
+| `Gtk.Entry` | `text` | EDITABLE, FOCUSABLE, SENSITIVE, SHOWING, VISIBLE | Accessible, Action, EditableText, Text |
+| `Gtk.Entry` + `set_visibility(False)` | `text` | *identical* | *identical* |
+| `Gtk.PasswordEntry` | `password text` | *identical* | *identical* |
+
+The dedicated widget carries a distinct **role**, and that is the only
+signal there is. An ordinary entry told not to show its characters is
+indistinguishable from one that does -- same role, same states, same
+interfaces. So a Linux `is_protected` built on the role will be right about
+`Gtk.PasswordEntry` and wrong about the other, and the other is the older
+and commoner idiom.
+
+**Third, and worse: both hand out the secret.**
+
+```
+password entry   role=text           get_text() -> 'hunter2'
+password widget  role=password text  get_text() -> 'hunter3'
+```
+
+The screen shows bullets; the bus returns the value. `Atspi.Text.get_text`
+does not redact, for either widget.
+
+**Why this matters more than it would on Windows.** D37 says a password
+field is protected rather than unresponsive, and D38 that nothing types into
+a field that hides its contents. Both were built on `EM_GETPASSWORDCHAR`,
+which answers the question honestly, and on a read path that never had the
+value to leak in the first place. On Linux the toolkit enforces neither: a
+`read` that passed the `Text` interface through would put a real password
+into a tool result, into the per-call trace the operator directory keeps
+(D62), and into a model's context.
+
+**So the driver has to enforce what the toolkit does not**, and it cannot
+do it reliably, because the signal is missing for the commonest case. The
+honest options, none of them free:
+
+1. **Refuse `Text` on anything with role `password text`,** and accept that
+   `Gtk.Entry(visibility=False)` slips through. Catches the widget a
+   modern application uses; misses the older idiom.
+2. **Never return `Text` from an editable single-line entry at all** unless
+   the caller has said it wants values. Safe and blunt: it takes ordinary
+   form-filling verification with it, which is most of what `read` is for.
+3. **Ask X, not AT-SPI.** GTK sets an input-purpose on password entries; if
+   that is visible over the bus as an attribute it would be a second signal.
+   `get_attributes()` returned only `toolkit=GTK` on all three here, so on
+   this evidence it is not -- but it was one measurement and worth a second.
+
+Not decided here. It is recorded, pinned by tests that fail if GTK ever
+changes either behaviour, and tracked, because choosing between those is a
+policy decision and the Linux backend is not built yet.
+
+**The tests assert the leak on purpose.** That is not approval. A test that
+says "the password comes back in cleartext" is the thing that will fail
+loudly on the day it stops being true, which is the day the driver can
+stop working around it.
 
 ## Open, for whoever picks this up
 
