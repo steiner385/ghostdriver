@@ -10,8 +10,14 @@ import os
 import stat
 
 from ghostdriver.consent import ConsentStore
+from tests.conftest import on_windows
 
 
+# The premise is Windows': a read-only *file* is undeletable there. On POSIX
+# deletion is a permission on the *directory*, so the entry is removed and the
+# test tears down against a file that is gone. The behaviour under test is
+# platform-neutral; only this way of provoking it is not.
+@on_windows
 def test_an_undeletable_stale_entry_is_skipped_not_fatal(tmp_path):
     folder = tmp_path / "consent"
     folder.mkdir()

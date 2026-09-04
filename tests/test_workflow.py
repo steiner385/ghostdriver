@@ -20,6 +20,7 @@ from ghostdriver.workflow import (
     dig,
     run_workflow,
 )
+from tests.conftest import on_windows
 
 # --- the operator directory -----------------------------------------------------
 
@@ -334,6 +335,8 @@ def test_the_report_leaves_pixels_out():
 
 # --- the interference watch, fed ---------------------------------------------------
 
+# Reaches InterferenceWatch's real defaults, which bind Win32 through winapi.
+@on_windows
 def test_the_watch_records_the_target_taking_the_foreground_and_cursor_moves():
     from ghostdriver.backends.windows.interference import InterferenceWatch
 

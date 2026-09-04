@@ -7,15 +7,13 @@ to the operator's desktop. No opt-in flag: a hidden-desktop target cannot
 disturb anyone, which is the point.
 """
 
-import ctypes
 import sys
 
 import pytest
 
-from tests.conftest import on_windows
+from tests.conftest import on_windows, user32
 
 pytestmark = [on_windows, pytest.mark.slow]
-user32 = ctypes.WinDLL("user32", use_last_error=True)
 
 COMMAND = [sys.executable, "-u", "-m", "tests.fixtureapp", "--onscreen"]
 
@@ -96,7 +94,7 @@ def test_the_launched_target_is_invisible_from_the_operators_desktop(box):
     from ghostdriver.backends.windows.enumerate import top_level_windows
 
     approved(box)
-    fg_before = user32.GetForegroundWindow()
+    fg_before = user32().GetForegroundWindow()
     launched = box.launch_isolated(COMMAND, tier="interactive", announces_pid=True)
     pid = launched["launched_pid"]
 
@@ -105,7 +103,7 @@ def test_the_launched_target_is_invisible_from_the_operators_desktop(box):
     assert top_level_windows(pid) == []
     box.click(launched["session_id"],
               'class=GhostFixtureCommandButton text="Apply"')
-    assert user32.GetForegroundWindow() == fg_before, "foreground never moved"
+    assert user32().GetForegroundWindow() == fg_before, "foreground never moved"
 
 
 def test_capture_of_a_hidden_target_is_a_real_png(box):

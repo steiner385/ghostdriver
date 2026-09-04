@@ -14,16 +14,23 @@ import time
 import psutil
 import pytest
 
-from ghostdriver.backends.windows.interference import InterferenceWatch
 from ghostdriver.consent import ConsentStore
 from ghostdriver.policy import ConsentSource
 from ghostdriver.session import SessionManager
 from ghostdriver.tools import Toolbox
 from tests.conftest import on_windows
 
+#: Every test here needs the Windows backend. The InterferenceWatch import is
+#: deferred into each test rather than taken at module scope: `interference`
+#: binds Win32 through `winapi`, and a module-scope import of it is a
+#: collection error on any other host, which aborts the whole run instead of
+#: skipping these tests.
+pytestmark = on_windows
+
 # --- the interference watch, fed a sequence ------------------------------------------
 
 def test_a_helper_taking_the_foreground_is_the_target_taking_it():
+    from ghostdriver.backends.windows.interference import InterferenceWatch
     clock = iter(range(100))
     watch = InterferenceWatch(10, family=lambda: [10, 42], now=lambda: next(clock),
                               foreground_pid=lambda: 0, cursor=lambda: (0, 0))
@@ -36,6 +43,7 @@ def test_a_helper_taking_the_foreground_is_the_target_taking_it():
 
 
 def test_moving_between_family_members_is_not_a_new_taking():
+    from ghostdriver.backends.windows.interference import InterferenceWatch
     clock = iter(range(100))
     watch = InterferenceWatch(10, family=lambda: [10, 42], now=lambda: next(clock),
                               foreground_pid=lambda: 0, cursor=lambda: (0, 0))
@@ -46,6 +54,7 @@ def test_moving_between_family_members_is_not_a_new_taking():
 
 
 def test_a_failing_family_snapshot_falls_back_to_the_target_alone():
+    from ghostdriver.backends.windows.interference import InterferenceWatch
     def boom():
         raise OSError("no snapshot")
 

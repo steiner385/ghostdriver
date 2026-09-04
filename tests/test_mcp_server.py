@@ -19,8 +19,12 @@ from tests.conftest import on_windows
 
 pytestmark = pytest.mark.slow
 
+# minversion, not just the name: 1.x is importable but renamed FastMCP to
+# MCPServer at the 2.0 boundary, so a 1.x install answers the import and then
+# fails every test with ModuleNotFoundError on an inner path. Skip instead.
 mcp = pytest.importorskip(
-    "mcp", reason="the protocol layer is an optional extra: pip install -e .[server]"
+    "mcp", minversion="2.1",
+    reason="the protocol layer is an optional extra: pip install -e .[server]"
 )
 
 READ_TOOLS = {

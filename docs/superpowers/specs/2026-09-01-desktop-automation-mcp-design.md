@@ -596,10 +596,15 @@ after the application self-foregrounds.
 
 ## 13. Open questions
 
-| Question | Resolution path |
-|---|---|
-| Does `WM_SETTEXT` propagate through toolkit data binding, or is `WM_CHAR` required? | Fixture item 4, step 5 of build order |
-| Do control classes beyond the proven one actuate identically? | Fixture items 1–2; then supervised probe phase 2 against a real target |
-| Can owner-drawn grid contents be read via clipboard or export? | Step 10; probe both before committing to OCR |
-| Does minimized-mode's freedom from focus theft hold over long runs? | Fixture item 5 with soak test; watchdog makes failure observable regardless |
-| Is `attach` to an existing process supportable under `hidden_desktop`? | Likely not — desktop assignment is fixed at process creation. Confirm and document as `Unsupported` |
+Answered rows are marked rather than deleted, the way the decision log
+leaves what it overturned in place: a question that quietly disappears is
+one a later phase re-answers without knowing it was already settled.
+Reviewed 2026-09-04 against the log.
+
+| Question | Resolution path | Status |
+|---|---|---|
+| Does `WM_SETTEXT` propagate through toolkit data binding, or is `WM_CHAR` required? | Fixture item 4, step 5 of build order | **Answered — D25.** Neither: `WM_SETTEXT` was *deleted*, not kept as a fast path, because it left the displayed value and the bound value disagreeing (D21). D19 records why it is sent rather than posted; D26 the cadence that replaced it. |
+| Do control classes beyond the proven one actuate identically? | Fixture items 1–2; then supervised probe phase 2 against a real target | **Narrowed — D56.** Elements that are not windows can be named, driven and denied, which covers the classes the fixture can reach. The half this question was really asking — how a *real* target's classes behave — is untouched and is the point of Gate 2 (`docs/VALIDATION.md`). |
+| Can owner-drawn grid contents be read via clipboard or export? | Step 10; probe both before committing to OCR | **Open.** The mechanism exists (D65, D70) but has never been run against a real owner-drawn grid, and the export and hidden-accessible-surface routes are unprobed. This is the gap named in "Open, for whoever picks this up", and the gate on OCR (§12). |
+| Does minimized-mode's freedom from focus theft hold over long runs? | Fixture item 5 with soak test; watchdog makes failure observable regardless | **Open.** The strategy is wired and nothing ever un-minimizes (D49, D55), and the watchdog makes a failure observable — but the soak test named here does not exist: `soak` appears in this document and nowhere in `tests/`. The question is *unmeasured*, not answered. |
+| Is `attach` to an existing process supportable under `hidden_desktop`? | Likely not — desktop assignment is fixed at process creation. Confirm and document as `Unsupported` | **Answered — D53.** Confirmed: `hidden_desktop` launches the direct pid and is launch-only. The guess in the middle column was right, and is now a measurement rather than a guess. |

@@ -162,3 +162,90 @@ def test_no_tool_module_outgrows_the_limit_the_split_set():
         if sum(1 for _ in p.open(encoding="utf-8")) > TOOL_MODULE_LIMIT
     }
     assert not over, f"tool modules over {TOOL_MODULE_LIMIT} lines: {over}"
+
+
+# --- a test module imports on any host ----------------------------------------
+
+TESTS = Path(__file__).resolve().parent
+
+#: Run as subprocesses (`python -m tests.fixtureapp`, `... .fixtureapp_gtk`)
+#: and never imported by the test process, so each is its platform's toolkit at
+#: module scope on purpose.
+IMPORT_TIME_PLATFORM_ALLOWED = {"fixtureapp.py", "fixtureapp_gtk.py"}
+
+#: Modules that exist on one platform only. `ctypes.WinDLL` raises
+#: AttributeError off Windows; `gi` and `pyatspi` are simply absent off a
+#: Linux desktop. Both directions are named so the guard is symmetric -- the
+#: Linux backend must not do to Windows what four modules did to Linux (D74).
+PLATFORM_MODULES = {"gi", "pyatspi", "Xlib"}
+
+
+def _module_scope(tree):
+    """Statements that run at import: the module body, and the bodies of the
+    `if`/`try` it nests -- but not a function or class body, which does not
+    run until something calls it."""
+    stack, out = list(tree.body), []
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        out.append(node)
+        for field in ("body", "orelse", "finalbody", "handlers"):
+            stack.extend(getattr(node, field, []) or [])
+    return out
+
+
+def _binds_a_platform(node):
+    """A platform binding: `ctypes.WinDLL(...)`/`ctypes.windll`, or an import of
+    a backend subpackage -- which binds one for you, transitively."""
+    for child in ast.walk(node):
+        if isinstance(child, ast.Attribute) and child.attr in {"WinDLL", "windll"}:
+            return "ctypes." + child.attr
+        if isinstance(child, ast.ImportFrom):
+            module = child.module or ""
+            if module.startswith(f"{PACKAGE}.backends."):
+                return module
+            if module.split(".")[0] in PLATFORM_MODULES:
+                return module
+        if isinstance(child, ast.Import):
+            for alias in child.names:
+                if alias.name.startswith(f"{PACKAGE}.backends."):
+                    return alias.name
+                if alias.name.split(".")[0] in PLATFORM_MODULES:
+                    return alias.name
+    return None
+
+
+def test_no_test_module_binds_a_platform_at_import_time():
+    """`pytestmark = on_windows` skips the *tests*; it does not stop the
+    *module* running. A module that binds Win32 at import raises during
+    collection -- and a collection error is not a skip, it aborts the whole
+    run, so four such modules took the entire suite down on Linux and hid
+    the ~470 tests that had nothing to do with Windows.
+
+    The rule was already the practice -- conftest keeps its Win32 in strings
+    run only in the subprocess, and the windows test modules call WinDLL
+    inside their functions -- but it lived in two comments, so nothing
+    failed when four modules did it the other way. D60's lesson: a promise
+    that lives only in prose is one a later change breaks without noticing.
+
+    Stated per-platform rather than per-symptom, so the Linux backend cannot
+    do the mirror image of this to Windows.
+    """
+    offenders = {}
+    for path in sorted(TESTS.glob("*.py")):
+        if path.name in IMPORT_TIME_PLATFORM_ALLOWED:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in _module_scope(tree):
+            found = _binds_a_platform(node)
+            if found:
+                offenders.setdefault(path.name, (found, node.lineno))
+                break
+    assert not offenders, (
+        "test modules bind a platform at import time, which is a collection "
+        "error rather than a skip and takes the whole run down on another "
+        "host. Move the binding inside the function that uses it, the way "
+        "tests/test_windows_actuate.py does: "
+        + ", ".join(f"{n} ({w} at line {ln})" for n, (w, ln) in sorted(offenders.items()))
+    )
