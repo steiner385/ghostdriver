@@ -1,24 +1,16 @@
 {
   "_comment": [
-    "A curated profile document. `ghostdriver probe --out` emits everything",
-    "here except `denylist` and `environment_allowlist`, which it leaves",
-    "empty for a human to fill in. Both are policy; everything else is",
-    "evidence.",
+    "A curated profile document; docs/PROFILE.md explains each key.",
+    "`ghostdriver probe --out` emits evidence (matched_profile, surfaces);",
+    "denylist, input_sensitivity, busy_indicator and safe_controls are",
+    "policy and measurement a person writes. `ghostdriver check-profile`",
+    "reads one back and says what the tool will make of it.",
     "",
-    "Until environment_allowlist has an entry, `attach` refuses: an empty",
-    "list means no environment has been approved, not that none is",
-    "required.",
-    "",
-    "Note: a re-probe overwrites this file and takes the curated policy with",
-    "it. Keep a copy, or keep policy in a file the probe does not write."
+    "Which targets may be driven is not in here: that is decided at",
+    "attach, by the person, for the life of the target process (R1, R1a)."
   ],
 
   "matched_profile": "L1",
-
-  "environment_allowlist": [
-    "http://dev-host:8183/dev-environment/*",
-    "https://staging.example.internal/*"
-  ],
 
   "denylist": [
     "*delete*",
@@ -26,8 +18,11 @@
     "*approve*",
     "TabItem:Change Log",
     "MenuItem#3@ToolbarWindow32",
-    "*complete task*",
-    "*release*"
+    {
+      "within": "class=VendorGrid visible=true",
+      "region": {"left": 0, "top": 24, "right": 600, "bottom": 44},
+      "note": "the release row: never clicked"
+    }
   ],
 
   "input_sensitivity": [
@@ -44,6 +39,19 @@
       "surface": "*",
       "evidence": "the native shell does not inspect input timing",
       "recorded": "2026-09-02"
+    }
+  ],
+
+  "busy_indicator": {
+    "region": {"left": 9, "top": 878, "right": 400, "bottom": 895},
+    "ink_above": 0.05
+  },
+
+  "safe_controls": [
+    {
+      "locator": "class=VendorButton text=\"Expand All\"",
+      "expect": {"locator": "class=VendorPanel text=\"Instructions\""},
+      "note": "expands the instruction blocks; nothing is committed"
     }
   ]
 }

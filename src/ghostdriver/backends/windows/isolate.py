@@ -212,6 +212,12 @@ class MinimizedWatch:
     def _run(self) -> None:
         assert self.main_hwnd is not None
         while not self._stop.is_set():
+            if not winapi.user32.IsWindow(wintypes.HWND(self.main_hwnd)):
+                # The window we locked onto is gone: the process exited.
+                # Stop rather than keep sampling self.pid, which the OS may
+                # by now have reused for an unrelated process -- a leaked
+                # watch must never minimize a stranger's window (D71).
+                break
             try:
                 with self._lock:
                     watch_once(self._pids(), self.main_hwnd, self.dog)

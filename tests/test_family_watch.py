@@ -113,3 +113,26 @@ def test_a_child_process_window_on_screen_is_caught_photographed_and_put_away():
         for sid in list(box._watches):
             box.release(sid)
         stop(proc, handles["pid"], *( [child_pid] if child_pid else [] ))
+
+
+@pytest.mark.slow
+@on_windows
+def test_a_watch_stops_when_its_window_is_gone_so_it_cannot_touch_a_reused_pid():
+    """The amplifier behind a rare cross-test flake: a watch whose target
+    exited kept sampling its pid, which the OS could reuse for an unrelated
+    process (D71). A watch whose locked window is gone stops itself."""
+    from ghostdriver.backends.windows.isolate import MinimizedWatch
+
+    proc, handles = start()
+    watch = MinimizedWatch(handles["pid"])
+    try:
+        watch.start()
+        time.sleep(0.3)
+        assert watch._thread.is_alive()
+    finally:
+        stop(proc, handles["pid"])
+    deadline = time.monotonic() + 5
+    while watch._thread.is_alive() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert not watch._thread.is_alive(), "the watch should stop once its window is gone"
+    watch.stop()

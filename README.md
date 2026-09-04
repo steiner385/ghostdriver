@@ -173,7 +173,8 @@ covers the application's whole process tree: the file dialog a browser
 opens in a helper process is the application the operator approved, not a
 new question, and a session sees that dialog's windows with
 `all_windows=true` without a second attach. A profile
-document is optional; its denylist names controls by caption or identity,
+document is optional (every key is described in `docs/PROFILE.md`, and
+`ghostdriver check-profile <name>` reads one back); its denylist names controls by caption or identity,
 and, since D72, by *place*: `{"within": locator, "region": {left, top,
 right, bottom}, "note"}` refuses any actuation aimed inside that rectangle
 of the named window -- a grid cell, a painted button.

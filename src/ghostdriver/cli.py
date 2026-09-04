@@ -7,6 +7,7 @@ server arrives in Iteration 2 and calls the same functions.
 
 import argparse
 import json
+import os
 import sys
 
 from .model.locator import Locator
@@ -152,6 +153,15 @@ def build_parser() -> argparse.ArgumentParser:
     trace.add_argument("--all-files", action="store_true",
                        help="Every trace file, not just the newest")
     trace.add_argument("--operator-dir", default=None, help=f"Overrides {ENV_VAR}")
+
+    check = sub.add_parser(
+        "check-profile",
+        help=("Read a profile document back and say what the tool will make of it: "
+              "denylist names and places, sensitivity notes, busy indicator, safe "
+              "controls; warns about keys it does not read."),
+    )
+    check.add_argument("profile", help="A bare name under the operator directory, or a path")
+    check.add_argument("--operator-dir", default=None, help=f"Overrides {ENV_VAR}")
 
     return parser
 
@@ -627,6 +637,59 @@ def cmd_restore(pid: int) -> int:
     return 0
 
 
+KNOWN_PROFILE_KEYS = {
+    "_comment", "matched_profile", "denylist", "input_sensitivity", "busy_indicator",
+    "safe_controls", "grid_strategy", "grid_evidence", "actuation_map", "focus_behavior",
+    "surfaces", "toolkit", "probed",
+}
+RETIRED_PROFILE_KEYS = {"environment_allowlist": "no longer read: which targets may be driven is decided at attach, by the person (R1, R1a)"}
+
+
+def cmd_check_profile(profile: str, operator_dir: str | None = None) -> int:
+    """Load a profile the way attach does, and print what it holds."""
+    import json as _json
+    from pathlib import Path
+
+    from .model.result import GhostdriverError
+    from .operator import profile_location
+    from .session import Profile
+
+    if operator_dir:
+        os.environ[ENV_VAR] = operator_dir
+    location = Path(profile_location(profile))
+    try:
+        loaded = Profile.load(location)
+    except GhostdriverError as exc:
+        print(f"error: {exc.message}", file=sys.stderr)
+        return 2
+    document = _json.loads(location.read_text(encoding="utf-8"))
+    print(f"profile         : {location}")
+    print(f"matched_profile : {loaded.matched_profile}")
+    print(f"denylist        : {len(loaded.denylist)} name(s), {len(loaded.deny_regions)} place(s)")
+    for name in loaded.denylist:
+        print(f"  name   {name}")
+    for place in loaded.deny_regions:
+        r = place["region"]
+        print(f"  place  within {place['within']!r} at ({r['left']},{r['top']})-({r['right']},{r['bottom']})"
+              + (f" -- {place['note']}" if place.get("note") else ""))
+    print(f"sensitivity     : {len(loaded.sensitivity.notes)} note(s)")
+    busy = loaded.busy_indicator
+    if not busy:
+        print("busy_indicator  : none (actuation results will not say still_arriving; wait_idle is refused)")
+    elif busy.get("locator"):
+        print(f"busy_indicator  : locator {busy['locator']!r}")
+    else:
+        r = busy.get("region") or {}
+        print(f"busy_indicator  : region ({r.get('left')},{r.get('top')})-({r.get('right')},{r.get('bottom')}) ink_above {busy.get('ink_above', 0.02)}")
+    print(f"safe_controls   : {len(loaded.safe_controls)}")
+    for key in document:
+        if key in RETIRED_PROFILE_KEYS:
+            print(f"warning: {key} is {RETIRED_PROFILE_KEYS[key]}")
+        elif key not in KNOWN_PROFILE_KEYS:
+            print(f"warning: unknown key {key!r}; the tool reads nothing from it")
+    return 0
+
+
 def cmd_trace(tail: int, session: str | None, all_files: bool,
               operator_dir: str | None = None) -> int:
     """Print recent tool calls from the trace, one line each."""
@@ -765,6 +828,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "list-workflows":
         return cmd_list_workflows(getattr(args, "operator_dir", None))
+    if args.command == "check-profile":
+        return cmd_check_profile(args.profile, args.operator_dir)
     if args.command == "trace":
         return cmd_trace(args.tail, args.session, args.all_files, args.operator_dir)
     if args.command == "run-workflow":
