@@ -103,8 +103,7 @@ class LifecycleTools(_ToolboxCore):
         """Record which targets the operator approved or ruled out.
 
         Session-scoped and revisable: a later decision replaces an earlier one.
-        Restricting a target that already has an open session takes effect
-        immediately -- the next call on that session refuses (D64 says why).
+        Restricting a target with an open session stops it at its next call (D64).
         """
         recorded = []
         stopped: list[str] = []
@@ -147,6 +146,7 @@ class LifecycleTools(_ToolboxCore):
         tier: str = "read_only",
         profile_path: str | None = None,
         isolation: str = "none",
+        clipboard: bool = False,
     ) -> dict:
         """Open a session against a target the operator has approved.
 
@@ -192,8 +192,7 @@ class LifecycleTools(_ToolboxCore):
             session = self.sessions.attach(
                 pid,
                 command_line=command_line,
-                tier=Tier(tier),
-                profile=profile,
+                tier=Tier(tier), profile=profile, clipboard=clipboard,
             )
         except ConsentRequired as exc:
             endpoints = extract_endpoints(command_line)
@@ -220,6 +219,7 @@ class LifecycleTools(_ToolboxCore):
         summary = session.summary()
         summary["ok"] = True
         summary["isolation"] = strategy.value
+        summary["clipboard"] = session.clipboard  # may this session write it? (D70)
         if strategy is Isolation.MINIMIZED:
             from ..backends import current
             MinimizedWatch = current().MinimizedWatch

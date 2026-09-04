@@ -52,6 +52,8 @@ _WHERE: dict[str, str | None] = {
     "assess_uia": "uia", "assess_msaa": "msaa",
     "verbs": None, "NAMED_KEYS": "input", "EDIT_ACTIONS": "input", "button_pair": "input",
     "read_clipboard_text": "grid",
+    "snapshot_clipboard": "grid",
+    "restore_clipboard": "grid",
     "ink_fraction": "capture",
     "deepest_child_at": "input",
     "copy_route": "grid", "focus_route": "grid",

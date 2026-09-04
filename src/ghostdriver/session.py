@@ -108,6 +108,10 @@ class Session:
     grant: Grant
     command_line: tuple[str, ...] = ()
     opened_at: float = field(default_factory=time.time)
+    #: Whether this session may write the person's clipboard -- the grid
+    #: copy route needs to, nothing else does (D70). Off unless asked for
+    #: at attach.
+    clipboard: bool = False
     #: How this session's backend calls reach the target. Normally None --
     #: the call runs on the calling thread. A hidden-desktop session sets a
     #: runner that marshals every target-touching call onto the one thread
@@ -299,6 +303,7 @@ class SessionManager:
         tier: Tier = Tier.READ_ONLY,
         profile: Profile | None = None,
         runner: Callable[[Callable[[], Any]], Any] | None = None,
+        clipboard: bool = False,
     ) -> Session:
         """Open a session against `pid`, if it has been consented to.
 
@@ -334,6 +339,7 @@ class SessionManager:
             grant=grant,
             command_line=tuple(command_line),
             runner=runner,
+            clipboard=clipboard,
         )
         self._sessions[session.session_id] = session
         return session

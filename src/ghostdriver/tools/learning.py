@@ -9,6 +9,7 @@ from .core import (
     _element,
     _error,
 )
+from .guidance import CLIPBOARD_NOT_ALLOWED
 
 
 class LearningTools(_ActingCore):
@@ -261,15 +262,18 @@ class LearningTools(_ActingCore):
 
         # Routed through the session: the focus re-scan and the clipboard
         # copy both have to run where the target's windows are.
+        may_copy = allow_clipboard and session.clipboard
         finding = find_grid_strategy(GridProbe(
             accessible_on_focus=lambda: session.run(lambda: focus_route(node)),
             clipboard_copy=(
                 (lambda: session.run(lambda: copy_route(node)))
-                if allow_clipboard else None
+                if may_copy else None
             ),
         ))
         report = {"ok": True, "locator": locator, "element": _element(node),
                   **finding.to_dict()}
+        if allow_clipboard and not session.clipboard:
+            report["clipboard"] = CLIPBOARD_NOT_ALLOWED
         if finding.strategy.value == "unknown":
             report["meaning"] = _unknown_meaning(len(finding.attempts), allow_clipboard)
 

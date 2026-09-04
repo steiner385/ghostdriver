@@ -33,7 +33,8 @@ where = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
 markers = [
-    "slow: launches an engine, a hidden desktop, a server, or waits on a watchdog; excluded from the quick gate (pytest -m \"not slow\")",
+    "slow: launches an engine, a hidden desktop, a server, or waits on a watchdog; excluded from the quick gate (pytest -m \"not slow and not clipboard\")",
+    "clipboard: writes the person's clipboard (put back whole afterwards); excluded from the quick gate, since the person may be using it",
 ]
 
 [tool.ruff]

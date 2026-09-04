@@ -190,7 +190,8 @@ def test_capture_refuses_a_path_as_a_name(app, tmp_path, monkeypatch):
 
 # --- 5. the clipboard read -----------------------------------------------------------
 
-def test_read_clipboard_returns_what_the_target_copied(app):
+@pytest.mark.clipboard
+def test_read_clipboard_returns_what_the_target_copied(app, preserved_clipboard):
     from ghostdriver.backends.windows.grid import write_clipboard_text
 
     box, session = session_for(app["pid"])

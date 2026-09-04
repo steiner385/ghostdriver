@@ -109,20 +109,21 @@ def test_find_says_its_frame(app):
 
 # --- 2. a value can be delivered whole -----------------------------------------------
 
-def test_paste_delivers_the_whole_value_and_restores_the_clipboard(app):
-    from ghostdriver.backends.windows.grid import read_clipboard_text, write_clipboard_text
-    from ghostdriver.backends.windows.input import paste_text
+def test_the_whole_value_rung_touches_no_clipboard(app):
+    """D63 pasted; D70 inserts through the control's own edit path instead,
+    because the clipboard is the person's. The sequence number proves it."""
+    import ctypes
+
+    from ghostdriver.backends.windows.input import insert_text
     from ghostdriver.backends.windows.text import read_window_text
 
-    write_clipboard_text("what was there before")
-    try:
-        assert paste_text(app["plain_edit"], "PASTED-WHOLE-0001")
-        time.sleep(0.2)
+    before = ctypes.windll.user32.GetClipboardSequenceNumber()
 
-        assert read_window_text(app["plain_edit"]) == "PASTED-WHOLE-0001"
-        assert read_clipboard_text() == "what was there before"
-    finally:
-        write_clipboard_text("")
+    assert insert_text(app["plain_edit"], "WHOLE-0001")
+    time.sleep(0.2)
+
+    assert read_window_text(app["plain_edit"]) == "WHOLE-0001"
+    assert ctypes.windll.user32.GetClipboardSequenceNumber() == before
 
 
 def test_set_value_names_the_route_that_delivered(app):
@@ -145,24 +146,22 @@ def test_a_mismatch_says_what_to_do_next(app):
 
     assert not result["ok"]
     assert "record_input_sensitivity" in result["error"]["message"]
-    assert "pasting" in result["error"]["message"]
+    assert "whole" in result["error"]["message"]
 
 
 # --- 4. editing actions in place of modifiers ----------------------------------------
 
-def test_send_keys_select_all_and_paste_are_the_messages_ctrl_a_and_ctrl_v_become(app):
+@pytest.mark.clipboard
+def test_send_keys_select_all_and_paste_are_the_messages_ctrl_a_and_ctrl_v_become(app, preserved_clipboard):
     from ghostdriver.backends.windows.grid import write_clipboard_text
 
     box, session = session_for(app["pid"])
-    write_clipboard_text("from-the-clipboard")
-    try:
-        result = box.send_keys(session, "class=GhostFixturePlainEdit",
-                               ["select-all", "paste"],
-                               expect={"locator": "class=GhostFixturePlainEdit",
-                                       "text": "from-the-clipboard"})
-        assert result["ok"], result
-    finally:
-        write_clipboard_text("")
+    write_clipboard_text("from-the-clipboard")  # put back whole by the fixture
+    result = box.send_keys(session, "class=GhostFixturePlainEdit",
+                           ["select-all", "paste"],
+                           expect={"locator": "class=GhostFixturePlainEdit",
+                                   "text": "from-the-clipboard"})
+    assert result["ok"], result
 
 
 def test_a_ctrl_combination_is_refused_with_the_alternative_named(app):

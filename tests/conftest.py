@@ -808,3 +808,17 @@ def pytest_unconfigure(config):
     watch = getattr(config, "_ghostdriver_focus_watch", None)
     if watch is not None:
         watch.stop()
+
+
+
+@pytest.fixture
+def preserved_clipboard():
+    """Snapshot every clipboard format before a test that writes it, and put
+    it all back after -- the person may be using the clipboard (D70)."""
+    from ghostdriver.backends.windows.grid import restore_clipboard, snapshot_clipboard
+
+    before = snapshot_clipboard()
+    try:
+        yield before
+    finally:
+        restore_clipboard(before)

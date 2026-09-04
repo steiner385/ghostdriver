@@ -33,6 +33,16 @@ HUNG_HINT = (
     "its last rendering"
 )
 
+#: Said when a route needs to write the person's clipboard and the session
+#: was not attached with clipboard=true (D70).
+CLIPBOARD_NOT_ALLOWED = (
+    "the clipboard route was not tried: this session may not write the "
+    "person's clipboard. The target's own Copy command writes it, which is a "
+    "disruption they notice. If the operator agrees, attach with "
+    "clipboard=true; every format is then saved and put back around each "
+    "copy, but choose a moment when they are not copying themselves"
+)
+
 #: Carried by a click result when the target's window is not its thread's
 #: active window -- which a second top-level window of the same thread
 #: need not be.

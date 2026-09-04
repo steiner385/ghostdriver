@@ -79,7 +79,7 @@ def test_the_grid_copies_its_rows_and_the_clipboard_is_put_back(
         assert result.worked, result.detail
         assert result.lines == 3, "three fixture rows"
         assert "PART-0001\tBracket, upper" in result.detail
-        assert "shared" in result.caveat
+        assert "person" in result.caveat
         assert read_clipboard_text() == sentinel, "put back what was there"
     finally:
         stop(proc, handles)
@@ -162,7 +162,7 @@ def full_session(box, pid, path=None):
                               source=ConsentSource.ELICITED)
     profile = Profile.load(path) if path else Profile.none()
     return box.sessions.attach(pid, command_line=["fixtureapp"],
-                                tier=Tier.FULL, profile=profile).session_id
+                                tier=Tier.FULL, profile=profile, clipboard=True).session_id
 
 
 def test_the_tool_records_the_strategy_in_the_profile(preserved_clipboard,

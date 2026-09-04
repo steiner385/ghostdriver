@@ -2144,6 +2144,45 @@ pair of captures, which needs a busy state to measure and belongs in the
 operator's profile, not here. Where those bars sit is target knowledge;
 the mechanism that waits on them is the tool's.
 
+### D70. The clipboard is the person's
+
+**Context.** The operator, watching the tool work while doing other
+things: it messes with the clipboard, and that is disruptive. It did, in
+two places. The whole-value rung of `set_text` (D63) put the value on the
+clipboard and pasted it; the grid copy route (`probe_grid`, `grid_seek`)
+asks the target to Copy, which writes the clipboard, and put the prior
+*text* back -- an image, a file list, a rich-text selection were gone,
+and a copy the person made in the gap was lost either way. The tests
+wrote it too, several times per quick gate, on the machine the operator
+was working at.
+
+**Setting text no longer touches the clipboard at all.** The paste
+without the clipboard is `EM_REPLACESEL`: an edit control inserts a
+string at its selection exactly as it would a paste, through its own
+edit path, and it is one of the few messages whose string the system
+marshals across processes. Select-all, then replace-selection, one
+message, the value whole -- what the rung was for -- and the clipboard's
+sequence number does not move. The rung is named `inserted` now. The
+`paste` editing action in `send_keys` stays: it pastes what the person
+has, and writes nothing.
+
+**The one route that must write it is opt-in per session, and puts
+everything back.** A target's Copy command is the clipboard by
+definition; there is no other way to run it. So it runs only in a
+session attached with `clipboard=true` -- an operator's choice, made
+knowing what it means -- and around each copy every clipboard format is
+snapshotted (`EnumClipboardFormats`, each global block's bytes) and
+restored, not the text alone. Formats that are not global memory (a
+bitmap, a metafile) cannot be copied from here and are named as lost.
+Without the flag, `probe_grid` skips the route and says why, and
+`grid_seek` is refused with the same words. `read_clipboard` reads and
+writes nothing; it stays as it was.
+
+**The tests.** Those that write the clipboard carry a `clipboard` marker,
+are excluded from the quick gate, and snapshot-and-restore around
+themselves. The whole-value rung's test proves the sequence number did
+not move, which is stronger than any restore.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

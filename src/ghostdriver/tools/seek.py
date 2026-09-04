@@ -3,6 +3,7 @@
 from ..model.result import ErrorKind, GhostdriverError
 from .acting import _ActingCore
 from .core import _element, _error
+from .guidance import CLIPBOARD_NOT_ALLOWED
 
 
 class SeekTools(_ActingCore):
@@ -64,6 +65,8 @@ class SeekTools(_ActingCore):
         if node.text:
             return _error(ErrorKind.NOT_ACTIONABLE,
                           f"{locator!r} already answers with text; use `read`, not a seek")
+        if not session.clipboard:
+            return _error(ErrorKind.DENIED_BY_POLICY, CLIPBOARD_NOT_ALLOWED, locator=locator)
         if advance.lower() not in current().NAMED_KEYS:
             return _error(ErrorKind.NOT_ACTIONABLE,
                           f"advance must be a named key (e.g. pagedown, down), not {advance!r}")

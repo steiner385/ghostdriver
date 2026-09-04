@@ -240,7 +240,7 @@ class ActuationTools(_ActingCore):
                 f"; the field shows {shown!r}, not {wanted!r}. If the control "
                 "reformats what it is given, pass expect_text with the value "
                 "it should end up showing. If characters went missing, typing "
-                "and then pasting were both tried; a target that drops typed "
+                "and then inserting the value whole were both tried; a target that drops typed "
                 "characters is worth recording with record_input_sensitivity"
             )
             if shown == "" and wanted and self._renders_content(prepared):

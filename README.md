@@ -45,7 +45,7 @@ The quick gate for everyday changes leaves out the tests that launch an
 engine, a hidden desktop or a server, or wait on a watchdog:
 
 ```bash
-pytest -m "not slow"
+pytest -m "not slow and not clipboard"
 ```
 
 Run the whole suite before a push, or after touching a backend, the
@@ -124,6 +124,8 @@ Edits to `session`, `policy`, `consent`, `model` or the server itself are
 reported as needing a reconnect (`/mcp` in Claude Code); a new tool or
 parameter always does, since the host caches the tool list at connect.
 An edit that fails to import keeps the previous generation running.
+
+**The clipboard is the person's.** Setting text never touches it: the whole-value rung inserts through the control's own edit path. The one route that must write it, a grid's own Copy, runs only in a session attached with `clipboard=true`, and puts every format back afterwards.
 
 **The effect may arrive after the action.** A profile can name how the target shows it is busy -- `busy_indicator`, a locator present while busy or a region that renders ink while busy. Every actuation result then says `still_arriving` while it shows, and `wait_idle` waits for it to clear before you read a grid that is still filling.
 

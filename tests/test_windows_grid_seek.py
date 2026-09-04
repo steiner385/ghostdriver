@@ -12,6 +12,7 @@ import sys
 import time
 
 import psutil
+import pytest
 
 from ghostdriver.consent import ConsentStore
 from ghostdriver.policy import ConsentSource, Tier
@@ -19,7 +20,7 @@ from ghostdriver.session import SessionManager
 from ghostdriver.tools import Toolbox
 from tests.conftest import on_windows
 
-pytestmark = on_windows
+pytestmark = [on_windows, pytest.mark.clipboard]
 
 GRID = "class=GhostFixtureDataGrid"
 
@@ -46,7 +47,7 @@ def full_session(pid):
     box = Toolbox(SessionManager(store=ConsentStore(None)))
     box.sessions.record_grant(pid, allowed=True, source=ConsentSource.ELICITED)
     return box, box.sessions.attach(pid, command_line=["fixtureapp"],
-                                    tier=Tier.FULL).session_id
+                                    tier=Tier.FULL, clipboard=True).session_id
 
 
 def test_a_seek_pages_to_a_value_only_on_the_last_page():

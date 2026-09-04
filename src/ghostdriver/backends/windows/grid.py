@@ -76,11 +76,16 @@ OPEN_RETRY_S = 0.01
 COPY_TIMEOUT_S = 1.5
 
 SHARED_CLIPBOARD_CAVEAT = (
-    "the clipboard is shared by the whole session: its prior text was "
-    "restored afterwards, but non-text content (images, files) cannot be "
-    "restored from here, the restore is not atomic against anything else "
-    "copying in the gap, and clipboard history saw the grid text"
+    "the clipboard is the person's: the target's Copy wrote it, and every "
+    "format it held before was put back afterwards -- but the restore is "
+    "not atomic against a copy the person makes in the gap, and clipboard "
+    "history saw the grid text. This session was attached with "
+    "clipboard=true, which is what allowed it"
 )
+
+#: Formats whose data is not an HGLOBAL and cannot be copied and put back
+#: from here: bitmaps, palettes, metafiles. A snapshot notes them as lost.
+_NON_GLOBAL_FORMATS = frozenset({2, 3, 9, 14, 0x0082, 0x0083, 0x008E})
 
 
 class _Clipboard:
@@ -176,8 +181,7 @@ def copy_route(node: WindowNode, *, want_text: bool = False) -> RouteResult:
     that the route works and how many lines it gave, never the cells.
     """
     try:
-        prior = read_clipboard_text()
-        lossy = clipboard_holds_non_text()
+        prior = snapshot_clipboard()
         before_seq = user32.GetClipboardSequenceNumber()
     except OSError as exc:
         return RouteResult(strategy=Strategy.CLIPBOARD_COPY, worked=False,
@@ -198,15 +202,15 @@ def copy_route(node: WindowNode, *, want_text: bool = False) -> RouteResult:
 
     restored = True
     try:
-        write_clipboard_text(prior)
+        restore_clipboard(prior)
     except OSError:
         restored = False
-
     caveat = SHARED_CLIPBOARD_CAVEAT
-    if lossy:
-        caveat += "; the clipboard held non-text content before, which is gone"
+    if prior["lost"]:
+        caveat += (f"; {len(prior['lost'])} format(s) it held (a bitmap or metafile) "
+                   "could not be copied from here and are gone")
     if not restored:
-        caveat += "; and the prior text could NOT be put back"
+        caveat += "; and the prior contents could NOT be put back"
 
     ok, lines = looks_like_a_grid(text or "")
     return RouteResult(
@@ -221,3 +225,53 @@ def copy_route(node: WindowNode, *, want_text: bool = False) -> RouteResult:
              else "the control copied something, but not grid-shaped text")
         ),
     )
+
+
+user32.EnumClipboardFormats.argtypes = [wintypes.UINT]
+user32.EnumClipboardFormats.restype = wintypes.UINT
+user32.GetClipboardFormatNameW.argtypes = [wintypes.UINT, wintypes.LPWSTR, ctypes.c_int]
+user32.GetClipboardFormatNameW.restype = ctypes.c_int
+kernel32.GlobalSize.argtypes = [wintypes.HGLOBAL]
+kernel32.GlobalSize.restype = ctypes.c_size_t
+
+
+def snapshot_clipboard() -> dict:
+    """Every format on the clipboard, with its bytes, so it can be put back
+    whole rather than as text alone (D70). Formats that are not global
+    memory (bitmaps, metafiles) are listed as `lost`."""
+    formats: list[tuple[int, bytes]] = []
+    lost: list[int] = []
+    with _Clipboard():
+        fmt = user32.EnumClipboardFormats(0)
+        while fmt:
+            if fmt in _NON_GLOBAL_FORMATS:
+                lost.append(fmt)
+            else:
+                handle = user32.GetClipboardData(fmt)
+                if handle:
+                    size = kernel32.GlobalSize(handle)
+                    locked = kernel32.GlobalLock(handle)
+                    try:
+                        if locked and size:
+                            formats.append((fmt, ctypes.string_at(locked, size)))
+                    finally:
+                        kernel32.GlobalUnlock(handle)
+            fmt = user32.EnumClipboardFormats(fmt)
+    return {"formats": formats, "lost": lost}
+
+
+def restore_clipboard(snapshot: dict) -> int:
+    """Put a snapshot back. Returns how many formats were restored."""
+    with _Clipboard():
+        user32.EmptyClipboard()
+        restored = 0
+        for fmt, data in snapshot.get("formats", ()):
+            handle = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
+            if not handle:
+                continue
+            locked = kernel32.GlobalLock(handle)
+            ctypes.memmove(locked, data, len(data))
+            kernel32.GlobalUnlock(handle)
+            if user32.SetClipboardData(fmt, handle):
+                restored += 1
+        return restored

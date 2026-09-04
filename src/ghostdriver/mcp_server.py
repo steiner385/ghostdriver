@@ -229,6 +229,13 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "or a path. Supplies the denylist, safe controls, input "
             "sensitivity notes and the busy_indicator wait_idle uses."
         ))] = None,
+        clipboard: Annotated[bool, Field(description=(
+            "Allow this session to write the person's clipboard. Only the "
+            "grid copy route (probe_grid, grid_seek) needs it -- the target's "
+            "own Copy command writes the clipboard, which the person notices. "
+            "Off by default; every format is saved and put back around each "
+            "copy when on. Setting text never uses the clipboard."
+        ))] = False,
         isolation: Annotated[str, Field(description=(
             "none (default) or minimized. minimized keeps the target "
             "minimized for the session without activating anything else; "
@@ -240,7 +247,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         ))] = "none",
     ) -> dict[str, Any]:
         result = box.attach(pid, tier=tier, profile_path=profile_path,
-                            isolation=isolation)
+                            isolation=isolation, clipboard=clipboard)
         if not result.get("needs_consent"):
             return result
 
@@ -773,7 +780,8 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "rows only to its own Copy and shows only the rows in view. Copies "
         "the current rows, matches `value` if given, pages with a caret key, "
         "and stops at the value, the end (a page that repeats), or max_pages. "
-        "Full tier; touches the shared clipboard; paging needs the grid to "
+        "Full tier; needs a session attached with clipboard=true, since the "
+        "target's Copy writes the person's clipboard; paging needs the grid to "
         "act on a posted key, which it may decline unless its window is "
         "active -- a view that never changes says so."
     ))

@@ -114,20 +114,21 @@ def set_text(hwnd: int, text: str, *,
         lambda: win_input.set_text_by_typing(hwnd, text, cadence=cadence),
         name="typed",
     )
-    # After typing, the paste: the field is read back after every rung, so
+    # After typing, the insert: the field is read back after every rung, so
     # a typed value that arrived short falls through to a value delivered
-    # whole. Measured need: an address field that dropped characters at
-    # both cadences. Paste uses the shared clipboard, which is why it is
-    # not first.
-    pasted = Attempt(Tier.WINDOW_MESSAGE,
-                     lambda: win_input.paste_text(hwnd, text), rank=1, name="pasted")
+    # whole through the control's own edit path (EM_REPLACESEL, D70) --
+    # no clipboard. Measured need: an address field that dropped
+    # characters at both cadences. Typing stays first because it is the
+    # toolkit's own keyboard path, which is what a bound field commits on.
+    inserted = Attempt(Tier.WINDOW_MESSAGE,
+                       lambda: win_input.insert_text(hwnd, text), rank=1, name="inserted")
     if not cadence.is_robot or not allow_pattern:
-        return [typed, pasted]
+        return [typed, inserted]
     return [
         Attempt(Tier.UIA_PATTERN,
                 lambda: win_input.set_value_via_uia(hwnd, text), name="pattern"),
         typed,
-        pasted,
+        inserted,
     ]
 
 

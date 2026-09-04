@@ -75,6 +75,10 @@ WM_KEYDOWN = 0x0100
 WM_KEYUP = 0x0101
 WM_SETFOCUS = 0x0007
 EM_SETSEL = 0x00B1
+#: Replace the selection with a string: the paste without the clipboard.
+#: One of the few messages whose string the system marshals across
+#: processes, which is what makes it deliverable from here (D70).
+EM_REPLACESEL = 0x00C2
 WM_CLEAR = 0x0303
 WM_CUT = 0x0300
 WM_COPY = 0x0301
@@ -448,29 +452,27 @@ def set_value_via_uia(hwnd: int, text: str) -> bool:
         return False
 
 
-def paste_text(hwnd: int, text: str, *, settle_s: float = 0.15) -> bool:
-    """Replace a control's text by putting `text` on the clipboard and pasting.
+def insert_text(hwnd: int, text: str, *, settle_s: float = 0.15,
+                timeout_ms: int = 2000) -> bool:
+    """Replace a control's text with `text` in one message, through the
+    control's own edit path, touching nothing shared.
 
-    Atomic where typing is not: the field receives the whole value in one
-    message, so a control that drops a character now and then -- measured
-    on an address field that lost `N`, `@`, `ht` and `ch` across six
-    attempts at two cadences -- cannot lose part of it. It uses the
-    session-wide clipboard; whatever was there is put back afterwards, but
-    the replacement is not atomic and clipboard history sees the text.
-    That is why this is the rung *after* typing, not instead of it.
+    Atomic where typing is not: a control that drops a character now and
+    then -- measured on an address field that lost `N`, `@`, `ht` and
+    `ch` across six attempts at two cadences -- cannot lose part of a value
+    that arrives whole. The earlier form of this rung put the value on the
+    clipboard and pasted; the clipboard is the person's, and taking it
+    even for a moment is a disruption they notice (D70). EM_REPLACESEL is
+    the paste without the clipboard: the edit control inserts the string
+    at the selection exactly as it would a paste, and the system marshals
+    the string across the process boundary. Select-all first, so the
+    insert replaces rather than appends.
     """
-    from .grid import clipboard_holds_non_text, read_clipboard_text, write_clipboard_text
+    from .winapi import send_message_timeout
 
-    lossy = clipboard_holds_non_text()
-    previous = read_clipboard_text()
-    try:
-        write_clipboard_text(text)
-        ok = user32.PostMessageW(wintypes.HWND(hwnd), EM_SETSEL, 0, -1)
-        ok = user32.PostMessageW(wintypes.HWND(hwnd), WM_PASTE, 0, 0) and ok
-        time.sleep(settle_s)
-        return bool(ok)
-    finally:
-        try:
-            write_clipboard_text(previous if not lossy else None)
-        except OSError:
-            pass
+    user32.PostMessageW(wintypes.HWND(hwnd), EM_SETSEL, 0, -1)
+    buffer = ctypes.create_unicode_buffer(text)
+    answered = send_message_timeout(hwnd, EM_REPLACESEL, 1, ctypes.addressof(buffer),
+                                    timeout_ms=timeout_ms)
+    time.sleep(settle_s)
+    return answered is not None
