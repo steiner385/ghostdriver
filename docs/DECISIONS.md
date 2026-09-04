@@ -2096,6 +2096,54 @@ carried, a syntax error keeps the old generation and restores
 `sys.modules`, a stable-module edit reloads nothing and asks for a
 reconnect.
 
+### D69. The round-3 addendum: the effect arrives later than the action
+
+**Context.** The same session, after D67 and the hot reload. It confirmed
+the earlier fixes -- `hit_targets` settled in one call what an hour of
+theorising had not (the toggle bars are painted, not windowed), and the
+lost-session message was called the standard every error should meet --
+and brought three things the tool did not yet say.
+
+**A child listed outside its container.** `hit_targets` returned a
+toolbar at y 768-802 inside a container whose rectangle ends at 626: a
+child clipped away or scrolled out of view, listed as though a click could
+reach it. Such a child is now flagged `outside_container`, counted in the
+result, and a container whose only children are outside is reported as
+having no *reachable* ones.
+
+**The focus note sent the caller to a no-op.** It said "a step for a
+person: await_human", and `await_human` without a condition was then the
+no-op D67 fixed. The session found, with a separate tool that does
+activate windows, that the same coordinates worked at once. That is the
+intended division of labour, and the note now says so: this tool never
+activates a window; a control that insists on one is a step for a person
+(with `until_change` when what will appear cannot be named) or for a tool
+that activates windows, given the coordinates this tool found. The
+`activate` opt-in stays unbuilt for D67's reason.
+
+**"The action completed" and "the screen shows the result" are seconds
+apart on this target, and nothing marked the gap.** A grid showed one row
+four seconds after the click and four at eight; the one-row state was
+reported as a finding, and was wrong. Instruction blocks render empty and
+fill later; `hit_targets` on them returned nothing while they rendered.
+The tell is the target's own busy indicator -- a pair of progress bars in
+its status strip. This tool cannot know a target's indicator; a profile
+can name it. `busy_indicator` in the profile is either a locator present
+while busy or a region that renders ink while busy (`ink_fraction`, D66,
+above a threshold). Every actuation result then carries `still_arriving`
+with a hint when the indicator shows, and `wait_idle` waits for it to
+clear -- one call, not a guessed sleep -- and is refused with
+instructions when the profile names none. Proven on the fixture with a
+"working" label shown for a while after each click, in both forms.
+
+**Measured on the primary target, read-only.** Its status strip is one
+control with no child windows -- the progress bars are painted -- and its
+idle rendering is three-quarters ink, so the indicator for that target is
+a *sub-region* of the strip with a threshold set from an idle-versus-busy
+pair of captures, which needs a busy state to measure and belongs in the
+operator's profile, not here. Where those bars sit is target knowledge;
+the mechanism that waits on them is the tool's.
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions and nothing else.** It is now exercised

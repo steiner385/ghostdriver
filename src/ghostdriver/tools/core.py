@@ -6,6 +6,7 @@ families subclass it, and `Toolbox` in the package root composes them.
 The rules every result follows are stated in the package docstring.
 """
 
+import time
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -122,6 +123,44 @@ class _ToolboxCore:
     #: Where tool calls are recorded (trace.py); resolved from the
     #: environment on first use, and a no-op when nothing is configured.
     _trace: Any = None
+
+    def _busy(self, session) -> bool | None:
+        """Whether the target shows its profile's busy indicator now. None
+        when the profile names none (D69)."""
+        spec = session.profile.busy_indicator
+        if not spec:
+            return None
+        from ..backends import current
+
+        try:
+            if spec.get("locator"):
+                found = self._resolve(session, spec["locator"], bool(spec.get("all_windows")))
+                return bool(found)
+            region = spec.get("region")
+            if region:
+                crop = (int(region["left"]), int(region["top"]),
+                        int(region["right"]), int(region["bottom"]))
+                trees = self._trees(session, all_windows=True)
+                holder = _top_level_overlapping(trees, crop)
+                if holder is None:
+                    return False
+                ink = session.run(lambda: current().ink_fraction(holder.handle, region=crop))
+                return ink > float(spec.get("ink_above", 0.02))
+        except Exception:
+            return None
+        return None
+
+    def _busy_after_action(self, session) -> bool | None:
+        """The busy check for a result: now, and once more a beat later, since
+        a target raises its indicator in its own time after the message that
+        asked for the work (D69). Only when the profile names one."""
+        if not session.profile.busy_indicator:
+            return None
+        busy = self._busy(session)
+        if not busy:
+            time.sleep(0.15)
+            busy = self._busy(session)
+        return busy
 
     def _frame_note(self) -> dict:
         """The display scale, and what to do with it, for results that carry

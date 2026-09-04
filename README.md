@@ -125,6 +125,8 @@ reported as needing a reconnect (`/mcp` in Claude Code); a new tool or
 parameter always does, since the host caches the tool list at connect.
 An edit that fails to import keeps the previous generation running.
 
+**The effect may arrive after the action.** A profile can name how the target shows it is busy -- `busy_indicator`, a locator present while busy or a region that renders ink while busy. Every actuation result then says `still_arriving` while it shows, and `wait_idle` waits for it to clear before you read a grid that is still filling.
+
 **A result does not say ok for nothing.** A click delivered to a window
 that is not active carries a `warning` and reads `delivered_inactive`,
 since a control that checks focus would ignore it; `require_active` refuses

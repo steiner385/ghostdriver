@@ -196,17 +196,24 @@ class StatusTools(_ToolboxCore):
                           "with within= or index=", locator=locator)
         container = matches[0]
 
+        c_left, c_top, c_right, c_bottom = container.rect
+
         def descend(node, depth):
             out = []
             for child in node.children:
                 left, top, right, bottom = child.rect
-                out.append({
+                entry = {
                     "class": child.class_name,
                     "text": child.text if child.responsive else None,
                     "handle_ephemeral": f"0x{child.handle:08X}",
                     "rect": {"left": left, "top": top, "right": right, "bottom": bottom},
                     "depth": depth,
-                })
+                }
+                if right <= c_left or left >= c_right or bottom <= c_top or top >= c_bottom:
+                    # A child wholly outside its container is clipped away or
+                    # scrolled out of view: not a target a click can reach.
+                    entry["outside_container"] = True
+                out.append(entry)
                 out.extend(descend(child, depth + 1))
             return out
 
@@ -218,13 +225,61 @@ class StatusTools(_ToolboxCore):
             "hit_targets": targets,
             "count": len(targets),
         }
-        if not targets:
+        outside = [t for t in targets if t.get("outside_container")]
+        if outside:
+            report["outside_container"] = len(outside)
+            report["outside_note"] = (
+                "child window(s) lie wholly outside the container's rectangle: "
+                "clipped or scrolled out of view, so not reachable by a click "
+                "until the container scrolls or grows"
+            )
+        if not targets or len(outside) == len(targets):
             report["note"] = (
-                "this container has no child windows: its hit targets are "
-                "painted, not windowed. `capture` it to see them and `click` "
+                "this container has no reachable child windows: its hit targets "
+                "are painted, not windowed. `capture` it to see them and `click` "
                 "at={x, y} at an offset, or hand the step to a person"
             )
         return report
+
+    def wait_idle(self, session_id: str, *, timeout_s: float = 30.0,
+                  poll_s: float = 0.5) -> dict:
+        """Wait until the target's profile-declared busy indicator clears.
+
+        On a target where "the action completed" and "the screen shows the
+        result" are seconds apart -- grids that fill one row at four seconds
+        and four at eight -- a read taken between them is a confident wrong
+        answer (D69). The profile names how the target shows it is busy;
+        this waits for that to stop, and says how long it took.
+        """
+        try:
+            session = self.sessions.authorize(session_id, "wait_idle")
+        except GhostdriverError as exc:
+            return _error(exc.kind, exc.message)
+        if not session.profile.busy_indicator:
+            return _error(
+                ErrorKind.NOT_ACTIONABLE,
+                "this session's profile names no busy_indicator, so there is "
+                "nothing to wait on. Add one to the profile ({\"locator\": ...} "
+                "present while busy, or {\"region\": ..., \"ink_above\": ...}), "
+                "or use wait_for with condition=settled on the control you need")
+        import time as _time
+
+        started = _time.monotonic()
+        deadline = started + max(0.0, timeout_s)
+        busy = self._busy(session)
+        polls = 1
+        while busy and _time.monotonic() < deadline:
+            _time.sleep(poll_s)
+            busy = self._busy(session)
+            polls += 1
+        waited_ms = int((_time.monotonic() - started) * 1000)
+        if busy:
+            return {"ok": False, "idle": False, "waited_ms": waited_ms, "polls": polls,
+                    "error": {"kind": ErrorKind.TIMEOUT.value,
+                              "message": f"still busy after {waited_ms}ms; the target may "
+                                         "be stuck, or the indicator may stay on -- capture "
+                                         "to see"}}
+        return {"ok": True, "idle": True, "waited_ms": waited_ms, "polls": polls}
     def restore(self, session_id: str) -> dict:
         """Un-minimize the target, reporting whether that took the foreground.
 

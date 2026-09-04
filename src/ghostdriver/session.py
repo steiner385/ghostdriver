@@ -52,6 +52,12 @@ class Profile:
     sensitivity: Sensitivity = field(default_factory=Sensitivity)
     #: What phase 2 is permitted to actuate. Curated only.
     safe_controls: tuple[dict, ...] = ()
+    #: How this target shows it is still working (D69): a locator that is
+    #: present while busy ({"locator": ..., "all_windows"?}), or a region
+    #: that renders ink while busy ({"region": {left,top,right,bottom},
+    #: "ink_above": 0.02}). On a target whose grids fill seconds after the
+    #: click that asked for them, an action's result is not the screen's.
+    busy_indicator: dict | None = None
 
     @classmethod
     def load(cls, path: str | Path) -> "Profile":
@@ -85,6 +91,7 @@ class Profile:
             denylist=tuple(document.get("denylist") or ()),
             sensitivity=sensitivity,
             safe_controls=tuple(document.get("safe_controls") or ()),
+            busy_indicator=document.get("busy_indicator") or None,
         )
 
     @classmethod

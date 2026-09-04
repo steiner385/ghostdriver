@@ -395,6 +395,13 @@ def _on_click(hwnd: int, *, button: str = "left", modifiers=(),
             wintypes.HWND(status),
             f"clicks={_STATE['clicks']} last={caption}{detail}",
         )
+    if _STATE.get("busy_ms") and _STATE.get("busy"):
+        # A target that shows it is working after an action, for a while:
+        # the effect arrives later than the action (D69).
+        user32.ShowWindow(wintypes.HWND(_STATE["busy"]), 5)  # SW_SHOW: a child, activates nothing
+        user32.UpdateWindow(wintypes.HWND(_STATE["busy"]))  # paint now: a never-painted window prints blank
+        user32.SetTimer(wintypes.HWND(_STATE["main"]), ctypes.c_void_p(5),
+                        _STATE["busy_ms"], None)
     if _STATE.get("grab_after_ms"):
         # Section 10 item 5: an application that pulls itself to the
         # foreground after acting, on a delay, which is what makes it a
@@ -700,6 +707,10 @@ def _main_proc(hwnd, msg, wparam, lparam):
             user32.KillTimer(wintypes.HWND(hwnd), ctypes.c_void_p(2))
             user32.SetForegroundWindow(wintypes.HWND(hwnd))
             return 0
+        if wparam == 5:
+            user32.KillTimer(wintypes.HWND(hwnd), ctypes.c_void_p(5))
+            user32.ShowWindow(wintypes.HWND(_STATE["busy"]), 0)
+            return 0
         if wparam == 4:
             # A thread that stops pumping: the application is frozen, and
             # the system says so after five seconds (D66).
@@ -888,6 +899,9 @@ def build(options) -> dict:
     secret = child("EDIT", "hunter2", 330, 256, 200, 22,
                    extra=WS_BORDER | ES_PASSWORD, exstyle=WS_EX_CLIENTEDGE)
     status = child("STATIC", "clicks=0 last=", 12, 330, 600, 22)
+    busy = child(CAPTION_CLASS, "working", 500, 395, 120, 22)  # painted, and not under the toolbar
+    user32.ShowWindow(wintypes.HWND(busy), 0)
+    _STATE["busy"] = busy
     _STATE.update(bound_mirror=mirror, status=status,
                   bound_value="PART-0001", page_index=0, pages=pages)
 
@@ -943,6 +957,11 @@ def build(options) -> dict:
     if options.child_after:
         user32.SetTimer(wintypes.HWND(main), ctypes.c_void_p(3),
                         options.child_after, None)
+    _STATE["busy_ms"] = options.busy_ms
+    if options.clipped_child:
+        # A child wholly outside its parent's rectangle: clipped away, the
+        # shape of a toolbar a container scrolled out of view (D69).
+        child("STATIC", "clipped", 2000, 8, 60, 20)
     if options.hang_after:
         _STATE["hang_s"] = options.hang_for
         user32.SetTimer(wintypes.HWND(main), ctypes.c_void_p(4),
@@ -977,6 +996,10 @@ def main(argv=None) -> None:
                         metavar="MS",
                         help="Pull the window to the foreground this long "
                              "after a click. 0 disables it.")
+    parser.add_argument("--clipped-child", action="store_true",
+                        help="add a child window wholly outside the shell's rectangle")
+    parser.add_argument("--busy-ms", type=int, default=0, metavar="MS",
+                        help="after any click, show a 'working' indicator this long")
     parser.add_argument("--hang-after", type=int, default=0, metavar="MS",
                         help="stop pumping messages this long after start")
     parser.add_argument("--hang-for", type=float, default=30.0, metavar="S",

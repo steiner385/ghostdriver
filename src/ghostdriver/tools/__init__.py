@@ -128,7 +128,8 @@ def _result_summary(result):
             "route", "grid_strategy", "sample_lines", "written", "focus",
             "open_sessions_stopped", "length", "empty", "saved_to", "timeout_s",
             "found", "row_count", "pages_read", "reached_end", "advanced",
-            "delivered_to", "hit_container", "warning", "until_change")
+            "delivered_to", "hit_container", "warning", "until_change",
+            "still_arriving", "idle", "polls", "outside_container")
     return {k: result[k] for k in keep if k in result}
 
 

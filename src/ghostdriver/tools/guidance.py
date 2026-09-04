@@ -41,7 +41,9 @@ FOCUS_NOTE = (
     "that checks that before acting on a click ignores it. Controls differ: "
     "a VCL form records its active control without it, so one grid proceeds "
     "while another, asking the window state directly, does not; `expect` is "
-    "how to tell which. This tool cannot make a window active without "
-    "activating it, which it never does. A control that insists is a step "
-    "for a person: await_human."
+    "how to tell which. This tool never activates a window: that is the "
+    "division of labour, not a gap. A control that insists on an active "
+    "window is a step for a person (await_human, with until_change when you "
+    "cannot name what will appear) or for a tool that does activate windows, "
+    "such as computer use, given the coordinates this tool found."
 )

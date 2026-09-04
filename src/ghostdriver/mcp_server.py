@@ -226,8 +226,8 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         profile_path: Annotated[str | None, Field(description=(
             "Optional profile document: a bare name looked up in the operator "
             "directory (profiles/<name>.json under GHOSTDRIVER_OPERATOR_DIR), "
-            "or a path. Supplies the denylist, safe controls and input "
-            "sensitivity notes."
+            "or a path. Supplies the denylist, safe controls, input "
+            "sensitivity notes and the busy_indicator wait_idle uses."
         ))] = None,
         isolation: Annotated[str, Field(description=(
             "none (default) or minimized. minimized keeps the target "
@@ -474,6 +474,18 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     def hit_targets(session_id: SessionId, locator: LocatorArg,
                     all_windows: AllWindows = False) -> dict[str, Any]:
         return box.hit_targets(session_id, locator, all_windows=all_windows)
+
+    @server.tool(annotations=READS, description=(
+        "Wait until the target's busy indicator clears, as its profile names "
+        "it. On a target whose grids fill seconds after the click that asked "
+        "for them, an actuation result marked still_arriving means a read "
+        "taken now can be incomplete; call this first, then read. Refused, "
+        "with instructions, when the profile names no busy_indicator."
+    ))
+    def wait_idle(session_id: SessionId,
+                  timeout_s: Annotated[float, Field(description="Seconds; default 30.")] = 30.0,
+                  ) -> dict[str, Any]:
+        return box.wait_idle(session_id, timeout_s=timeout_s)
 
     @server.tool(annotations=CHANGES_SCREEN, description=(
         "Un-minimize the target so it can be read. Changes no application "

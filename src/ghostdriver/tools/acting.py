@@ -7,6 +7,7 @@ and reports one shape. Split from `core` so the reading families do not
 carry it; `ActuationTools` and `LearningTools` subclass this.
 """
 
+
 from ..model.element import AccessibleElement
 from ..model.locator import Locator
 from ..model.result import ErrorKind, GhostdriverError
@@ -309,6 +310,15 @@ class _ActingCore(_ToolboxCore):
                     "around this action -- see disturbances. " + SENSITIVE_HINT
                 )
             reported["error"] = error
+        if self._busy_after_action(prepared.session):
+            # The action is done; the screen is not. On a target whose grids
+            # fill seconds after the click, a result read now is wrong (D69).
+            reported["still_arriving"] = True
+            reported["settle_hint"] = (
+                "the target shows its busy indicator: the effect of this action "
+                "may still be arriving, and a grid or a block read now can be "
+                "incomplete. wait_idle first, then read"
+            )
         return reported
 
     def _expectation(self, session, expect: dict | str | None):

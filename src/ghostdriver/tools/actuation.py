@@ -101,8 +101,8 @@ class ActuationTools(_ActingCore):
                     ErrorKind.NOT_ACTIONABLE,
                     "require_active: the target's window is not active, so a "
                     "focus-checking control would ignore this click; nothing "
-                    "delivered. Hand it to a person (await_human), or drop "
-                    "require_active to deliver anyway.", locator=locator)
+                    "delivered. Hand it to a person (await_human) or a tool that "
+                    "activates windows, or drop require_active.", locator=locator)
                 refusal["focus"] = before
                 return refusal
         delivered = self._delivery(prepared, point)
@@ -132,7 +132,8 @@ class ActuationTools(_ActingCore):
                 "a control that checks focus will have ignored this click, and "
                 "nothing here confirms an effect. Pass expect to confirm one, "
                 "require_active=true to refuse instead of delivering blind, or "
-                "hand the step to a person with await_human."
+                "hand the step to a person (await_human) or to a tool that "
+                "activates windows, with the coordinates found here."
             )
         return reported
 
