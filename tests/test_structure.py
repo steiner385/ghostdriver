@@ -18,7 +18,10 @@ keeps visible rather than a permission to forget it.
 """
 
 import ast
+import re
 from pathlib import Path
+
+import pytest
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent / "src" / "ghostdriver"
 PACKAGE = "ghostdriver"
@@ -249,4 +252,89 @@ def test_no_test_module_binds_a_platform_at_import_time():
         "host. Move the binding inside the function that uses it, the way "
         "tests/test_windows_actuate.py does: "
         + ", ".join(f"{n} ({w} at line {ln})" for n, (w, ln) in sorted(offenders.items()))
+    )
+
+
+# --- the decision log numbers each entry once ---------------------------------
+
+DECISIONS = REPO / "docs" / "DECISIONS.md"
+
+#: `### D73.` / `### R5.` -- the log's two numbered series. D is a decision,
+#: R a revision of an earlier one.
+_NUMBERED = re.compile(r"^### ([DR])(\d+)\.", re.M)
+
+
+def _series(kind):
+    text = DECISIONS.read_text(encoding="utf-8")
+    return [int(n) for k, n in _NUMBERED.findall(text) if k == kind]
+
+
+@pytest.mark.parametrize("kind", ["D", "R"])
+def test_the_decision_log_gives_each_number_to_one_entry(kind):
+    """Two sessions on two machines both reached for D76 within the same
+    minute, because the log is numbered by hand and nothing checked. One of
+    them had to be renumbered after the fact, on a branch that had already
+    been pushed.
+
+    This fails on the *branch* that duplicates, before a merge is attempted,
+    which is the only cheap moment to fix it: after the merge the number is
+    in two commit messages, in whatever referred to it, and in anyone's
+    checkout.
+    """
+    numbers = _series(kind)
+    seen, repeated = set(), []
+    for n in numbers:
+        (repeated.append(n) if n in seen else None)
+        seen.add(n)
+    assert not repeated, (
+        f"{kind}{repeated[0]} is used twice in docs/DECISIONS.md. Two sessions "
+        f"probably allocated it in parallel; renumber the one that has not "
+        f"merged yet -- the merged one keeps the number -- and say so in the "
+        f"entry, the way D77 does. All duplicates: "
+        + ", ".join(f"{kind}{n}" for n in repeated)
+    )
+
+
+@pytest.mark.parametrize("kind", ["D", "R"])
+def test_the_decision_log_skips_no_numbers(kind):
+    """A gap means an entry was renumbered or dropped and its old number never
+    reused. That is worth catching for the same reason the log leaves what it
+    overturned in place: the reader who goes looking for the missing number
+    should find something, not a hole."""
+    numbers = _series(kind)
+    highest, count = max(numbers), len(set(numbers))
+    missing = sorted(set(range(1, highest + 1)) - set(numbers))
+    if not missing:
+        return
+
+    # One mistyped high number would otherwise report every number under it as
+    # missing, burying the actual cause. Say the likely cause first.
+    shown = ", ".join(f"{kind}{n}" for n in missing[:5])
+    if len(missing) > 5:
+        shown += f", and {len(missing) - 5} more"
+    hint = (
+        f"the highest is {kind}{highest} but there are only {count} entries, "
+        f"so {kind}{highest} is more likely a typo than {len(missing)} lost "
+        f"decisions -- check it first. "
+    ) if highest > count + 1 else ""
+    raise AssertionError(
+        f"docs/DECISIONS.md skips {shown}. {hint}"
+        f"Either restore the entry, or give the free number to the next one "
+        f"rather than adding to the end."
+    )
+
+
+def test_the_decision_log_is_not_required_to_be_in_order():
+    """Deliberately asserting the *absence* of a rule, because the obvious
+    next guard would be wrong and someone will want to add it.
+
+    The log is not sorted and must not be forced to be: the 2026-09-02
+    revision section holds D42-D48 and sits *after* the iteration that
+    reached D73, so file order descends on purpose. What matters is that a
+    number identifies one entry, not where it sits.
+    """
+    numbers = _series("D")
+    assert numbers != sorted(numbers), (
+        "the decision log now happens to be in ascending order. That is fine, "
+        "but do not add a test requiring it -- see this test's docstring."
     )

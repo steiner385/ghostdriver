@@ -10,6 +10,14 @@ written so a decision can be *disagreed with* later — which needs the reason,
 not just the outcome. New decisions go at the end of the current iteration,
 numbered, with the evidence.
 
+**Check the highest number on `origin/main`, not in your checkout, before
+taking one.** Two sessions on two machines both took D76 within a minute of
+each other, and one had to be renumbered after it was already pushed. The
+numbers are unique and gap-free, and `tests/test_structure.py` enforces both
+— on your branch, which is the cheap moment. What it deliberately does *not*
+enforce is order: the log is not sorted, and the 2026-09-02 revision section
+holds D42–D48 after the iteration that reached D73.
+
 ## Environment-gated issues
 
 **This repository cannot be fully worked from one machine.** Most issues are
