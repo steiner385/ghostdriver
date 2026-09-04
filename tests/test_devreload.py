@@ -126,3 +126,18 @@ def test_in_dev_mode_a_call_passes_through_and_a_quiet_check_adds_nothing():
     assert result["error"]["kind"] == "not_found"
     assert "dev_reload" not in result, "nothing changed, nothing to say"
     assert live.sessions is live.current.sessions
+
+
+def test_a_stable_change_holds_the_implementation_until_a_reconnect(scratch):
+    """Measured on the desktop server: tools reloaded against a session module
+    that had not been, and called it with a keyword it did not take. Once a
+    stable module changes, the implementation is held at its generation."""
+    reloader = reloader_for(scratch)
+    bump(scratch / "state.py", "class Store:\n    kind = 2\n")
+    reloader.check(force=True)
+
+    bump(scratch / "impl.py", "def answer():\n    return 9\n")
+    event = reloader.check(force=True)
+
+    assert event and "held" in event and "reloaded" not in event
+    assert reloader.current.answer() == 1 and reloader.generation == 0

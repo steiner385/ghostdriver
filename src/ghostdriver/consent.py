@@ -73,7 +73,11 @@ class ConsentStore:
         if self.folder is None or not self.folder.is_dir():
             return []
         kept: list[Grant] = []
-        for path in sorted(self.folder.glob("*.json")):
+        try:
+            paths = sorted(self.folder.glob("*.json"))
+        except OSError:
+            return []
+        for path in paths:
             try:
                 entry = json.loads(path.read_text(encoding="utf-8"))
                 pid = int(entry["pid"])
@@ -85,11 +89,22 @@ class ConsentStore:
                     at=float(entry.get("at", time.time())), restored=True,
                 )
             except (OSError, ValueError, KeyError, TypeError):
-                path.unlink(missing_ok=True)
+                _discard(path)
                 continue
             now = self.fingerprint(pid)
             if now is None or abs(now - started) > 0.01:
-                path.unlink(missing_ok=True)  # that process is gone; the pid may be reused
+                _discard(path)  # that process is gone; the pid may be reused
                 continue
             kept.append(grant)
         return kept
+
+
+def _discard(path: Path) -> None:
+    """Remove a stale entry, or leave it for next time. Another server may
+    hold the file open at this instant (two runs starting together), and
+    Windows then refuses the delete; a store that cannot tidy itself must
+    not take the server down with it -- measured on a desktop relaunch."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass

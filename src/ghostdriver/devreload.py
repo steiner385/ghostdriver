@@ -99,6 +99,12 @@ class HotReloader:
         self._retired: list[dict] = []  # kept alive on purpose; see the module docstring
         self._last_check = 0.0
         self._mtimes = self._scan()
+        #: Set once a stable module changes: from then on the implementation
+        #: is held at its current generation, because a new one may be
+        #: written against the new stable code and would not fit the running
+        #: one -- measured: tools passing a keyword the old session module
+        #: did not take. A reconnect clears it by starting over.
+        self.held_for: list[str] = []
         self.current = build()
 
     # --- files -----------------------------------------------------------------
@@ -141,7 +147,17 @@ class HotReloader:
         event: dict = {"changed": names}
         reloadable = [n for n in names if n not in self.stable]
         stable = [n for n in names if n in self.stable]
-        if reloadable:
+        for name in stable:
+            if name not in self.held_for:
+                self.held_for.append(name)
+        if reloadable and self.held_for:
+            event["held"] = (
+                "implementation not reloaded: a stable module changed since this "
+                f"server started ({', '.join(self.held_for)}), and a new generation "
+                "written against it would not fit the running one. Reconnect the "
+                "server to pick everything up together"
+            )
+        elif reloadable:
             try:
                 self._rebuild()
             except Exception as exc:  # the old generation stays; say why

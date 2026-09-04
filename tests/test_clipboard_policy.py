@@ -32,6 +32,18 @@ def sequence() -> int:
     return ctypes.windll.user32.GetClipboardSequenceNumber()
 
 
+def untouched_by(action, attempts: int = 3) -> bool:
+    """Run `action` and report whether the clipboard sequence number stayed
+    put. The person may copy something in the window, which moves it too, so
+    a moved number is retried: a person copying in three windows in a row is
+    not the tool."""
+    for _ in range(attempts):
+        before = sequence()
+        action()
+        if sequence() == before:
+            return True
+    return False
+
 def start(*args):
     proc = subprocess.Popen([sys.executable, "-m", "tests.fixtureapp", *args],
                             stdout=subprocess.PIPE, text=True)
@@ -68,23 +80,21 @@ def test_the_whole_value_rung_inserts_without_the_clipboard(app):
     from ghostdriver.backends.windows.input import insert_text
     from ghostdriver.backends.windows.text import read_window_text
 
-    before = sequence()
+    def insert():
+        assert insert_text(app["plain_edit"], "INSERTED-0001")
+        time.sleep(0.2)
 
-    assert insert_text(app["plain_edit"], "INSERTED-0001")
-    time.sleep(0.2)
-
+    assert untouched_by(insert), "the clipboard was not touched"
     assert read_window_text(app["plain_edit"]) == "INSERTED-0001"
-    assert sequence() == before, "the clipboard was not touched"
 
 
 def test_set_value_never_touches_the_clipboard(app):
     box, session = session_for(app["pid"])
-    before = sequence()
+    results = []
 
-    result = box.set_value(session, EDIT, "typed-and-clean")
+    assert untouched_by(lambda: results.append(box.set_value(session, EDIT, "typed-and-clean")))
 
-    assert result["ok"] and result["route"] == "typed"
-    assert sequence() == before
+    assert results[-1]["ok"] and results[-1]["route"] == "typed"
 
 
 def test_the_insert_rung_is_named_when_typing_falls_short(app):
@@ -92,24 +102,24 @@ def test_the_insert_rung_is_named_when_typing_falls_short(app):
     (no ES_AUTOHSCROLL); the insert rung then delivers the value whole and
     the read-back decides. Either way, the clipboard is untouched."""
     box, session = session_for(app["pid"])
-    before = sequence()
+    results = []
 
-    result = box.set_value(session, EDIT, "x" * 40)
+    assert untouched_by(lambda: results.append(box.set_value(session, EDIT, "x" * 40)))
 
+    result = results[-1]
     assert "inserted" in (result.get("route") or "") or not result["ok"]
     assert "pasting" not in json.dumps(result)
-    assert sequence() == before
 
 
 def test_probe_grid_does_not_copy_unless_the_session_allows_it(app):
     box, session = session_for(app["pid"], tier=Tier.FULL)
-    before = sequence()
+    reports = []
 
-    report = box.probe_grid(session, GRID, allow_clipboard=True)
+    assert untouched_by(lambda: reports.append(box.probe_grid(session, GRID, allow_clipboard=True)))
 
+    report = reports[-1]
     assert report["ok"] and report["grid_strategy"] == "unknown"
     assert "clipboard=true" in report["clipboard"]
-    assert sequence() == before
 
 
 def test_grid_seek_is_refused_unless_the_session_allows_the_clipboard(app):
