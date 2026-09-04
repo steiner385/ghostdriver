@@ -45,16 +45,21 @@ def test_a_malformed_place_is_an_error_with_the_reason(tmp_path, capsys):
     assert "unreadable denylist entry" in capsys.readouterr().err
 
 
-def test_a_retired_key_is_warned_about(tmp_path, capsys):
+def test_retired_evidence_and_unknown_keys_are_told_apart(tmp_path, capsys):
     path = write(tmp_path, {"denylist": [], "environment_allowlist": ["http://x/*"],
-                            "colour": "blue"})
+                            "class_census": {"TPanel": 9}, "colour": "blue"})
 
     code = main(["check-profile", str(path)])
 
     out = capsys.readouterr().out
     assert code == 0
+    # retired names its reason; evidence is one informational line; only a
+    # genuinely unknown key is flagged as a possible typo.
     assert "environment_allowlist" in out and "no longer read" in out
-    assert "colour" in out and "unknown key" in out
+    assert "probe evidence  : 1 key(s)" in out
+    warnings = [ln for ln in out.splitlines() if ln.startswith("warning:")]
+    assert not any("class_census" in ln for ln in warnings)
+    assert any("colour" in ln and "typo" in ln for ln in warnings)
 
 
 def test_a_missing_file_is_an_error(tmp_path, capsys):

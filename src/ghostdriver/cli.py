@@ -637,12 +637,15 @@ def cmd_restore(pid: int) -> int:
     return 0
 
 
-KNOWN_PROFILE_KEYS = {
-    "_comment", "matched_profile", "denylist", "input_sensitivity", "busy_indicator",
+#: Keys attach and the tools consume: policy and measurement a person curates.
+CURATED_PROFILE_KEYS = {
+    "matched_profile", "denylist", "input_sensitivity", "busy_indicator",
     "safe_controls", "grid_strategy", "grid_evidence", "actuation_map", "focus_behavior",
-    "surfaces", "toolkit", "probed",
 }
-RETIRED_PROFILE_KEYS = {"environment_allowlist": "no longer read: which targets may be driven is decided at attach, by the person (R1, R1a)"}
+RETIRED_PROFILE_KEYS = {
+    "environment_allowlist": "no longer read: which targets may be driven is "
+                             "decided at attach, by the person (R1, R1a)",
+}
 
 
 def cmd_check_profile(profile: str, operator_dir: str | None = None) -> int:
@@ -682,11 +685,21 @@ def cmd_check_profile(profile: str, operator_dir: str | None = None) -> int:
         r = busy.get("region") or {}
         print(f"busy_indicator  : region ({r.get('left')},{r.get('top')})-({r.get('right')},{r.get('bottom')}) ink_above {busy.get('ink_above', 0.02)}")
     print(f"safe_controls   : {len(loaded.safe_controls)}")
+    from .probe.profile import ProfileDocument
+
+    # The probe writes evidence keys (Phase1Profile.OBSERVED) the tools do not
+    # read but a re-probe preserves; those are informational, not mistakes.
+    evidence = set(ProfileDocument.OBSERVED) | {"_comment"}
+    known = CURATED_PROFILE_KEYS | evidence
+    kept = [k for k in document if k in ProfileDocument.OBSERVED]
+    if kept:
+        print(f"probe evidence  : {len(kept)} key(s) the probe wrote, kept but not read")
     for key in document:
         if key in RETIRED_PROFILE_KEYS:
             print(f"warning: {key} is {RETIRED_PROFILE_KEYS[key]}")
-        elif key not in KNOWN_PROFILE_KEYS:
-            print(f"warning: unknown key {key!r}; the tool reads nothing from it")
+        elif key not in known:
+            print(f"warning: unknown key {key!r}; not read, and not something a "
+                  "probe writes -- a typo?")
     return 0
 
 

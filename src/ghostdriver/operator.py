@@ -127,8 +127,13 @@ class OperatorDir:
         profile elsewhere is not forced through the directory.
         """
         candidate = Path(name_or_path)
-        if candidate.suffix or len(candidate.parts) > 1:
-            return candidate
+        if len(candidate.parts) > 1:
+            return candidate  # a path (has a directory), used as given
+        # A bare name in profiles/: with a .json suffix used as the file name,
+        # otherwise .json appended -- so a dotted stem like
+        # target-profile.redacted resolves, not read as a path.
+        if candidate.suffix == ".json":
+            return self.profiles / name_or_path
         return self.profiles / f"{name_or_path}.json"
 
     def workflow_path(self, name: str) -> Path:
