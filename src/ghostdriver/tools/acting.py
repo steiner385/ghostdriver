@@ -17,12 +17,12 @@ from .core import (
     _element,
     _error,
     _Prepared,
-    _ToolboxCore,
 )
+from .deny import _DenyCore
 from .guidance import FOCUS_NOTE
 
 
-class _ActingCore(_ToolboxCore):
+class _ActingCore(_DenyCore):
     """Resolve, gate, perform, report: the steps every acting tool shares."""
 
     #
@@ -81,6 +81,9 @@ class _ActingCore(_ToolboxCore):
             self.sessions.check_identity(session_id, identities)
         except GhostdriverError as exc:
             return None, _error(exc.kind, exc.message, locator=locator)
+        refusal = self._denied_region(session, self._aim(node, None), locator)
+        if refusal is not None:
+            return None, refusal
 
         try:
             pace = self._cadence(session, node.handle, cadence)

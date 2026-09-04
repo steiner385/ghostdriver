@@ -346,6 +346,13 @@ def popup_menu_items(hwnd: int, *, timeout_ms: int = 500) -> list[dict]:
     return items
 
 
+def client_to_screen(hwnd: int, point: tuple[int, int]) -> tuple[int, int]:
+    """A point in `hwnd`'s client coordinates, on screen."""
+    pt = wintypes.POINT(int(point[0]), int(point[1]))
+    user32.ClientToScreen(wintypes.HWND(hwnd), ctypes.byref(pt))
+    return pt.x, pt.y
+
+
 def screen_to_client(hwnd: int, point: tuple[int, int]) -> tuple[int, int]:
     """A screen point in `hwnd`'s client coordinates."""
     pt = wintypes.POINT(int(point[0]), int(point[1]))

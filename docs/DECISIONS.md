@@ -2158,7 +2158,11 @@ string at its selection exactly as it would a paste, through its own
 edit path, and it is one of the few messages whose string the system
 marshals across processes. Select-all, then replace-selection, one
 message, the value whole -- what the rung was for -- and the clipboard's
-sequence number does not move. The rung is named `inserted` now. The
+sequence number does not move. The rung is named `inserted` now. One
+measurement after the fact: the select-all must be *sent* before the
+replace is sent, not posted -- a posted select-all can be processed after
+a sent replace, which then inserts at the caret and appends; it showed
+up under load as `INSERTED-0001plain text` once in a dozen runs. The
 `paste` editing action in `send_keys` stays: it pastes what the person
 has, and writes nothing.
 
@@ -2212,14 +2216,36 @@ is half closed: an element identity -- a toolbar button by position, a
 tab by name -- can be denied since D57; a grid cell still cannot, because
 nothing names one.
 
+### D72. A denylist entry can be a place
+
+**Context.** The oldest open item: the denylist matched captions, then
+identities (D57), and still could not forbid the controls a person would
+most want to -- a grid cell, a row in an owner-drawn list, a painted
+button on a toolbar. They have no caption and no identity. What they have
+is a place: a rectangle inside a window the profile can name.
+
+**What changed.** A denylist entry may be `{"within": <locator>,
+"region": {left, top, right, bottom}, "note"?}`, the rectangle in the
+client coordinates of the window the locator names -- the same frame
+`at` uses and a capture of that window shows, so an operator reads the
+numbers off a capture and writes them down. Every actuation computes
+where it will land on screen -- the aimed point, or the control's centre
+-- resolves each region's window now, and refuses if the aim falls
+inside, naming the note. A malformed entry fails the profile load rather
+than silently protecting nothing. Proven on the fixture: a click into the
+grid's denied row is refused and a click into the row above it is not; a
+`set_value` on a field whose centre lies in a denied region is refused.
+
+**What it does not do.** The region is a rectangle in one window's
+frame; a control that scrolls within it is not tracked. That is the
+nature of a place; a control that can be named is still better denied
+by name.
+
 ## Open, for whoever picks this up
 
-- **The denylist matches captions and nothing else.** It is now exercised
-  end to end -- an actuation resolves, the caption is checked, and a match
-  refuses before anything is sent. What it cannot express is a control
-  identified by anything other than its caption: an unlabelled toolbar
-  button, or a grid cell. Those are exactly the controls a person would most
-  want to forbid.
+- **The denylist matches captions, identities (D57) and places (D72).** A
+  control with none of the three -- one that scrolls inside its window --
+  is what remains unexpressible.
 - **Nothing gives *exact* text out of an owner-drawn region.** The model can
   read a capture, which is enough to decide what to do next, but not enough
   to verify a value (D46). The routes that would give exact text -- the

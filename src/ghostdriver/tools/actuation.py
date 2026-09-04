@@ -38,15 +38,13 @@ class ActuationTools(_ActingCore):
         the input was delivered and claims nothing about its effect, because
         on this class of target those are genuinely different statements.
 
-        `at` is a point {x, y} inside the element, for a region that paints
-        its own rows: a capture shows where the row is, this clicks there,
-        nothing is activated. `count` 2 double-clicks; `button` is left,
+        `at` is a point {x, y} inside a region that paints its own rows (a
+        capture shows where). `count` 2 double-clicks; `button` is left,
         right or middle (a right-click's context menu is a new top-level
         window, all_windows=true reaches it); `modifiers` (ctrl, shift)
         ride the message's own flags, which a target that reads them sees
         and one that asks the keyboard does not -- `expect` tells which.
-        `require_active` refuses when the window is not active rather than
-        delivering a click a focus-checking control would drop.
+        `require_active` refuses when the window is not active (D67).
         """
         prepared, failure = self._prepared(
             session_id, "click", locator, all_windows, None
@@ -82,6 +80,8 @@ class ActuationTools(_ActingCore):
                               "at must be {x, y} in pixels inside the element", locator=locator)
             if frame == "physical":
                 point = self._to_logical(point)
+            if (refusal := self._denied_region(prepared.session, self._aim(prepared.node, point), locator)):
+                return refusal
             left, top, right, bottom = prepared.node.rect
             width, height = right - left, bottom - top
             if not (0 <= point[0] < max(width, 1) and 0 <= point[1] < max(height, 1)):

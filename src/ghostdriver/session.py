@@ -49,6 +49,12 @@ class Profile:
     path: Path | None = None
     matched_profile: str = "unknown"
     denylist: tuple[str, ...] = ()
+    #: Denied *places*: {"within": locator, "region": {left, top, right,
+    #: bottom}, "note"?}, the rectangle in the client coordinates of the
+    #: window `within` names -- the frame `at` and a capture of it use. A
+    #: grid cell or a painted button has no caption and no identity, only a
+    #: place (D72). Any actuation aimed inside one is refused.
+    deny_regions: tuple[dict, ...] = ()
     sensitivity: Sensitivity = field(default_factory=Sensitivity)
     #: What phase 2 is permitted to actuate. Curated only.
     safe_controls: tuple[dict, ...] = ()
@@ -85,10 +91,28 @@ class Profile:
                 f"profile {location} has an unreadable input_sensitivity "
                 f"section: {exc}",
             ) from exc
+        names: list[str] = []
+        regions: list[dict] = []
+        for entry in document.get("denylist") or ():
+            if isinstance(entry, str):
+                names.append(entry)
+                continue
+            region = entry.get("region") if isinstance(entry, dict) else None
+            if (not isinstance(entry, dict) or not entry.get("within")
+                    or not isinstance(region, dict)
+                    or any(k not in region for k in ("left", "top", "right", "bottom"))):
+                raise GhostdriverError(
+                    ErrorKind.DENIED_BY_POLICY,
+                    f"profile {location} has an unreadable denylist entry {entry!r}: "
+                    "a region entry is {\"within\": <locator>, \"region\": "
+                    "{left, top, right, bottom}, \"note\"?}",
+                )
+            regions.append(entry)
         return cls(
             path=location,
             matched_profile=document.get("matched_profile", "unknown"),
-            denylist=tuple(document.get("denylist") or ()),
+            denylist=tuple(names),
+            deny_regions=tuple(regions),
             sensitivity=sensitivity,
             safe_controls=tuple(document.get("safe_controls") or ()),
             busy_indicator=document.get("busy_indicator") or None,
@@ -141,6 +165,7 @@ class Session:
                 "note": self.grant.note,
             },
             "denylist_patterns": len(self.profile.denylist),
+            "deny_regions": len(self.profile.deny_regions),
         }
         # Told, not left to be discovered. A session that has to learn this
         # learns it by tripping the target at machine speed, which is the

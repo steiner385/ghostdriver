@@ -470,7 +470,10 @@ def insert_text(hwnd: int, text: str, *, settle_s: float = 0.15,
     """
     from .winapi import send_message_timeout
 
-    user32.PostMessageW(wintypes.HWND(hwnd), EM_SETSEL, 0, -1)
+    # Sent, not posted, and before the replace: a posted select-all can be
+    # processed after a sent replace, which then inserts at the caret and
+    # appends -- measured as 'INSERTED-0001plain text' under load (D70).
+    send_message_timeout(hwnd, EM_SETSEL, 0, -1, timeout_ms=timeout_ms)
     buffer = ctypes.create_unicode_buffer(text)
     answered = send_message_timeout(hwnd, EM_REPLACESEL, 1, ctypes.addressof(buffer),
                                     timeout_ms=timeout_ms)
