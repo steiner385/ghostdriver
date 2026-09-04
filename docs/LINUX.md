@@ -1,7 +1,10 @@
 # The Linux backend: a specification, and the measurements that come first
 
-Status: specified, not built. The package `ghostdriver.backends.linux`
-answers every contract name with a refusal that points here. This
+Status: specified, not built -- but no longer unmeasured. The package
+`ghostdriver.backends.linux` answers every contract name with a refusal that
+points here. **D75 contradicted two things below**; the affected rows are
+marked rather than rewritten, so the model and the measurement stay visible
+side by side. This
 document exists because the Windows backend was built by measurement --
 every corner of it that mattered was a measurement contradicting a model
 (D21, D47, D49, D55, D56, D58) -- and the Linux one will be too. What
@@ -110,10 +113,17 @@ a foreground grab *is*).
 
 ## The measurements, in the order they unblock things
 
+0. **The fixture itself.** Built: `tests/fixtureapp_gtk.py`, GTK 4 (GTK 3 is
+   not available from PyGObject here, which costs `Gtk.Toolbar` -- see D75).
+   `tests/test_linux_fixture.py` stands it up on a nested display and passes.
 1. **A nested X server with an AT-SPI bus.** `Xvfb :99`, `DISPLAY=:99
    at-spi-bus-launcher --launch-immediately`, the fixture on it, and
    `pyatspi` (or raw D-Bus) listing the fixture's tree. Until this works
    nothing else can be measured. This is also `HiddenDesktop`.
+   **Correction (D75): it also needs a window manager.** A bare `Xvfb` sets
+   neither `_NET_CLIENT_LIST` nor `_NET_ACTIVE_WINDOW` -- both come from a
+   WM, not the X server -- so measurements 6 and 7 cannot be asked without
+   one, and enumeration must walk the tree instead.
 2. **Reading.** Names, roles, states, text of every fixture control;
    which controls answer `Text` and which only `Name`; what an unresponsive
    control does to a bus call (D4) and what timeout is right.
@@ -124,6 +134,13 @@ a foreground grab *is*).
    button's window: does GTK act on a sent event? This decides whether the
    Windows ladder maps to Linux at all. Then `KeyPress/Release` to the
    entry, and whether the mirror follows.
+   **Answered early, provisionally (D75): no.** GTK 4.14.5 routes input by
+   the real input state and discards a sent event that does not match it --
+   a key to an unfocused window and a button with the pointer elsewhere are
+   both ignored, while `XTest` works. Tier 3 does not exist here; the ladder
+   is tier 1 then tier 4-under-isolation, which makes the nested server
+   mandatory rather than preferred. Re-run with a WM present, and against
+   Qt, before treating it as settled.
 5. **Modality.** The timer modal: what `_NET_WM_STATE` and AT-SPI say,
    and whether a sent event to the held window is honoured (on Windows a
    posted message is; D48).

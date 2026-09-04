@@ -2344,6 +2344,84 @@ other, and "no failures" means "no failures among the tests that ran".
 
 **Not verified on Windows.** Recorded as done on one platform only.
 
+### D75. The Linux fixture stands up, and two of the model's assumptions do not
+
+**Context.** With the suite collecting on Linux (D74), L0 -- the GTK fixture
+-- became workable. `docs/LINUX.md` specifies its shapes; this records what
+building it measured, because the document says plainly that it "was written
+on a machine with no Linux desktop" and nothing in it had been run.
+
+**GTK 4, not GTK 3.** PyGObject here offers `Gtk 4.0` and no `Gtk 3.0`. That
+costs one shape: GTK4 removed `Gtk.Toolbar`, so the icon-only toolbar is a
+box of icon-only buttons. For D56's purposes -- a row of controls that are
+not windows and carry no caption of their own -- it is the same thing.
+Measured against GTK 4.14.5.
+
+**`present()` is avoidable, and that matters.** The fixture must never take
+the foreground incidentally (`gtk_window_present` is what a foreground grab
+*is*). In GTK4, `set_visible(True)` maps a window without raising or
+focusing it, and the mapped window still has a real X id. So the grab exists
+only behind `--present-after`, and L6 can measure a real one instead of
+assuming.
+
+**First contradiction: a bare Xvfb has no EWMH.** `docs/LINUX.md` maps
+`top_level_windows` to "`_NET_CLIENT_LIST` + `_NET_WM_PID`" and asks L6 to
+read `_NET_ACTIVE_WINDOW` before and after every action. On `Xvfb :99` with
+no window manager running, **neither root property exists** -- the root
+carries `_XKB_RULES_NAMES` and nothing else. Both are set by a *window
+manager*, not by the X server. What does work is a tree walk (`XQueryTree`,
+which is what `xwininfo -root -children` does) plus `_NET_WM_PID`, which the
+application sets on its own window.
+
+Consequences, none of them fatal but all of them planning:
+`top_level_windows` on the nested display has to walk the tree rather than
+read `_NET_CLIENT_LIST`; L6's foreground assertion is meaningless *on the
+nested display* (it stays meaningful on the operator's, which has a WM); and
+L7 -- "does the window manager focus an un-hidden window" -- cannot be asked
+at all without a window manager to ask. **L1 therefore needs a WM on the
+nested display, which the measurement as written does not mention.** None is
+installed on this machine.
+
+**Second contradiction, and the bigger one: sent events do not drive an
+unfocused window.** L4 is named as the measurement that decides "whether the
+Windows ladder maps to Linux at all". Taken early, because the fixture made
+it cheap:
+
+| What was sent | State | Acted? |
+|---|---|---|
+| `XSendEvent` key `ctrl+c` to the window | target **has** input focus | **yes** |
+| `XSendEvent` key `ctrl+c` to window B | window **A** has focus | **no** |
+| `XSendEvent` `ButtonPress`/`Release` to the window | pointer parked elsewhere | **no** |
+| `XTest` click, real pointer on the control | -- | **yes** |
+
+The first row looks like a success and is not one: the target already held
+focus, so `XTest` would have done it too. It adds nothing a tier 4 could not
+do. Read together, GTK4 routes input by the *real* input state -- keyboard by
+input focus, pointer by pointer position -- and discards a sent event that
+does not match it.
+
+**So tier 3 does not exist on Linux/GTK4**, and the ladder is tier 1 then
+tier 4-under-isolation. Tier 4 is excluded by default (D9) and is acceptable
+only where the input being taken is not the operator's -- which makes the
+nested X server **mandatory rather than preferred**, where `docs/LINUX.md`
+had it as the simpler of two options. It also promotes MPX from "measure it
+after the nested server works" to the only route that could ever drive a
+target on the operator's own display.
+
+**What this measurement is not.** GTK 4.14.5 only; Qt is untested and GTK3
+is unavailable here. No window manager was running, which changes focus
+semantics, so the keyboard rows deserve a re-run once L1 has one. The sends
+were made with `xdotool` 3.20160805.1; a hand-rolled `XSendEvent` with
+different propagation could behave differently, and that is worth one
+attempt before this is treated as settled. Recorded now because it changes
+what L1 has to build, and finding that out after building it would be worse.
+
+**One thing that worked exactly as hoped.** `Ctrl+C` on the owner-drawn grid
+put its exact rows on the clipboard, read back with `xclip`. That is the
+Linux half of the route issue #1 is opening on Windows, and it is the first
+evidence anywhere in this project that a copy route gives exact text out of a
+control that has no children to read.
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on

@@ -168,10 +168,16 @@ def test_no_tool_module_outgrows_the_limit_the_split_set():
 
 TESTS = Path(__file__).resolve().parent
 
-#: Run as a subprocess (`python -m tests.fixtureapp`) and never imported by the
-#: test process, so it is Win32 at module scope on purpose. The Linux fixture
-#: (issue #7) joins it here when it lands.
-IMPORT_TIME_PLATFORM_ALLOWED = {"fixtureapp.py"}
+#: Run as subprocesses (`python -m tests.fixtureapp`, `... .fixtureapp_gtk`)
+#: and never imported by the test process, so each is its platform's toolkit at
+#: module scope on purpose.
+IMPORT_TIME_PLATFORM_ALLOWED = {"fixtureapp.py", "fixtureapp_gtk.py"}
+
+#: Modules that exist on one platform only. `ctypes.WinDLL` raises
+#: AttributeError off Windows; `gi` and `pyatspi` are simply absent off a
+#: Linux desktop. Both directions are named so the guard is symmetric -- the
+#: Linux backend must not do to Windows what four modules did to Linux (D74).
+PLATFORM_MODULES = {"gi", "pyatspi", "Xlib"}
 
 
 def _module_scope(tree):
@@ -195,13 +201,17 @@ def _binds_a_platform(node):
     for child in ast.walk(node):
         if isinstance(child, ast.Attribute) and child.attr in {"WinDLL", "windll"}:
             return "ctypes." + child.attr
-        if isinstance(child, ast.ImportFrom) and (child.module or "").startswith(
-            f"{PACKAGE}.backends."
-        ):
-            return child.module
+        if isinstance(child, ast.ImportFrom):
+            module = child.module or ""
+            if module.startswith(f"{PACKAGE}.backends."):
+                return module
+            if module.split(".")[0] in PLATFORM_MODULES:
+                return module
         if isinstance(child, ast.Import):
             for alias in child.names:
                 if alias.name.startswith(f"{PACKAGE}.backends."):
+                    return alias.name
+                if alias.name.split(".")[0] in PLATFORM_MODULES:
                     return alias.name
     return None
 

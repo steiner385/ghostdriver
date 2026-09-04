@@ -11,6 +11,10 @@ on_windows = pytest.mark.skipif(
     sys.platform != "win32", reason="Windows backend test"
 )
 
+on_linux = pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Linux backend test"
+)
+
 
 @functools.cache
 def user32():
