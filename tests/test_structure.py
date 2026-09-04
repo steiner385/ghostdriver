@@ -171,7 +171,8 @@ TESTS = Path(__file__).resolve().parent
 #: Run as subprocesses (`python -m tests.fixtureapp`, `... .fixtureapp_gtk`)
 #: and never imported by the test process, so each is its platform's toolkit at
 #: module scope on purpose.
-IMPORT_TIME_PLATFORM_ALLOWED = {"fixtureapp.py", "fixtureapp_gtk.py"}
+IMPORT_TIME_PLATFORM_ALLOWED = {"fixtureapp.py", "fixtureapp_gtk.py",
+                                "linux_atspi_probe.py"}
 
 #: Modules that exist on one platform only. `ctypes.WinDLL` raises
 #: AttributeError off Windows; `gi` and `pyatspi` are simply absent off a

@@ -36,6 +36,7 @@ import sys
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 gi.require_version("GdkX11", "4.0")
 from gi.repository import Gdk, GdkX11, GLib, Gtk  # noqa: E402
 
@@ -86,7 +87,7 @@ def _drawn_button(status):
     """D21's "a button that is not a BUTTON": a DrawingArea that paints itself
     and acts only on the press/release *pair*. A press alone does nothing, so
     a driver that synthesises half the pair sees no effect and no error."""
-    area = Gtk.DrawingArea()
+    area = Gtk.DrawingArea(accessible_role=Gtk.AccessibleRole.BUTTON)
     area.set_content_width(140)
     area.set_content_height(32)
     area.set_focusable(True)
@@ -142,7 +143,7 @@ def _grid(status):
     as one node however many rows it paints. Ctrl+C is the only route to its
     exact text (D50, D65) -- unless --grid-no-copy takes even that away, so a
     prober's honest "no route works" verdict can be tested."""
-    area = Gtk.DrawingArea()
+    area = Gtk.DrawingArea(accessible_role=Gtk.AccessibleRole.TABLE)
     area.set_content_width(340)
     area.set_content_height(90)
     area.set_focusable(True)
@@ -369,6 +370,12 @@ def main(argv=None):
                         help="exit this long after start; for unattended runs")
     parser.set_defaults(offscreen=True, grid_copies=True)
     options = parser.parse_args(argv)
+
+    # Without these the AT-SPI application node comes back named "Unnamed",
+    # which leaves a locator nothing to match the *application* on -- the
+    # Linux counterpart of the process/main-window pairing D3 does on Windows.
+    GLib.set_prgname("ghostdriver-fixture")
+    GLib.set_application_name("Ghostdriver GTK fixture")
 
     if not Gtk.init_check():
         print(json.dumps({"error": "no display"}), flush=True)

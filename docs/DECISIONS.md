@@ -2551,6 +2551,69 @@ can report failure while `focus` shows it open) is a matter of naming
 its pixels, is the way in, and that is a measurement for the next
 session, not a line of code.
 
+### D#8. L1 stands up, and the isolation needs a session bus of its own
+
+*(Two machines allocated D76 within the same minute -- the real-target
+validation run on the Windows box, and this. That one kept the number and
+this one moved, which is the cheap resolution once, and a standing hazard
+of numbering a shared log by hand. Recorded because the next pair of
+parallel sessions will hit it again.)*
+
+**Correcting D75 first.** D75 said no window manager was installed and that
+`at-spi-bus-launcher` and the AT-SPI bindings were missing. All three were
+wrong, and wrong the same way: each was checked with `command -v` or an
+`import`, and absence from `PATH` was read as absence from the machine. The
+operator runs GNOME Shell on `:0` with full EWMH; `at-spi-bus-launcher` is at
+`/usr/libexec/`, off `PATH` by design; and the bindings are `Atspi 2.0`
+through GObject introspection, which is a third route `docs/LINUX.md` did not
+list beside "pyatspi (or raw D-Bus)". Nothing had to be installed. The lesson
+is the cheap one: ask the system what it has, do not ask `PATH` whether it
+has the names you thought of.
+
+**The fourth piece.** `docs/LINUX.md` measurement 1 names three: `Xvfb`,
+`at-spi-bus-launcher`, and something to list the tree. It needs a fourth, and
+the fourth is what makes the strategy an isolation strategy rather than a
+convenience: **its own D-Bus session bus.** AT-SPI is discovered *through*
+the session bus, so a nested display that shares the operator's bus finds the
+operator's accessibility bus and enumerates the operator's applications.
+`dbus-run-session` keeps them apart.
+
+This was found the honest way: `gnome-shell` refused to start on the nested
+display with "org.gnome.Shell already exists on bus and --replace not
+specified" -- a singleton on the *session* bus, not a display conflict.
+
+**The guarantee is now asserted, not assumed.** With the operator running a
+full desktop on `:0`, the nested bus reports **one** desktop child: the
+fixture. `test_the_nested_bus_sees_only_the_fixture` fails if any of the
+operator's applications ever appear, which is the check that makes
+`HiddenDesktop` mean something on Linux.
+
+**What the tree showed.**
+
+* A `WindowNode` on Linux is an AT-SPI **frame** carrying the window title,
+  not an X window. Only toplevels have X ids; controls are accessibles.
+* The application node reported `Unnamed` until the fixture called
+  `GLib.set_prgname`. An unnamed application node leaves a locator nothing to
+  match the *application* on -- the counterpart of the process/main-window
+  pairing D3 does on Windows -- so a real target that does not set it will
+  have to be matched by pid alone.
+* **An owner-drawn control is invisible to a locator by default.** A
+  `Gtk.DrawingArea` comes back as a generic `panel` with an empty name, and
+  an accessible *label* alone does not change that: it took an accessible
+  *role* before the drawn button and the grid appeared as `push button` and
+  `table`. So on Linux the D56 problem is sharper than on Windows, where a
+  window class is always there to match: a control that declares no role is
+  not merely hard to name, it is indistinguishable from layout.
+* The grid is one `table` node with **zero children** while painting three
+  rows. That asymmetry is D50 exactly, and it is why the copy route matters.
+* All three entries -- plain, bound, and password -- report role `text`. The
+  password one is not a distinct role, so `is_protected` cannot be answered
+  from the role and must read `STATE_PROTECTED` (D33's constraint 4, D37,
+  D38). Confirming that state is L2's job.
+
+**Cost.** The nested stack takes several seconds to stand up, so the L1 tests
+share one and are marked slow.
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on
