@@ -2289,17 +2289,79 @@ it does -- name the window it reached, and let `expect` prove the effect
 or its absence. When `expect` shows nothing happened, `foreground` plus a
 real-input tool is the route, and the focus note says so (D69).
 
+### D74. The suite could not run on Linux, and the rule that says so is a test
+
+**Context.** With the backlog written up as issues, the Linux backend
+(D59) became startable work rather than a plan, and the first thing a
+Linux implementer does is run the tests. On this repository, on Linux,
+`pytest` did not run at all: `Interrupted: 4 errors during collection`.
+
+**What was wrong.** `pytestmark = on_windows` gates the *tests* in a
+module. It does not stop the *module* from running. Three test modules
+bound `ctypes.WinDLL` at module scope and a fourth imported
+`backends.windows.interference`, which binds it for you; each raises
+`AttributeError` on import. A binding that raises during collection is
+not a skip -- it aborts the whole run, so roughly 470 tests with nothing
+to do with Windows never ran either.
+
+**The rule was already the practice.** `conftest` keeps its Win32 in
+strings executed only in the Windows subprocess, with a comment saying
+why; `tests/test_windows_actuate.py` calls `WinDLL` inside its functions
+and defers its backend imports the same way. So the idiom existed, was
+understood, and was written down -- in two comments, one of which names
+the wrong exception (`OSError`; it is `AttributeError`). Nothing failed
+when four modules did it the other way, which is D60's lesson arriving a
+second time: a promise that lives only in prose is one a later change
+breaks without noticing.
+
+**The decision.** The rule is a test --
+`test_no_test_module_binds_a_platform_at_import_time` -- and it is stated
+per *platform*, not per symptom: a module-scope `ctypes.WinDLL`, a
+`ctypes.windll`, or an import of any `ghostdriver.backends.*` subpackage.
+Stated that way it is symmetric, so the Linux backend cannot do the
+mirror image of this to Windows when it lands.
+
+**And the copies went.** Six modules each held their own
+`ctypes.WinDLL("user32", use_last_error=True)`. That is six chances for
+the seventh to be written the other way, so they now share one lazy
+`conftest.user32()` and the copies are deleted rather than left to drift.
+
+**What the measurement showed.** Linux went from "cannot collect" to 896
+collected, 473 passed, 422 skipped, 0 errors. Two tests turned out to
+need Windows and never to have said so: a consent-store case whose whole
+premise is that a read-only *file* is undeletable -- true on Windows,
+false on POSIX, where deletion is a permission on the *directory* -- and
+a watch test reaching `InterferenceWatch`'s real Win32 defaults. The
+`[server]` extra is pinned to `mcp` 2.x while `importorskip` accepted any
+version, so a 1.x install answered the import and then failed fourteen
+tests on an inner path; it checks `minversion` now.
+
+**The 45% that skips is the more important number.** A Linux run reports
+no failures having verified less than half the suite and nothing of the
+backend. That is why the environment is now part of an issue rather than
+folklore, and why `CLAUDE.md` states it: neither platform can confirm the
+other, and "no failures" means "no failures among the tests that ran".
+
+**Not verified on Windows.** Recorded as done on one platform only.
+
 ## Open, for whoever picks this up
+
+> These two, and everything else outstanding, are now tracked as issues on
+> `steiner385/ghostdriver-mcp` and phased on the **GhostDriver** project
+> board. The list below is kept because it says *why* each gap is a gap,
+> which an issue title cannot; the board says what order to take them in
+> and which machine each one needs. If they disagree, this file is the
+> reasoning and the board is the plan.
 
 - **The denylist matches captions, identities (D57) and places (D72).** A
   control with none of the three -- one that scrolls inside its window --
-  is what remains unexpressible.
+  is what remains unexpressible. *(issue #2)*
 - **Nothing gives *exact* text out of an owner-drawn region.** The model can
   read a capture, which is enough to decide what to do next, but not enough
   to verify a value (D46). The routes that would give exact text -- the
   control's own clipboard copy, an export command, a hidden accessible
   surface -- are unprobed. That is the gap worth closing, and it is a
-  different gap from the one OCR was imagined to fill.
+  different gap from the one OCR was imagined to fill. *(issue #1)*
 
 ---
 
