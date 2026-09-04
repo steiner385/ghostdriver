@@ -102,8 +102,8 @@ class LifecycleTools(_ToolboxCore):
     ) -> dict:
         """Record which targets the operator approved or ruled out.
 
-        Session-scoped and revisable: a later decision replaces an earlier one.
-        Restricting a target with an open session stops it at its next call (D64).
+        Session-scoped and revisable; restricting a target with an open
+        session stops it at its next call (D64).
         """
         recorded = []
         stopped: list[str] = []
@@ -121,21 +121,23 @@ class LifecycleTools(_ToolboxCore):
                 "nothing to record: pass allow=[...] or restrict=[...]",
             )
         grants = self.sessions.grants()
+        allowed = sorted(g.pid for g in grants if g.allowed)
+        restricted = sorted(g.pid for g in grants if not g.allowed)
         out = {
             "ok": True,
+            # what changed, in full; standing totals as counts (D73)
             "recorded": [g.describe() for g in recorded],
-            "allowed": sorted(g.pid for g in grants if g.allowed),
-            "restricted": sorted(g.pid for g in grants if not g.allowed),
+            "allowed_count": len(allowed),
+            "restricted_count": len(restricted),
+            **({"restricted": restricted} if restricted else {}),
         }
         if stopped:
             out["open_sessions_stopped"] = stopped
             out["caution"] = (
                 f"session(s) {', '.join(stopped)} were open against a target "
-                "just restricted and will refuse from now on -- possibly "
-                "another chat's work, since one server can serve several "
-                "chats at once. Restrict only a target the operator ruled "
-                "out: a target nobody allowed is never automated, so leaving "
-                "one alone needs no record. allow=[pid] reverses this."
+                "just restricted and will refuse now -- possibly another chat's "
+                "work, since one server serves several chats. Restrict only what "
+                "the operator ruled out; allow=[pid] reverses this."
             )
         return out
 
@@ -288,11 +290,8 @@ class LifecycleTools(_ToolboxCore):
         result: dict = {"ok": True, "released": session_id}
         watch = self._watches.pop(session_id, None)
         if watch is not None:
-            # Anything it saw since the last call is still worth reporting.
-            # The window stays minimized: every way of un-minimizing it
-            # activates it (see MinimizedWatch.stop), and taking the
-            # operator's focus at release would break the promise the
-            # strategy exists to keep. They click the taskbar when ready.
+            # Report what it saw; leave the window minimized (un-minimizing
+            # activates it -- see MinimizedWatch.stop). They click the taskbar.
             events = watch.drain()
             if events:
                 result["watchdog_events"] = events

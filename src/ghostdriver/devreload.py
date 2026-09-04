@@ -247,8 +247,14 @@ class LiveToolbox:
         def traced(*args: Any, **kwargs: Any) -> Any:
             result = target(*args, **kwargs)
             events = reloader.take_events()
-            if events and isinstance(result, dict):
-                result["dev_reload"] = events if len(events) > 1 else events[0]
+            # Only actionable events reach a consumer result: a reconnect is
+            # needed, an edit failed, or a reload was held. A routine reload
+            # is developer telemetry and stays in the log, not in an
+            # operator's attach result (D73).
+            surfaced = [e for e in events
+                        if e.get("needs_reconnect") or e.get("error") or e.get("held")]
+            if surfaced and isinstance(result, dict):
+                result["dev_reload"] = surfaced if len(surfaced) > 1 else surfaced[0]
             return result
 
         return traced

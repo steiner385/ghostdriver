@@ -12,6 +12,7 @@ from .core import (
     MAX_ELEMENTS,
     _element,
     _error,
+    _physical,
     _ToolboxCore,
     _top_level_holding,
     _top_level_overlapping,
@@ -317,6 +318,7 @@ class DiscoveryTools(_ToolboxCore):
                 "pid": target.pid,
                 "handle_ephemeral": f"0x{target.handle:08X}",
                 "rect": {"left": left, "top": top, "right": right, "bottom": bottom},
+                **_physical(target.rect),
             },
             "base64": base64.b64encode(png).decode("ascii"),
         }

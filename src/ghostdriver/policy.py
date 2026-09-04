@@ -60,6 +60,9 @@ TIER_TOOLS: dict[Tier, frozenset[str]] = {
     }),
     Tier.INTERACTIVE: frozenset({
         "click", "type_text", "set_value", "send_keys",
+        # Brings a window forward on request. Interactive, because it
+        # interrupts the operator; never automatic (D73).
+        "foreground",
         # Reads the system clipboard: the result of a target's own Copy
         # command, which on some targets is the only exact read a grid has.
         # Interactive rather than read-only because the clipboard is the

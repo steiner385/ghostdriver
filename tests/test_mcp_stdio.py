@@ -26,7 +26,7 @@ pytestmark = pytest.mark.slow
 READ_TOOLS = {
     "list_targets", "attach", "release", "grant_targets",
     "describe", "find", "read", "capture", "wait_for",
-    "probe", "surfaces", "modals", "restore", "await_human",
+    "probe", "surfaces", "modals", "restore", "foreground", "await_human",
     "hit_targets", "read_clipboard", "wait_idle",
 }
 

@@ -21,7 +21,7 @@ from typing import Any
 #: surprise.
 CONTRACT: tuple[str, ...] = (
     # the window tree
-    "enumerate_process", "top_level_windows", "process_facts", "descendants",
+    "enumerate_process", "top_level_windows", "direct_children", "process_facts", "descendants",
     "parent_map",
     # reading
     "read_window_text", "is_protected", "capture_window", "CaptureError",

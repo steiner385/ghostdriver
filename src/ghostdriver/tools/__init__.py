@@ -29,6 +29,7 @@ from .discovery import DiscoveryTools
 from .human import HumanTools
 from .learning import LearningTools
 from .lifecycle import LifecycleTools
+from .screen import ScreenTools
 from .seek import SeekTools
 from .status import StatusTools
 
@@ -36,7 +37,7 @@ __all__ = ["MAX_ELEMENTS", "SENSITIVE_HINT", "Toolbox", "_element", "_error"]
 
 
 class Toolbox(LifecycleTools, DiscoveryTools, StatusTools, ActuationTools,
-              HumanTools, LearningTools, SeekTools):
+              HumanTools, LearningTools, SeekTools, ScreenTools):
     """Every tool, over one session manager.
 
     One class, so a caller holds one object; one module per family, so a
@@ -129,7 +130,8 @@ def _result_summary(result):
             "open_sessions_stopped", "length", "empty", "saved_to", "timeout_s",
             "found", "row_count", "pages_read", "reached_end", "advanced",
             "delivered_to", "hit_container", "warning", "until_change",
-            "still_arriving", "idle", "polls", "outside_container")
+            "still_arriving", "idle", "polls", "outside_container",
+            "took_foreground", "physical_rect")
     return {k: result[k] for k in keep if k in result}
 
 

@@ -137,6 +137,8 @@ class StatusTools(_ToolboxCore):
         state = session.run(lambda: top_level_state(session.pid))
         blocks, unexplained = find_modal_blocks(state)
         hung = [t for t in state if t.hung]
+        texts = {b.dialog.handle: session.run(lambda b=b: _dialog_text(b.dialog.handle))
+                 for b in blocks}
         return {
             "ok": True,
             "blocked": bool(blocks or unexplained),
@@ -150,6 +152,10 @@ class StatusTools(_ToolboxCore):
                     "dialog_class": b.dialog.class_name,
                     "holds": b.blocked.text or b.blocked.class_name,
                     "description": b.describe(),
+                    # Every text control in the dialog, read whole -- a
+                    # scrollable pane shows only part of its buffer, and the
+                    # part that matters is often below the fold (D73).
+                    "text": texts.get(b.dialog.handle) or None,
                 }
                 for b in blocks
             ],
@@ -164,6 +170,7 @@ class StatusTools(_ToolboxCore):
                 for u in unexplained
             ],
         }
+
 
 
     def hit_targets(self, session_id: str, locator: str, *,
@@ -332,3 +339,34 @@ class StatusTools(_ToolboxCore):
             "note": ("nothing was minimized" if not result.restored else
                      "the application re-showed its own forms"),
         }
+
+
+def _dialog_text(hwnd: int, *, limit: int = 8000) -> str:
+    """Every readable line of text inside a dialog, top to bottom.
+
+    A modal's edit, memo and label controls answer a text query with their
+    whole buffer, not just the visible part, so this returns the exception
+    below the fold that a capture cannot show (D73). Ordered by position so
+    it reads as the dialog does; de-duplicated because a control and its
+    frame can report the same string."""
+    from ..backends import current
+
+    enumerate_children = current().direct_children
+    read_window_text = current().read_window_text
+
+    lines: list[tuple[int, int, str]] = []
+    seen: set[str] = set()
+
+    def walk(handle: int) -> None:
+        for child in enumerate_children(handle):
+            text = (read_window_text(child) or "").strip()
+            if text and text not in seen:
+                seen.add(text)
+                rect = current().winapi.window_rect(child)
+                lines.append((rect[1], rect[0], text))
+            walk(child)
+
+    walk(hwnd)
+    lines.sort()
+    out = "\n".join(text for _, _, text in lines)
+    return out[:limit] + (" ..." if len(out) > limit else "")

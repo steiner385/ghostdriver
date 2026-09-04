@@ -377,3 +377,61 @@ def is_hung(hwnd: int) -> bool:
     pumped for five seconds. The one signal that tells a frozen application
     from a busy one (D66)."""
     return bool(user32.IsHungAppWindow(wintypes.HWND(hwnd)))
+
+
+user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+user32.AttachThreadInput.restype = wintypes.BOOL
+user32.BringWindowToTop.argtypes = [wintypes.HWND]
+user32.BringWindowToTop.restype = wintypes.BOOL
+user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+user32.SetForegroundWindow.restype = wintypes.BOOL
+kernel32_fg = ctypes.WinDLL("kernel32", use_last_error=True)
+kernel32_fg.GetCurrentThreadId.restype = wintypes.DWORD
+SW_RESTORE = 9
+
+
+def bring_foreground(hwnd: int) -> bool:
+    """Bring `hwnd` to the front and give it the foreground, returning whether
+    it took it. The opposite of everything else here, done only on request.
+
+    A background process cannot simply call SetForegroundWindow -- Windows
+    refuses, and the window only flashes in the taskbar. The documented way
+    around that is to attach this thread's input queue to the current
+    foreground window's thread for the duration of the call; while attached,
+    SetForegroundWindow is honoured. That attach is exactly what D64 refused
+    to do for a *click*, because it moves the keyboard focus the operator is
+    typing into -- which is why this is never automatic and never a side
+    effect. It is done here only because a caller asked to bring the window
+    forward, knowing it interrupts the operator (D73). The attach is undone
+    before returning.
+    """
+    target = wintypes.HWND(hwnd)
+    if user32.IsIconic(target):
+        user32.ShowWindow(target, SW_RESTORE)
+    fg = user32.GetForegroundWindow()
+    this_thread = kernel32_fg.GetCurrentThreadId()
+    fg_thread = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+    attached = False
+    if fg_thread and fg_thread != this_thread:
+        attached = bool(user32.AttachThreadInput(this_thread, fg_thread, True))
+    try:
+        user32.BringWindowToTop(target)
+        user32.SetForegroundWindow(target)
+    finally:
+        if attached:
+            user32.AttachThreadInput(this_thread, fg_thread, False)
+    now = user32.GetForegroundWindow()
+    return bool(now) and root_window(now) == root_window(hwnd)
+
+
+def to_physical_rect(rect: tuple[int, int, int, int]) -> dict:
+    """A logical-frame rectangle in physical pixels: what a DPI-aware
+    screenshot tool reports (D73). The scale is the display's, and a
+    DPI-unaware process's logical origin already matches the physical one
+    at the primary monitor's top-left, so the ratio is the whole
+    conversion."""
+    scale = display_scale()
+    left, top, right, bottom = rect
+    return {"left": round(left * scale), "top": round(top * scale),
+            "right": round(right * scale), "bottom": round(bottom * scale),
+            "scale": scale}

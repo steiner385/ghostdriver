@@ -367,7 +367,11 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "to confirm a value was saved. Reading pixels is a guess, however "
         "good a one, and this server is built so an action only claims "
         "success against something exactly checked: verify with `read`, or "
-        "with an `expect` naming where the committed value appears."
+        "with an `expect` naming where the committed value appears. A capture "
+        "with a locator returns an image whose pixel coordinates equal that "
+        "element's own logical coordinates, so a point measured in it is an "
+        "`at` with no arithmetic; and a scrollable pane shows only part of "
+        "its text -- `read` or `modals` returns the whole buffer."
     ))
     def capture(
         session_id: SessionId,
@@ -493,6 +497,21 @@ def build_server(sessions: SessionManager | None = None) -> Any:
                   timeout_s: Annotated[float, Field(description="Seconds; default 30.")] = 30.0,
                   ) -> dict[str, Any]:
         return box.wait_idle(session_id, timeout_s=timeout_s)
+
+    @server.tool(annotations=CHANGES_SCREEN, description=(
+        "Bring a window of the target to the front -- the deliberate pair to "
+        "isolation=minimized. Everything else works from the background, so "
+        "this is only for a step that needs the window frontmost, such as "
+        "handing the click to a tool that uses real input. It interrupts the "
+        "operator (the keyboard focus moves with the window), so it is never "
+        "automatic; interactive tier. Says whether it took the foreground -- "
+        "a background SetForegroundWindow can be refused."
+    ))
+    def foreground(session_id: SessionId,
+                   locator: Annotated[str | None, Field(description=(
+                       "A specific window to raise; omit for the main window."
+                   ))] = None) -> dict[str, Any]:
+        return box.foreground(session_id, locator=locator)
 
     @server.tool(annotations=CHANGES_SCREEN, description=(
         "Un-minimize the target so it can be read. Changes no application "

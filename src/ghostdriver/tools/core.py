@@ -73,6 +73,19 @@ def _accessible(element: AccessibleElement) -> dict:
     return described
 
 
+def _physical(rect) -> dict:
+    """`physical_rect` for a logical-frame rect, only when the display is
+    scaled -- at 100% it equals `rect` and would be noise (D73)."""
+    from ..backends import current
+
+    try:
+        if current().winapi.display_scale() == 1.0:
+            return {}
+        return {"physical_rect": current().winapi.to_physical_rect(rect)}
+    except Exception:
+        return {}
+
+
 def _element(node) -> dict:
     """One element, described so a caller can find it again."""
     if isinstance(node, AccessibleElement):
@@ -85,6 +98,7 @@ def _element(node) -> dict:
         "visible": node.visible,
         "enabled": node.enabled,
         "rect": {"left": left, "top": top, "right": right, "bottom": bottom},
+        **_physical(node.rect),
         # Valid only for this call. Present because it is the only thing that
         # tells two identically-captioned controls apart within one result.
         "handle_ephemeral": f"0x{node.handle:08X}",

@@ -2241,6 +2241,54 @@ frame; a control that scrolls within it is not tracked. That is the
 nature of a place; a control that can be named is still better denied
 by name.
 
+### D73. Bringing a window forward, on request; and three frame/telemetry fixes
+
+**Context.** A session driving System Manager produced the controlled
+experiment the earlier reports could not: three posted clicks across a
+fifteen-pixel spread on a Delphi `TSpeedButton` toolbar all returned
+`ok`/`delivery_only` and did nothing; one real click at the same point
+fired it. A VCL graphic control has no window, and the parent panel
+dispatches its clicks from *real* input, not a posted message. Delivery
+to that panel is honest and useless. Real input needs the window
+frontmost, and the tool had no way to bring it there -- which cost two
+hand-offs to the operator, one of them a stray second instance from
+computer-use's open_application.
+
+**`foreground`.** The deliberate pair to `isolation=minimized`: one keeps
+the target out of the way, this brings it forward. Asked for across three
+reports, each time with the operator accepting that it interrupts them, so
+it is built -- but never automatic and never a side effect. It attaches
+this thread's input queue to the current foreground thread for the length
+of one SetForegroundWindow (the dance D64 refused for a *click*, because
+it moves the keyboard focus the operator types into) and detaches
+immediately. Interactive tier. It reports `took_foreground`: a background
+process's SetForegroundWindow can be refused by Windows, and `false` is
+that refusal said plainly. The click itself still belongs to a tool that
+uses real input; this only makes that possible without a manual raise.
+Not built: real input inside this server. Posting is what keeps it
+background-safe everywhere else, and one deliberate raise plus the
+existing division of labour covers the case.
+
+**Three smaller things from the same report.** `find` and `capture` carry
+`physical_rect` beside `rect` when the display is scaled -- logical times
+the display scale -- so a coordinate maps into a DPI-aware screenshot
+tool's frame with one known quantity instead of a guess. `modals` returns
+each dialog's whole text, read from its child controls top to bottom, so
+the exception below a scrollable pane's fold arrives in one call rather
+than being guessed from the visible summary. And `dev_reload` no longer
+rides on an operator's result unless it is actionable (a reconnect is
+needed, an edit failed, a reload was held); a routine reload stays in the
+log. `grant_targets` reports counts and what it changed, not the whole
+standing pid list on every call.
+
+**Still not addressed, deliberately.** A posted click on a windowless
+graphic control cannot be told apart from one on an owner-drawn grid that
+*does* act on posted clicks -- both are `delivered_to` the container. So
+the click still cannot return `no_target_control`; what it can do is what
+it does -- name the window it reached, and let `expect` prove the effect
+or its absence. When `expect` shows nothing happened, `foreground` plus a
+real-input tool is the route, and the focus note says so (D69).
+
 ## Open, for whoever picks this up
 
 - **The denylist matches captions, identities (D57) and places (D72).** A

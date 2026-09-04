@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 #: contract name -> the submodule that implements it. `None` means the
 #: name *is* a submodule (a namespace of verbs, or the raw API).
 _WHERE: dict[str, str | None] = {
-    "enumerate_process": "enumerate", "top_level_windows": "enumerate",
+    "enumerate_process": "enumerate", "top_level_windows": "enumerate", "direct_children": "enumerate",
     "process_facts": "process", "descendants": "process", "parent_map": "process",
     "read_window_text": "text", "is_protected": "text",
     "capture_window": "capture", "CaptureError": "capture",
