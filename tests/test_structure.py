@@ -259,75 +259,100 @@ def test_no_test_module_binds_a_platform_at_import_time():
 
 DECISIONS = REPO / "docs" / "DECISIONS.md"
 
-#: `### D73.` / `### R5.` -- the log's two numbered series. D is a decision,
-#: R a revision of an earlier one.
-_NUMBERED = re.compile(r"^### ([DR])(\d+)\.", re.M)
+#: The frozen series. `### D73.` / `### R5.`, numbered from a counter, kept
+#: because several hundred references across the source tree point at them.
+_SEQUENTIAL = re.compile(r"^### ([DR])(\d+)\.", re.M)
+
+#: The live series. `### D#34.` -- numbered from the issue the decision came
+#: out of, so GitHub allocates it and two branches cannot pick the same one.
+_BY_ISSUE = re.compile(r"^### D#(\d+)\.", re.M)
+
+#: Where the counter stopped. Nothing may extend it.
+LAST_SEQUENTIAL_DECISION = 77
+
+
+def _text():
+    return DECISIONS.read_text(encoding="utf-8")
 
 
 def _series(kind):
-    text = DECISIONS.read_text(encoding="utf-8")
-    return [int(n) for k, n in _NUMBERED.findall(text) if k == kind]
+    return [int(n) for k, n in _SEQUENTIAL.findall(_text()) if k == kind]
+
+
+def test_no_new_decision_extends_the_frozen_counter():
+    """The rule that makes the change stick, rather than relying on everyone
+    remembering it.
+
+    A hand-kept counter cannot be made safe: every branch reads the highest
+    number before any branch writes one, so two sessions that start together
+    pick the same number and both are right. It happened three times in a
+    day. Issue numbers are handed out by GitHub once, so the question does
+    not arise -- but only if new entries actually use them, which is what
+    this checks.
+    """
+    over = sorted(n for n in _series("D") if n > LAST_SEQUENTIAL_DECISION)
+    assert not over, (
+        "docs/DECISIONS.md has "
+        + ", ".join(f"D{n}" for n in over)
+        + f", but the sequential series is frozen at D{LAST_SEQUENTIAL_DECISION}. "
+        "Number a new decision from the issue it came out of -- `### D#34.` "
+        "for issue 34 -- and open an issue for it first if it has none."
+    )
+
+
+def test_no_issue_numbered_decision_is_used_twice():
+    """One issue, one decision. If an issue genuinely produced two, suffix
+    them (`D#34a`, `D#34b`) rather than heading two entries the same, or a
+    reader following a reference lands on whichever comes first."""
+    numbers = _BY_ISSUE.findall(_text())
+    seen, repeated = set(), []
+    for n in numbers:
+        (repeated.append(n) if n in seen else None)
+        seen.add(n)
+    assert not repeated, (
+        "docs/DECISIONS.md heads two entries D#"
+        + ", D#".join(sorted(set(repeated)))
+        + ". One issue, one decision -- suffix them D#Na / D#Nb if an issue "
+        "really did produce two."
+    )
 
 
 @pytest.mark.parametrize("kind", ["D", "R"])
-def test_the_decision_log_gives_each_number_to_one_entry(kind):
-    """Two sessions on two machines both reached for D76 within the same
-    minute, because the log is numbered by hand and nothing checked. One of
-    them had to be renumbered after the fact, on a branch that had already
-    been pushed.
-
-    This fails on the *branch* that duplicates, before a merge is attempted,
-    which is the only cheap moment to fix it: after the merge the number is
-    in two commit messages, in whatever referred to it, and in anyone's
-    checkout.
-    """
+def test_the_frozen_series_gives_each_number_to_one_entry(kind):
+    """Still worth checking, because the frozen entries are what the source
+    tree's several hundred references point at. A duplicate there sends a
+    reader to the wrong decision."""
     numbers = _series(kind)
     seen, repeated = set(), []
     for n in numbers:
         (repeated.append(n) if n in seen else None)
         seen.add(n)
     assert not repeated, (
-        f"{kind}{repeated[0]} is used twice in docs/DECISIONS.md. Two sessions "
-        f"probably allocated it in parallel; renumber the one that has not "
-        f"merged yet -- the merged one keeps the number -- and say so in the "
-        f"entry, the way D78 does. All duplicates: "
-        + ", ".join(f"{kind}{n}" for n in repeated)
+        f"{kind}{repeated[0]} heads two entries in docs/DECISIONS.md. These are "
+        f"frozen and referenced from source; renumbering one breaks those "
+        f"references, so the fix is to merge or retitle the duplicate. "
+        "All: " + ", ".join(f"{kind}{n}" for n in repeated)
     )
 
 
-def test_a_gap_in_the_numbering_is_tolerated():
-    """Deliberately asserting the *absence* of a rule, like the ordering test
-    below, because the obvious guard is wrong and this one was written, run,
-    and removed inside a single afternoon.
+def test_numbers_may_skip_and_may_arrive_out_of_order():
+    """Deliberately asserting the *absence* of two rules, because both look
+    like obvious guards and both are wrong.
 
-    A gap-free check looks right and false-fails constantly. Two branches
-    open at once is the normal state here: one takes D77, the other reads the
-    same `main`, takes D78, and its own checkout is now missing D77 -- which
-    exists, on a branch this test cannot see. That happened within an hour of
-    the check being added, on the branch that added it.
+    Issue numbers skip by nature -- issue 8 and issue 34 with nothing
+    between -- and arrive in whatever order the work finished, so neither
+    contiguity nor sorting can be required. A contiguity check was written
+    and removed the same afternoon: while another branch held a number, this
+    checkout was legitimately missing it and the check false-failed.
 
-    A permanently lost decision is a real but small problem, and a reader
-    hunting a missing number will find it. A duplicate costs rework on a
-    pushed branch, twice so far. So uniqueness is the guard and contiguity is
-    not; the numbers are still allocated contiguously by convention, and
-    `CLAUDE.md` says to read the highest from `origin/main` rather than from
-    your checkout.
+    The frozen series is not sorted either: the 2026-09-02 revision section
+    holds D42-D48 after the iteration that reached D73.
     """
-    numbers = _series("D")
-    assert numbers, "the decision log has no numbered decisions at all"
-
-
-def test_the_decision_log_is_not_required_to_be_in_order():
-    """Deliberately asserting the *absence* of a rule, because the obvious
-    next guard would be wrong and someone will want to add it.
-
-    The log is not sorted and must not be forced to be: the 2026-09-02
-    revision section holds D42-D48 and sits *after* the iteration that
-    reached D73, so file order descends on purpose. What matters is that a
-    number identifies one entry, not where it sits.
-    """
-    numbers = _series("D")
-    assert numbers != sorted(numbers), (
-        "the decision log now happens to be in ascending order. That is fine, "
-        "but do not add a test requiring it -- see this test's docstring."
+    assert _BY_ISSUE.findall(_text()), "no issue-numbered decisions yet"
+    sequential = _series("D")
+    assert sequential != sorted(sequential), (
+        "the frozen series is now in ascending order. Fine, but do not add a "
+        "test requiring it -- see this test's docstring."
     )
+
+

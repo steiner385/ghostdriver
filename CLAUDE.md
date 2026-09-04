@@ -10,20 +10,18 @@ written so a decision can be *disagreed with* later — which needs the reason,
 not just the outcome. New decisions go at the end of the current iteration,
 numbered, with the evidence.
 
-**Check the highest number on `origin/main`, not in your checkout, before
-taking one — and expect to lose the race anyway.** It has happened twice:
-D76 and D77 were each allocated by two machines within a minute, and the
-same entry was renumbered both times. `tests/test_structure.py` enforces
-that a number appears once *in one file*, which is the cheap half; it cannot
-see across branches, so a collision surfaces at the second merge.
+**Number a new decision from its issue.** The decision that came out of
+issue 34 is `### D#34.`; if the thing you decided has no issue, open one
+first. GitHub hands each issue number out once, so two people working at the
+same time cannot pick the same one.
 
-Two rules it deliberately does **not** enforce, both because the obvious
-guard is wrong:
+D1–D77 are the old scheme, numbered from a counter, and are frozen — several
+hundred references across the source tree point at them. `tests/test_structure.py`
+fails if anything extends that counter, so you do not have to remember this.
 
-- **Gaps are fine.** While another branch holds D77, your checkout is
-  legitimately missing it. A gap-free check false-fails constantly.
-- **Order is not required.** The log is not sorted: the 2026-09-02 revision
-  section holds D42–D48 after the iteration that reached D73.
+Numbers now skip and arrive out of order, because issue numbers do. That is
+expected, and two tests deliberately assert that neither contiguity nor
+sorting is required — don't add a guard for either.
 
 ## Environment-gated issues
 

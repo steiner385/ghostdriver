@@ -124,7 +124,7 @@ a foreground grab *is*).
    neither `_NET_CLIENT_LIST` nor `_NET_ACTIVE_WINDOW` -- both come from a
    WM, not the X server -- so measurements 6 and 7 cannot be asked without
    one, and enumeration must walk the tree instead.
-   **Correction (D78): and a session bus of its own.** AT-SPI is discovered
+   **Correction (D#8): and a session bus of its own.** AT-SPI is discovered
    through the D-Bus *session* bus, so a nested display sharing the
    operator's finds the operator's a11y bus and enumerates the operator's
    applications. `dbus-run-session` is what makes this an isolation strategy

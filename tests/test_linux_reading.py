@@ -11,7 +11,7 @@ one.** Both facts are pinned here so that the Linux backend cannot be built
 without confronting them, and so that a GTK version which fixes either will
 fail these tests loudly rather than quietly widening what the driver reads.
 
-Against GTK 4.14.5. See D79.
+Against GTK 4.14.5. See D#34.
 """
 
 import pytest

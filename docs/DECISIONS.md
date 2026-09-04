@@ -2551,18 +2551,23 @@ can report failure while `focus` shows it open) is a matter of naming
 its pixels, is the way in, and that is a measurement for the next
 session, not a line of code.
 
+> **A note on numbering.** Decisions D1-D77 are numbered sequentially and
+> are frozen -- several hundred references across the source tree point at
+> them. From here on a decision is numbered by the **issue** it came out of:
+> `D#8` is the decision that came out of issue 8. Issue numbers are handed
+> out once by GitHub, so two people working at the same time cannot pick the
+> same one, which a hand-kept counter could not manage -- it collided three
+> times in a day. Numbers therefore skip and arrive out of order, and that is
+> expected. If a decision has no issue, open one for it first.
+
 ### D#8. L1 stands up, and the isolation needs a session bus of its own
 
-*(This entry has now been renumbered twice. It was D76 until the real-target
-validation run took that, and D77 until the click-surface work took that.
-Both times two machines branched from the same `main`, read the same highest
-number, and both were right. `tests/test_structure.py` catches a duplicate
-inside one file, which is the easy half; it cannot see across branches, so
-the collision surfaces at the second merge. The remaining guard is the
-convention in CLAUDE.md -- read the highest number from `origin/main`, not
-from your checkout -- and even that loses a race this tight. Left here as
-the evidence that hand-numbering a shared log does not survive two parallel
-sessions.)*
+*(Numbered from its issue rather than from a counter, and this entry is why.
+It was D76, then D77, then D78: three times, two machines branched from the
+same `main`, read the same highest number, and both were right. A shared
+counter that every branch reads before any branch writes cannot be made
+safe by care. An issue number is handed out by GitHub once, so the question
+does not arise.)*
 
 **Correcting D75 first.** D75 said no window manager was installed and that
 `at-spi-bus-launcher` and the AT-SPI bindings were missing. All three were
@@ -2615,7 +2620,7 @@ operator's applications ever appear, which is the check that makes
   password one is not a distinct role, so `is_protected` cannot be answered
   from the role and must read `STATE_PROTECTED` (D33's constraint 4, D37,
   D38). Confirming that state is L2's job.
-  **Wrong, corrected by D79: there is no `STATE_PROTECTED`.** AT-SPI's
+  **Wrong, corrected by D#34: there is no `STATE_PROTECTED`.** AT-SPI's
   `StateType` has 45 members and none of them names one. The sentence was
   written from the Windows model rather than from a measurement, which is
   the mistake this document exists to prevent.
@@ -2623,14 +2628,14 @@ operator's applications ever appear, which is the check that makes
 **Cost.** The nested stack takes several seconds to stand up, so the L1 tests
 share one and are marked slow.
 
-### D79. AT-SPI gives out the password, and hides which field is one
+### D#34. AT-SPI gives out the password, and hides which field is one
 
 **Context.** L2 asks which controls answer `Text` and which only `Name`
 (`docs/LINUX.md` measurement 2). The answer is dull -- entries answer
 `Text`, buttons do not -- and on the way to it two things turned up that
 are not about reading at all. Measured against GTK 4.14.5.
 
-**First: there is no `PROTECTED` state.** D78 said `is_protected` would have
+**First: there is no `PROTECTED` state.** D#8 said `is_protected` would have
 to read `STATE_PROTECTED`. It cannot: AT-SPI's `StateType` has 45 members
 and none of them is one. That sentence was written from the Windows model
 (`EM_GETPASSWORDCHAR`, D33 constraint 4) rather than from a measurement.
