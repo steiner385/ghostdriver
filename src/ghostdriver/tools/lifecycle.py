@@ -225,7 +225,7 @@ class LifecycleTools(_ToolboxCore):
             MinimizedWatch = current().MinimizedWatch
             WatchError = current().WatchError
 
-            watch = MinimizedWatch(pid)
+            watch = MinimizedWatch(pid, family=lambda: self._tree_pids(session))
             try:
                 session.run(watch.start)
             except WatchError as exc:

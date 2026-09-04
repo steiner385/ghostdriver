@@ -135,6 +135,10 @@ OFFSCREEN = -32000
 #: can assert on the application's own idea of its state rather than on
 #: what the screen happens to look like.
 WM_FIXTURE_CURRENT_PAGE = WM_USER + 11
+#: On demand, for tests that must not race a timer: raise the modal now;
+#: spawn the child process now (D71).
+WM_FIXTURE_RAISE_MODAL = WM_USER + 12
+WM_FIXTURE_SPAWN_CHILD = WM_USER + 13
 
 for fn, argtypes, restype in (
     ("DefWindowProcW", [wintypes.HWND, wintypes.UINT, wintypes.WPARAM,
@@ -661,6 +665,23 @@ def _show_page(index: int) -> None:
     _STATE["page_index"] = index
 
 
+def _spawn_child() -> None:
+    """A window in a child process: the shape of a browser's file dialog,
+    which lives in a helper process of its own. A second fixture, announced
+    on a second stdout line; on screen when --child-onscreen was given."""
+    import json as _json
+    import subprocess as _subprocess
+    import sys as _sys
+    child = _subprocess.Popen(
+        [_sys.executable, "-u", "-m", "tests.fixtureapp"]
+        + (["--onscreen"] if _STATE.get("child_onscreen") else []),
+        stdout=_subprocess.PIPE, text=True)
+    announced = _json.loads(child.stdout.readline())
+    _STATE["child"] = child
+    print(_json.dumps({"child": announced["pid"]}), flush=True)
+
+
+
 def _main_proc(hwnd, msg, wparam, lparam):
     if msg == WM_FIXTURE_CURRENT_PAGE:
         return _STATE.get("page_index", 0)
@@ -697,6 +718,12 @@ def _main_proc(hwnd, msg, wparam, lparam):
         user32.SetWindowTextW(wintypes.HWND(_STATE["status"]),
                               f"clicks={_STATE['clicks']} last={name}")
         return 0
+    if msg == WM_FIXTURE_RAISE_MODAL:
+        _show_modal()
+        return 0
+    if msg == WM_FIXTURE_SPAWN_CHILD:
+        _spawn_child()
+        return 0
     if msg == WM_TIMER:
         if wparam == 1:
             # Section 10 item 7: a modal that appears mid-run.
@@ -719,19 +746,8 @@ def _main_proc(hwnd, msg, wparam, lparam):
             _time.sleep(_STATE.get("hang_s", 30))
             return 0
         if wparam == 3:
-            # A window in a child process: the shape of a browser's file
-            # dialog, which lives in a helper process of its own. A second
-            # fixture, off-screen, announced on a second stdout line.
             user32.KillTimer(wintypes.HWND(hwnd), ctypes.c_void_p(3))
-            import json as _json
-            import subprocess as _subprocess
-            import sys as _sys
-            child = _subprocess.Popen(
-                [_sys.executable, "-u", "-m", "tests.fixtureapp"],
-                stdout=_subprocess.PIPE, text=True)
-            announced = _json.loads(child.stdout.readline())
-            _STATE["child"] = child
-            print(_json.dumps({"child": announced["pid"]}), flush=True)
+            _spawn_child()
             return 0
     if msg == WM_DESTROY:
         user32.PostQuitMessage(0)
@@ -954,6 +970,7 @@ def build(options) -> dict:
     if options.modal_after:
         user32.SetTimer(wintypes.HWND(main), ctypes.c_void_p(1),
                         options.modal_after, None)
+    _STATE["child_onscreen"] = options.child_onscreen
     if options.child_after:
         user32.SetTimer(wintypes.HWND(main), ctypes.c_void_p(3),
                         options.child_after, None)
@@ -1015,6 +1032,8 @@ def main(argv=None) -> None:
                         action="store_false",
                         help="Make the grid ignore WM_COPY, so the probe's "
                              "honest 'no route works' verdict can be tested.")
+    parser.add_argument("--child-onscreen", action="store_true",
+                        help="the child process's window is shown on screen (no-activate)")
     parser.add_argument("--child-after", type=int, default=0, metavar="MS",
                         help="spawn a second fixture in a child process after MS "
                              "(announced as a second JSON line: {\"child\": pid})")

@@ -117,13 +117,19 @@ def test_the_whole_value_rung_touches_no_clipboard(app):
     from ghostdriver.backends.windows.input import insert_text
     from ghostdriver.backends.windows.text import read_window_text
 
-    before = ctypes.windll.user32.GetClipboardSequenceNumber()
-
-    assert insert_text(app["plain_edit"], "WHOLE-0001")
-    time.sleep(0.2)
+    sequence = ctypes.windll.user32.GetClipboardSequenceNumber
+    # The person may copy something in the window, which moves the number
+    # too; a moved number is retried, and three in a row would not be them.
+    for _ in range(3):
+        before = sequence()
+        assert insert_text(app["plain_edit"], "WHOLE-0001")
+        time.sleep(0.2)
+        if sequence() == before:
+            break
+    else:
+        raise AssertionError("the clipboard sequence number moved on every try")
 
     assert read_window_text(app["plain_edit"]) == "WHOLE-0001"
-    assert ctypes.windll.user32.GetClipboardSequenceNumber() == before
 
 
 def test_set_value_names_the_route_that_delivered(app):

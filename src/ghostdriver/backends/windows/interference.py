@@ -36,10 +36,13 @@ def _foreground_pid() -> int:
 
 class InterferenceWatch:
     def __init__(self, pid: int, *,
+                 family: Callable[[], list[int]] | None = None,
                  foreground_pid: Callable[[], int] = _foreground_pid,
                  cursor: Callable[[], tuple[int, int]] = _cursor,
                  now: Callable[[], float] = time.time):
         self.pid = pid
+        #: The process family to watch for, asked each poll (R5, D71).
+        self._family = family
         self._foreground_pid = foreground_pid
         self._cursor = cursor
         self._now = now
@@ -60,13 +63,27 @@ class InterferenceWatch:
     def events(self) -> list[dict]:
         return list(self._events)
 
+    def family_now(self) -> list[int]:
+        """The target and its descendants right now; the target alone when
+        no family was given or the snapshot failed."""
+        if self._family is None:
+            return [self.pid]
+        try:
+            pids = list(self._family())
+        except Exception:
+            return [self.pid]
+        return pids if self.pid in pids else [self.pid, *pids]
+
     def observe(self, foreground_pid: int, cursor: tuple[int, int],
                 last_foreground: int, last_cursor: tuple[int, int]) -> None:
         """One poll step, separated so it can be fed."""
-        if foreground_pid == self.pid and last_foreground != self.pid:
+        family = self.family_now()
+        if foreground_pid in family and last_foreground not in family:
+            who = ("the target" if foreground_pid == self.pid
+                   else f"a process the target spawned (pid {foreground_pid})")
             self._events.append({
-                "kind": "foreground_taken", "at": self._now(),
-                "detail": "a window of the target became the foreground window",
+                "kind": "foreground_taken", "at": self._now(), "pid": foreground_pid,
+                "detail": f"a window of {who} became the foreground window",
             })
         if cursor != last_cursor:
             self._events.append({

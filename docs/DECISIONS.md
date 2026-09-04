@@ -1569,12 +1569,8 @@ exactly where a dialog's controls are. It is applied after the trees are
 combined now, for windows and for elements alike, and the fixture test
 picks the child's button by index among two identical ones.
 
-**Not extended: the watchdog and the interference watch.** Both still
-sample the target pid alone. A helper-process dialog that comes on screen
-under the `minimized` strategy is not yet an escape the watchdog sees,
-and a helper taking the foreground is not yet an interference event. Both
-should follow the tree; neither was needed for the case at hand, and
-each is a measurement rather than a line of code.
+**Extended in D71: the watchdog and the interference watch follow the
+tree.** Both sampled the target pid alone until then.
 
 ### D61. The ask goes where the person is looking, and a click has buttons and modifiers
 
@@ -2182,6 +2178,39 @@ writes nothing; it stays as it was.
 are excluded from the quick gate, and snapshot-and-restore around
 themselves. The whole-value rung's test proves the sequence number did
 not move, which is stronger than any restore.
+
+### D71. The watches follow the process tree
+
+**Context.** R5 made consent and sessions cover a process tree and left
+two watchers behind: the minimized-session watchdog and the workflow
+interference watch both sampled the target pid alone. A file dialog in a
+browser's helper process coming on screen under the minimized strategy
+was not an escape the watchdog saw, and a helper taking the foreground
+was not an interference event.
+
+**What changed.** Each watch takes an optional `family` callable that
+returns the target and its descendants, asked on every poll, so a helper
+that appears later is watched too; the session's cached tree (0.5 s)
+supplies it for the watchdog, the backend's `descendants` for the
+workflow runner. The watchdog samples every member's top-level windows
+and treats a foreground window of any member as the target holding the
+front; when the window it photographs belongs to a helper, it puts that
+window away itself, since minimizing the parent's main window hides an
+owned modal but not another process's window. The interference watch
+reports which pid took the foreground and says when it was a process the
+target spawned. A snapshot that fails on one poll falls back to the
+target alone for that poll. Proven on the fixture: a child-process
+window shown on screen under a minimized session is caught, photographed
+and put away, and a fed sequence proves the interference watch's family
+logic without disturbing a desktop.
+
+**The open items above, revisited.** "Nothing gives exact text out of an
+owner-drawn region" is closed as written: `probe_grid` probes the routes
+it named, `grid_seek` reads a grid through its own Copy, and
+`read_clipboard` reads that copy back (D63, D65, D70). The denylist item
+is half closed: an element identity -- a toolbar button by position, a
+tab by name -- can be denied since D57; a grid cell still cannot, because
+nothing names one.
 
 ## Open, for whoever picks this up
 

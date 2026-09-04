@@ -29,20 +29,32 @@ def _main_window(pid: int) -> int | None:
     return tree.handle if tree else None
 
 
-def _on_screen_window(pid: int) -> int | None:
-    """A visible, non-minimized top-level window of `pid`, if any.
+def _family(pid) -> list[int]:
+    """A pid, or the pids of a process family (target first), as a list.
+
+    An application is a process tree (R5): a browser's file dialog lives in
+    a helper process, and an escape from *that* process is the application
+    escaping. Every sampler here takes either form.
+    """
+    return [pid] if isinstance(pid, int) else list(pid)
+
+
+def _on_screen_window(pid) -> int | None:
+    """A visible, non-minimized top-level window of the family, if any.
 
     The window the escape put in front of a person -- what the capture
     should show. Preferring an owned popup (a modal) over the shell is not
     worth the machinery; the first on-screen window is the one to photograph.
     """
-    for hwnd in top_level_windows(pid):
-        if winapi.user32.IsWindowVisible(wintypes.HWND(hwnd)) and                 not winapi.is_minimized(hwnd):
-            return hwnd
+    for member in _family(pid):
+        for hwnd in top_level_windows(member):
+            if winapi.user32.IsWindowVisible(wintypes.HWND(hwnd)) and \
+                    not winapi.is_minimized(hwnd):
+                return hwnd
     return None
 
 
-def sample(pid: int, now: Callable[[], float]) -> Observation:
+def sample(pid, now: Callable[[], float]) -> Observation:
     """One read of whether the target is on screen, and holding the front.
 
     On-screen scans every top-level window of the process, not just the
@@ -55,15 +67,12 @@ def sample(pid: int, now: Callable[[], float]) -> Observation:
     the target raises is a different window of the same process, and that
     still counts as the target holding the front.
     """
-    on_screen = False
-    for hwnd in top_level_windows(pid):
-        if winapi.user32.IsWindowVisible(wintypes.HWND(hwnd)) and                 not winapi.is_minimized(hwnd):
-            on_screen = True
-            break
+    family = _family(pid)
+    on_screen = _on_screen_window(family) is not None
     foreground = winapi.foreground_window()
     target_front = (
         bool(foreground)
-        and winapi.window_pid(foreground) == pid
+        and winapi.window_pid(foreground) in family
         and not winapi.is_minimized(foreground)
     )
     return Observation(
@@ -73,7 +82,7 @@ def sample(pid: int, now: Callable[[], float]) -> Observation:
     )
 
 
-def enforce(pid: int, main_hwnd: int, action: Action,
+def enforce(pid, main_hwnd: int, action: Action,
             dog: Watchdog) -> None:
     """Carry out one watchdog decision, and hand back any capture it wanted.
 
@@ -94,10 +103,14 @@ def enforce(pid: int, main_hwnd: int, action: Action,
             dog.attach_capture(png)
         except CaptureError:
             pass
+        if target != main_hwnd and winapi.window_pid(target) != winapi.window_pid(main_hwnd):
+            # A helper process's window is not put away by minimizing its
+            # parent's main window, as an owned modal is; put it away itself.
+            winapi.minimize_no_activate(target)
     winapi.minimize_no_activate(main_hwnd)
 
 
-def watch_once(pid: int, main_hwnd: int, dog: Watchdog) -> Action:
+def watch_once(pid, main_hwnd: int, dog: Watchdog) -> Action:
     """Sample the target once and act on what the watchdog decides.
 
     The main window handle is passed in, not re-resolved. Resolution picks
@@ -167,8 +180,13 @@ class MinimizedWatch:
 
     INTERVAL_S = 0.1
 
-    def __init__(self, pid: int, *, now: Callable[[], float] = time.monotonic):
+    def __init__(self, pid: int, *, now: Callable[[], float] = time.monotonic,
+                 family: Callable[[], list[int]] | None = None):
         self.pid = pid
+        #: The current process family (target and its descendants), asked
+        #: each poll so a helper process that appears later is watched too.
+        #: None means the target alone (R5, extended in D71).
+        self.family = family
         self.dog = Watchdog(now=now)
         self.main_hwnd: int | None = None
         #: True when *we* minimized it -- reported at release, so the
@@ -196,12 +214,21 @@ class MinimizedWatch:
         while not self._stop.is_set():
             try:
                 with self._lock:
-                    watch_once(self.pid, self.main_hwnd, self.dog)
+                    watch_once(self._pids(), self.main_hwnd, self.dog)
             except OSError:
                 # A window that vanished between sample and act. The next
                 # poll sees the world as it is; one bad poll is not news.
                 pass
             self._stop.wait(self.INTERVAL_S)
+
+    def _pids(self) -> list[int]:
+        if self.family is None:
+            return [self.pid]
+        try:
+            pids = list(self.family())
+        except Exception:  # a process snapshot that failed: the target alone this poll
+            return [self.pid]
+        return pids if self.pid in pids else [self.pid, *pids]
 
     def drain(self) -> list[dict]:
         """Every event since the last drain, as data; captures kept aside."""

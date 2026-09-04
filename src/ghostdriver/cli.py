@@ -690,7 +690,8 @@ def cmd_run_workflow(name: str, pid: int, operator_dir: str | None = None) -> in
                     if workflow.profile else None)
     report = run_workflow(
         Toolbox(SessionManager()), workflow, pid=pid,
-        watch=InterferenceWatch(pid), profile_path=profile_path,
+        watch=InterferenceWatch(pid, family=lambda: [pid, *_descendants(pid)]),
+        profile_path=profile_path,
     )
     stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(report.started_at))
     written = folder.write_report(workflow.name, stamp, report.to_dict())
@@ -773,3 +774,13 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def _descendants(pid: int) -> list[int]:
+    """The processes the target spawned, through the backend (R5)."""
+    from .backends import current
+
+    try:
+        return list(current().descendants(pid))
+    except Exception:
+        return []

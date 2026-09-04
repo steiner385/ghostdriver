@@ -125,6 +125,8 @@ reported as needing a reconnect (`/mcp` in Claude Code); a new tool or
 parameter always does, since the host caches the tool list at connect.
 An edit that fails to import keeps the previous generation running.
 
+**The watches follow the process tree.** A session's consent covers the target's helper processes, and so do its watches: under `isolation=minimized`, a helper's window coming on screen is caught, photographed and put away, and a workflow's interference watch reports a helper taking the foreground as the target taking it.
+
 **The clipboard is the person's.** Setting text never touches it: the whole-value rung inserts through the control's own edit path. The one route that must write it, a grid's own Copy, runs only in a session attached with `clipboard=true`, and puts every format back afterwards.
 
 **The effect may arrive after the action.** A profile can name how the target shows it is busy -- `busy_indicator`, a locator present while busy or a region that renders ink while busy. Every actuation result then says `still_arriving` while it shows, and `wait_idle` waits for it to clear before you read a grid that is still filling.

@@ -55,8 +55,10 @@ def target():
 
 @pytest.fixture
 def modal_target():
-    """Raises its own modal 600ms after starting -- the escape that matters."""
-    proc, handles = start("--modal-after", "600")
+    """Raises its own modal 1.5s after starting -- the escape that matters.
+    Late enough that attach (and the watchdog's first poll) is done first on
+    a loaded machine; a modal already up when the watch starts is no escape."""
+    proc, handles = start()
     yield handles
     stop(proc, handles)
 
@@ -81,6 +83,17 @@ def foreground_pid():
     hwnd = winapi.foreground_window()
     return winapi.window_pid(hwnd) if hwnd else 0
 
+
+
+def raise_modal(handles):
+    """Ask the fixture to raise its modal now: after the watch is up, so the
+    escape is a transition the watchdog sees, never a race with a timer."""
+    import ctypes
+    from ctypes import wintypes
+
+    from tests.fixtureapp import WM_FIXTURE_RAISE_MODAL
+
+    ctypes.windll.user32.PostMessageW(wintypes.HWND(handles["main"]), WM_FIXTURE_RAISE_MODAL, 0, 0)
 
 def minimized(hwnd):
     from ghostdriver.backends.windows import winapi
@@ -144,8 +157,8 @@ def test_a_window_the_target_raises_is_caught_captured_and_reported(
         box, modal_target):
     session = attached(box, modal_target["pid"])["session_id"]
 
-    # The modal comes at 600ms; give the watchdog a few polls after it.
-    time.sleep(1.5)
+    raise_modal(modal_target)
+    time.sleep(1.2)  # a few watchdog polls after the modal
     result = box.modals(session)
 
     assert result["ok"], result
@@ -166,7 +179,8 @@ def test_events_ride_on_whichever_tool_is_called_next(box, modal_target):
     """The event is the product; a caller should not have to know which
     tool to ask. `describe` reports it as readily as `modals` would."""
     session = attached(box, modal_target["pid"])["session_id"]
-    time.sleep(1.5)
+    raise_modal(modal_target)
+    time.sleep(1.2)
 
     result = box.describe(session)
 
@@ -221,6 +235,7 @@ def test_release_leaves_a_target_that_was_already_minimized_alone(box, target):
 
 def test_release_reports_what_the_watchdog_saw_last(box, modal_target):
     session = attached(box, modal_target["pid"])["session_id"]
+    raise_modal(modal_target)
     # The modal comes at 600ms and the watchdog polls at 100ms; on a loaded
     # machine either can be late, so wait for the event itself, bounded.
     watch = box._watches[session]
