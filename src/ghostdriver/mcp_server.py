@@ -526,8 +526,10 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         return box.restore(session_id)
 
     ExpectArg = Annotated[dict | str | None, Field(description=(
-        "How to tell that this worked: {locator, text}, or a bare locator "
-        "string as shorthand for \"this is now present\". Checked after the "
+        "How to tell that this worked: {locator, text}, a bare locator string "
+        "for \"this is now present\", or {changed: true} when no control can be "
+        "named and the effect is the surface itself moving -- a palette docking "
+        "a few seconds later (timeout_s, default 6). Checked after the "
         "action, and re-resolved at that point -- so it can name something "
         "that does not exist until the action succeeds. Without it the "
         "result reports only that the input was delivered."

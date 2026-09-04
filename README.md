@@ -125,6 +125,13 @@ reported as needing a reconnect (`/mcp` in Claude Code); a new tool or
 parameter always does, since the host caches the tool list at connect.
 An edit that fails to import keeps the previous generation running.
 
+**A click can name the surface changing.** When no control's presence
+proves an action worked -- an owner-drawn bar whose click docks a
+palette seconds later -- `expect={"changed": true}` verifies against the
+surface shape instead, and tells "delivered and something changed" from
+"delivered and nothing did". The delivered-inactive caveat is dropped
+when the click's own disturbances show a window opening or closing.
+
 **A window can be brought forward, on request.** `foreground` is the
 deliberate pair to `isolation=minimized`: everything works from the
 background, but when a step needs the window frontmost -- handing the
