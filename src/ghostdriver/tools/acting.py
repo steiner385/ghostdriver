@@ -9,7 +9,6 @@ carry it; `ActuationTools` and `LearningTools` subclass this.
 
 
 from ..model.element import AccessibleElement
-from ..model.locator import Locator
 from ..model.result import ErrorKind, GhostdriverError
 from .core import (
     MAX_ELEMENTS,
@@ -19,10 +18,11 @@ from .core import (
     _Prepared,
 )
 from .deny import _DenyCore
+from .expect import _ExpectCore
 from .guidance import FOCUS_NOTE
 
 
-class _ActingCore(_DenyCore):
+class _ActingCore(_DenyCore, _ExpectCore):
     """Resolve, gate, perform, report: the steps every acting tool shares."""
 
     #
@@ -143,15 +143,17 @@ class _ActingCore(_DenyCore):
 
         return notes.cadence_for(surface_of(handle))
 
-    def _actuator(self, session):
+    def _actuator(self, session, *, verify_timeout_s: float | None = None):
         from ..actuate import Actuator
         from ..backends import current
         snapshot = current().snapshot
 
-        return Actuator(observe=lambda: session.run(
-            lambda: snapshot(session.pid)))
+        observe = lambda: session.run(lambda: snapshot(session.pid))  # noqa: E731
+        if verify_timeout_s is None:
+            return Actuator(observe=observe)
+        return Actuator(observe=observe, verify_timeout_s=verify_timeout_s)
 
-    def _perform(self, session, attempts, **kw):
+    def _perform(self, session, attempts, *, verify_timeout_s: float | None = None, **kw):
         """Run an actuation where the target can be seen.
 
         The whole perform is marshalled, not each message: verb posts, the
@@ -161,7 +163,9 @@ class _ActingCore(_DenyCore):
         the snapshot and conditions inside -- which call back through the
         session -- execute inline rather than deadlocking.
         """
-        return session.run(lambda: self._actuator(session).perform(attempts, **kw))
+        return session.run(
+            lambda: self._actuator(session, verify_timeout_s=verify_timeout_s).perform(
+                attempts, **kw))
 
     def _remember(self, session_id: str, tool: str, locator: str,
                   prepared, result) -> None:
@@ -323,73 +327,3 @@ class _ActingCore(_DenyCore):
                 "incomplete. wait_idle first, then read"
             )
         return reported
-
-    def _expectation(self, session, expect: dict | str | None):
-        """Turn a caller\'s `expect` into a condition, re-resolved each time.
-
-        Re-resolving rather than holding a handle is the point: the element
-        that proves an action worked may not exist until the action has
-        worked. A handle captured beforehand would be stale or absent
-        exactly when the check matters.
-
-        The locator is parsed *here*, before anything is sent, and a bad one
-        is an error rather than an unmet condition. Those look identical from
-        the outside and mean opposite things: one says the application did
-        not do what you expected, the other says you mistyped. Reporting the
-        second as the first sends a caller looking at their target when the
-        problem is their query -- and since a malformed locator can never
-        hold, the action would fail every time and look like a target that
-        never responds.
-        """
-        if not expect:
-            return None, None
-        if isinstance(expect, str):
-            # `expect` names how to tell the action worked. The common case
-            # is "this locator is now present", and a bare string is the
-            # natural way to say it -- the name invites a sentence, so at
-            # least let a locator string through (D67).
-            expect = {"locator": expect}
-
-        from ..actuate import Condition
-        from ..backends import current
-        read_window_text = current().read_window_text
-
-        where = expect.get("locator")
-        wanted = expect.get("text")
-        selected = expect.get("selected")
-        if not where:
-            return None, None
-        Locator.parse(where)  # raises ValueError, caught by the caller
-
-        def text_of(found) -> str:
-            # An element's text is its name, or its value when it has one;
-            # a window's is what it answers to a text query.
-            if isinstance(found, AccessibleElement):
-                return found.value if found.value is not None else found.name
-            return read_window_text(found.handle) or ""
-
-        def holds() -> bool:
-            found = self._resolve(session, where,
-                                  expect.get("all_windows", False))
-            if not found:
-                return False
-            if selected is not None:
-                # Re-read from the surface, not from the walk that found
-                # it: the state that proves a tab click worked is the one
-                # after the click.
-                from ..backends import current
-                is_selected = current().is_selected
-
-                if not all(isinstance(n, AccessibleElement)
-                           and is_selected(n) == bool(selected) for n in found):
-                    return False
-            if wanted is None:
-                return True
-            return any(text_of(n) == wanted for n in found)
-
-        described = f"{where} exists"
-        if selected is not None:
-            described = f"{where} is {'selected' if selected else 'not selected'}"
-        if wanted is not None:
-            described = f"{where} reads {wanted!r}"
-        return Condition(holds, described), described

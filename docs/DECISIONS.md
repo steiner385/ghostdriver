@@ -2511,6 +2511,46 @@ under the interference watch (D57, D62). That remains the operator's, and
 the scorecard keeps that part of the row open.
 
 
+### D77. A click can name the surface changing; and the inactive warning yields to evidence
+
+**Context.** A session driving an owner-drawn Delphi/VCL screen hit the
+gap the earlier reports circled: two controls -- a Toggle Block Edit bar
+(owner-drawn panel) and a hypertext caret box -- took a posted click as
+`delivered` and did nothing, and there was no way to say so. The
+`expect`/`require_active` machinery did not help, for a reason worth
+stating: the click's effect was a palette docking several seconds later,
+with no control whose presence could be named as the postcondition. A
+real OS click worked first try; five round trips were spent before
+switching.
+
+**A whole-surface postcondition.** `expect={"changed": true}` verifies
+against the surface shape digest (the one `surfaces` already computes) rather than a named control: the baseline is taken before the
+action, and the postcondition holds when the shape moves -- a class
+appearing that was not there, an engine waking, a pane docking. Because
+that effect can lag the click, `changed` gets a longer verify window than
+a named control does (its `timeout_s`, six seconds by default, against
+the standard two). It is deliberately blind to position and count (as that digest is): a palette of a *new* class moves it; a row highlight or a status
+caption does not -- which is exactly the honest split the report wanted,
+"delivered and something changed" from "delivered and nothing did". It
+does not make a windowless control that ignores posted clicks suddenly
+work; it makes the tool able to *say* it did nothing, so a caller stops
+guessing and reaches for `foreground` and a real-input tool (D73).
+
+**The inactive warning yields to evidence.** A click into a window that
+is not its thread's active one carried a `delivered_inactive` warning
+(D67). It fired even when the click visibly closed a dialog -- the very
+result whose own `disturbances` list showed the window gone. The warning
+is now suppressed when the click's disturbances show a window appearing
+or vanishing: that is the click plainly having acted, and the caveat
+"a focus-checking control may have ignored this" is then noise.
+
+**Not changed.** The picker-race trap (a common-dialog whose `expect`
+can report failure while `focus` shows it open) is a matter of naming
+`all_windows` and the two-second window, not a defect; and the black
+`capture` of a Chromium window remains -- its accessible surface, not
+its pixels, is the way in, and that is a measurement for the next
+session, not a line of code.
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on

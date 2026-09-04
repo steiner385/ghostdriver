@@ -33,17 +33,13 @@ class ActuationTools(_ActingCore):
     ) -> dict:
         """Actuate one control.
 
-        `expect` names something that should be true afterwards -- a locator
-        and the text it should then have. Without it the result reports that
-        the input was delivered and claims nothing about its effect, because
-        on this class of target those are genuinely different statements.
-
-        `at` is a point {x, y} inside a region that paints its own rows (a
-        capture shows where). `count` 2 double-clicks; `button` is left,
-        right or middle (a right-click's context menu is a new top-level
-        window, all_windows=true reaches it); `modifiers` (ctrl, shift)
-        ride the message's own flags, which a target that reads them sees
-        and one that asks the keyboard does not -- `expect` tells which.
+        `expect` names what should be true afterwards -- a locator (and
+        text), or {changed: true} for a whole-surface effect (D77); without
+        it the result claims only that the input was delivered. `at` is a
+        point inside a region that paints its own rows. `count` 2
+        double-clicks; `button` is left/right/middle (a right-click's menu
+        is a new top-level, all_windows=true reaches it); `modifiers` (ctrl,
+        shift) ride the message flags -- `expect` tells whether they landed.
         `require_active` refuses when the window is not active (D67).
         """
         prepared, failure = self._prepared(
@@ -106,10 +102,18 @@ class ActuationTools(_ActingCore):
                 refusal["focus"] = before
                 return refusal
         delivered = self._delivery(prepared, point)
+        # A "changed" postcondition (the surface moving, not a named
+        # control) can take longer than a control appearing -- a palette
+        # docks a few seconds after the click (D77) -- so it gets a longer
+        # verify window, the caller's timeout_s or six seconds.
+        verify_timeout_s = None
+        if isinstance(expect, dict) and expect.get("changed"):
+            verify_timeout_s = float(expect.get("timeout_s", 6.0))
         result = self._perform(prepared.session,
             attempts,
             expect_before=verbs.unblocked(prepared.node.handle),
             expect_after=after,
+            verify_timeout_s=verify_timeout_s,
         )
         self._remember(session_id, "click", locator, prepared, result)
         focus = self._focus_report(prepared)
@@ -125,15 +129,19 @@ class ActuationTools(_ActingCore):
             focus=focus,
             **delivered,
         )
-        if inactive and after is None and result.ok:
+        acted = any(d.get("change") in ("window_appeared", "window_disappeared")
+                    for d in result.disturbances)
+        if inactive and after is None and result.ok and not acted:
             # ok:true (delivered), but a status-skimmer must see it (D67).
+            # Suppressed when a window appeared or vanished around the click:
+            # that is the click plainly having done something, so the
+            # inactive-window caveat would be noise (D77).
             reported["warning"] = (
                 "delivered to a window that is not its thread's active window: "
-                "a control that checks focus will have ignored this click, and "
-                "nothing here confirms an effect. Pass expect to confirm one, "
-                "require_active=true to refuse instead of delivering blind, or "
-                "hand the step to a person (await_human) or to a tool that "
-                "activates windows, with the coordinates found here."
+                "a focus-checking control will have ignored this, and nothing "
+                "here confirms an effect. Pass expect (a locator, or "
+                "{changed: true}), require_active=true, or hand it to "
+                "await_human or a tool that activates windows."
             )
         return reported
 
@@ -150,25 +158,15 @@ class ActuationTools(_ActingCore):
     ) -> dict:
         """Replace a field\'s contents, and check what actually landed.
 
-        Two different things can go wrong here and both are silent, so both
-        are checked rather than assumed.
-
-        **The field may not have taken all of it.** Typing goes through the
-        control\'s own input handling, so a length limit or a mask applies
-        exactly as it would to a person -- measured at about twenty
-        characters on a field whose declared limit was thirty thousand. The
-        display is therefore always read back and compared. A field that
-        reformats what it is given (a date mask turning 01012026 into
-        01/01/2026) will fail that comparison the first time; pass
-        `expect_text` with the reformatted value and the reformatting
-        becomes something asserted rather than something skimmed past.
-
-        **The application may not have accepted it.** A field can display a
-        value the application never received -- it shows in a mirror label,
-        a grid cell, a change log -- so `expect` names where to look, and
-        only then is the result `verified: "committed"`. With `expect` a
-        pattern tier is tried first; without it this only types, an
-        unverifiable shortcut not worth the milliseconds.
+        Two silent failures, both checked. **The field may not take all of
+        it:** typing goes through the control's own input handling, so a
+        length limit or a mask applies as it would to a person (measured at
+        ~20 chars on a field declaring 30000). The display is read back; a
+        field that reformats (a date mask) fails the first compare -- pass
+        `expect_text` with the reformatted value. **The application may not
+        accept it:** a field can show a value it never received (the truth
+        is in a mirror label, a grid cell, a change log), so `expect` names
+        where to look, and only then is it `verified: "committed"`.
         """
         prepared, failure = self._prepared(
             session_id, "set_value", locator, all_windows, cadence
