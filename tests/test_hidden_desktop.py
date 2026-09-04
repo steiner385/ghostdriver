@@ -6,15 +6,13 @@ desktop, so unlike the minimized tests they cannot disturb anyone. That is
 the whole reason the strategy exists.
 """
 
-import ctypes
 import sys
 
 import pytest
 
-from tests.conftest import on_windows
+from tests.conftest import on_windows, user32
 
 pytestmark = [on_windows, pytest.mark.slow]
-user32 = ctypes.WinDLL("user32", use_last_error=True)
 
 
 def fixture_command():
@@ -40,12 +38,12 @@ def test_a_target_launched_here_is_invisible_from_the_input_desktop(desktop):
     -- or stolen to -- from the desktop the operator is using."""
     from ghostdriver.backends.windows.enumerate import top_level_windows
 
-    fg_before = user32.GetForegroundWindow()
+    fg_before = user32().GetForegroundWindow()
     pid = desktop.launch(fixture_command(), announces_pid=True)
 
     # From this thread -- the Default desktop -- the target does not exist.
     assert top_level_windows(pid) == []
-    assert user32.GetForegroundWindow() == fg_before, "foreground never moved"
+    assert user32().GetForegroundWindow() == fg_before, "foreground never moved"
 
 
 def test_the_target_is_fully_visible_from_the_bound_thread(desktop):

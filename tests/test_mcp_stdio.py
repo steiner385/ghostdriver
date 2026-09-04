@@ -16,7 +16,8 @@ import pytest
 
 from tests.conftest import on_windows
 
-pytest.importorskip("mcp", reason="protocol layer is the [server] extra")
+pytest.importorskip("mcp", minversion="2.1",
+                    reason="protocol layer is the [server] extra, pinned to 2.x")
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client

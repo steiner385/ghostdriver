@@ -20,11 +20,10 @@ import pytest
 from ghostdriver.policy import ConsentSource
 from ghostdriver.session import SessionManager
 from ghostdriver.tools import Toolbox
-from tests.conftest import on_windows
+from tests.conftest import on_windows, user32
 
 pytestmark = on_windows
 
-user32 = ctypes.WinDLL("user32", use_last_error=True)
 GWL_EXSTYLE = -20
 WS_EX_TOPMOST, WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE = 0x8, 0x80, 0x08000000
 
@@ -41,27 +40,27 @@ def notice_windows():
 
 def _pid_of(hwnd):
     pid = wintypes.DWORD(0)
-    user32.GetWindowThreadProcessId(wintypes.HWND(hwnd), ctypes.byref(pid))
+    user32().GetWindowThreadProcessId(wintypes.HWND(hwnd), ctypes.byref(pid))
     return pid.value
 
 
 def exstyle(hwnd):
-    return user32.GetWindowLongW(wintypes.HWND(hwnd), GWL_EXSTYLE)
+    return user32().GetWindowLongW(wintypes.HWND(hwnd), GWL_EXSTYLE)
 
 
 def test_the_notice_is_visible_topmost_and_never_activated():
     from ghostdriver.backends.windows.notice import OperatorNotice
 
-    before = user32.GetForegroundWindow()
+    before = user32().GetForegroundWindow()
     with OperatorNotice("Please sign in to the application, then leave it open.") as shown:
         assert shown.hwnd, "the window was created"
-        assert user32.IsWindowVisible(wintypes.HWND(shown.hwnd))
+        assert user32().IsWindowVisible(wintypes.HWND(shown.hwnd))
         flags = exstyle(shown.hwnd)
         assert flags & WS_EX_TOPMOST and flags & WS_EX_TOOLWINDOW and flags & WS_EX_NOACTIVATE
         # The claim is that the *notice* did not become the foreground
         # window; the operator may switch windows of their own meanwhile,
         # and a handle comparison cannot survive that.
-        after = user32.GetForegroundWindow()
+        after = user32().GetForegroundWindow()
         assert after != shown.hwnd, "showing it took focus"
         assert after == before or after == 0 or             _pid_of(after) != os.getpid(), "focus went to a window of ours"
         assert notice_windows() == [shown.hwnd]

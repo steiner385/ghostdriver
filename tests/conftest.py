@@ -1,3 +1,5 @@
+import ctypes
+import functools
 import subprocess
 import sys
 import time
@@ -8,6 +10,25 @@ import pytest
 on_windows = pytest.mark.skipif(
     sys.platform != "win32", reason="Windows backend test"
 )
+
+
+@functools.cache
+def user32():
+    """`user32`, bound on the first call rather than at import.
+
+    The single place a test reaches Win32 from the test process itself.
+    `ctypes.WinDLL` does not exist off Windows -- it raises AttributeError,
+    not the OSError an older comment in test_cli.py claims -- and a module
+    that binds it at import fails *collection*, which is not a skip: it
+    aborts the entire run, including every test that has nothing to do with
+    Windows. `pytestmark = on_windows` does not help, because it gates the
+    tests and not the module.
+
+    So the binding is deferred, and it is deferred in one place: six modules
+    each held their own identical copy of this line, which is six chances
+    for the next one to be written the other way. Call it inside the test.
+    """
+    return ctypes.WinDLL("user32", use_last_error=True)
 
 # A native Win32 window built directly through ctypes, run in a subprocess.
 #
