@@ -356,3 +356,43 @@ def test_numbers_may_skip_and_may_arrive_out_of_order():
     )
 
 
+
+
+# --- nothing ships a half-finished merge --------------------------------------
+
+#: Git's markers. Written split so this file does not trip its own check.
+_CONFLICT = tuple("<" * 7), tuple(">" * 7)
+
+
+def test_no_tracked_file_carries_a_merge_conflict_marker():
+    """`git add` does not care whether you finished resolving. Staging a file
+    that still has markers and running `rebase --continue` commits them, with
+    no warning -- which is exactly how a decision-log entry reached this
+    branch cut in half.
+
+    Cheap to check, and it catches the whole class: a resolution that looked
+    done, a script whose replacement silently did not match, a bad merge that
+    nobody re-read.
+    """
+    opener, closer = "".join(_CONFLICT[0]), "".join(_CONFLICT[1])
+    offenders = []
+    for path in REPO.rglob("*"):
+        parts = {p.lower() for p in path.relative_to(REPO).parts}
+        if parts & {".git", ".venv", "venv", "__pycache__", ".pytest_cache", "node_modules"}:
+            continue
+        if not path.is_file() or path.suffix not in {".py", ".md", ".toml", ".json", ".cfg"}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if line.startswith(opener) or line.startswith(closer):
+                offenders.append(f"{path.relative_to(REPO)}:{lineno}")
+                break
+    assert not offenders, (
+        "unresolved merge conflict markers are committed in: "
+        + ", ".join(offenders)
+        + " -- finish the resolution and amend, rather than leaving a file "
+        "cut in half."
+    )
