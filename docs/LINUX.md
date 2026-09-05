@@ -120,7 +120,9 @@ a foreground grab *is*).
    at-spi-bus-launcher --launch-immediately`, the fixture on it, and
    `pyatspi` (or raw D-Bus) listing the fixture's tree. Until this works
    nothing else can be measured. This is also `HiddenDesktop`.
-   **Correction (D75): it also needs a window manager.** A bare `Xvfb` sets
+   **Correction (D75): it also needs a window manager**, and one runs --
+   `gnome-shell --x11` under its own `dbus-run-session` (D#11), which
+   unblocks measurements 6 and 7. A bare `Xvfb` sets
    neither `_NET_CLIENT_LIST` nor `_NET_ACTIVE_WINDOW` -- both come from a
    WM, not the X server -- so measurements 6 and 7 cannot be asked without
    one, and enumeration must walk the tree instead.
@@ -148,7 +150,12 @@ a foreground grab *is*).
    button's window: does GTK act on a sent event? This decides whether the
    Windows ladder maps to Linux at all. Then `KeyPress/Release` to the
    entry, and whether the mirror follows.
-   **Answered early, provisionally (D75): no.** GTK 4.14.5 routes input by
+   **Answered (D#11): no.** Confirmed under GNOME Shell on the nested
+   display, with every experiment behind a passing XTest control. The
+   provisional version follows; the one row it got wrong -- a sent key to a
+   focused window appearing to work -- was an artefact of running without a
+   window manager.
+   **Provisionally (D75): no.** GTK 4.14.5 routes input by
    the real input state and discards a sent event that does not match it --
    a key to an unfocused window and a button with the pointer elsewhere are
    both ignored, while `XTest` works. Tier 3 does not exist here; the ladder
