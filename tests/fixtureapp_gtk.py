@@ -132,8 +132,21 @@ def _bound_entry(mirror):
     entry.set_text("original")
     _label(entry, "bound entry")
 
+    # Did the toolkit's own input path see the write? D21's split on Windows
+    # was a value that reached the control while the binding never heard of
+    # it, so the display and the committed value disagreed. `changed` is what
+    # a GTK binding listens to, so reporting it answers the question directly
+    # rather than by inference.
+    entry.connect("changed", lambda *_: _event(event="bound_changed",
+                                               text=entry.get_text()))
+
     focus = Gtk.EventControllerFocus()
-    focus.connect("leave", lambda *_: mirror.set_text(entry.get_text()))
+
+    def commit(*_):
+        mirror.set_text(entry.get_text())
+        _event(event="bound_committed", text=entry.get_text())
+
+    focus.connect("leave", commit)
     entry.add_controller(focus)
     mirror.set_text(entry.get_text())
     return entry
@@ -189,6 +202,9 @@ def _toolbar():
         button = Gtk.Button()
         button.set_icon_name(icon)
         _label(button, name)
+        # An observable effect, so "the action returned true" can be told
+        # apart from "the action did something".
+        button.connect("clicked", lambda _b, n=name: _event(event="toolbar", name=n))
         box.append(button)
     return box
 
@@ -204,7 +220,11 @@ def _pages(status):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         button = Gtk.Button(label="Apply")
         _label(button, "Apply")
-        button.connect("clicked", lambda _b, p=page: status.set_text(f"applied on {p}"))
+        def applied(_b, p=page):
+            status.set_text(f"applied on {p}")
+            _event(event="applied", page=p)
+
+        button.connect("clicked", applied)
         box.append(Gtk.Label(label=f"{page} page"))
         box.append(button)
         stack.add_titled(box, page.lower(), page)

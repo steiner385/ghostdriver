@@ -3018,6 +3018,57 @@ unwired list shrank on its own, because `tree` now calls `deadline`; and
 "nothing is built", and now asserts the thing that stays true as the backend
 fills in.
 
+### D#10. Tier 1 works, cannot touch owner-drawn controls, and does not split
+
+**Context.** L3 asks three things of the accessibility API: does it drive a
+real button, does it fail on an owner-drawn one, and does writing a value
+show D21's split. Two answers match the Windows expectation and the third
+does not, which is the useful one.
+
+| | expected | measured |
+|---|---|---|
+| `Action.DoAction` on a real `Gtk.Button` | acts | **acts** -- `actions=['click']`, returns true, and the application observably ran the handler |
+| `Action.DoAction` on the custom-drawn `DrawingArea` | no action | **no action at all** -- `actions=[]`, the call raises |
+| `EditableText.set_text_contents` on the bound entry | D21's split | **no split** |
+
+**The owner-drawn negative is sharper than expected.** It is not that the
+action fails; there is no Action interface behind the control at all. The
+fixture gives that DrawingArea an accessible *role* (D#8), and a role turns
+out not to imply an implementation -- it is nameable and not drivable. So
+tier 1 cannot reach owner-drawn controls, which is what the rungs below
+exist for, and on Linux the only rung below is tier 4 under isolation
+(D#11).
+
+**No split, and that is a real divergence.** On Windows, writing a value went
+around the toolkit: the control displayed the new text while the binding
+never heard of it, so the shown and committed values disagreed until
+something forced a commit. That is D21, and it is why `WM_SETTEXT` was
+deleted rather than kept as a fast path (D25).
+
+`EditableText` goes *through* `GtkEditable`, so the widget's own `changed`
+signal fires and a binding sees the write. **Tier 1 is stronger on Linux than
+on Windows**, and the Windows reasoning for deleting the API-level write does
+not carry over. Slice 4 should use it as the tier-1 write path rather than
+inheriting the Windows conclusion.
+
+**One detail worth pinning rather than discovering.** `set_text_contents`
+clears and re-inserts, so `changed` fires **twice** and the first carries an
+*empty* value the caller never wrote. Harmless against a mirror; not harmless
+against a field that rejects empty, or one that fires a lookup per change. A
+driver that writes values has to know the intermediate state exists.
+
+**And a constraint for slice 4.** `Atspi.Component.grab_focus` does not work
+-- it raises. Tier 4 is the only actuation rung that exists here and it needs
+the target focused (D#11), so focus has to come from the window manager and
+keyboard navigation, not from the accessibility API. Recorded now because
+slice 4 would otherwise start by assuming the easy route exists.
+
+**Unrelated finding, from the probe failing.** A `Gtk.Label`'s accessible name
+is its *text*, and it overrides an explicitly set accessible label. So a label
+cannot be given a stable name, and a locator matching one matches its
+contents -- which change. Anything that needs to find a label reliably has to
+match on something else.
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on

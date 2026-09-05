@@ -146,6 +146,11 @@ a foreground grab *is*).
 3. **Tier 1.** `Action.DoAction` on the real button, the custom-drawn
    button (expected: no action), the entry (`Value` / `EditableText.SetText`
    -- expected: the D21 split on the bound entry).
+   **Done (D#10).** First two as expected -- and the owner-drawn control has
+   no Action interface at all, so a role is nameable without being drivable.
+   The third went the other way: `EditableText` goes through GtkEditable, the
+   binding hears the write, and there is **no split**. Tier 1 is stronger
+   here than on Windows, so D25's reasoning does not carry over.
 4. **Tier 3.** `XSendEvent` `ButtonPress/Release` to the custom-drawn
    button's window: does GTK act on a sent event? This decides whether the
    Windows ladder maps to Linux at all. Then `KeyPress/Release` to the
