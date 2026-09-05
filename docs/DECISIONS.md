@@ -2620,7 +2620,7 @@ operator's applications ever appear, which is the check that makes
   password one is not a distinct role, so `is_protected` cannot be answered
   from the role and must read `STATE_PROTECTED` (D33's constraint 4, D37,
   D38). Confirming that state is L2's job.
-  **Wrong, corrected by D#34: there is no `STATE_PROTECTED`.** AT-SPI's
+  **Wrong, corrected by D#34a: there is no `STATE_PROTECTED`.** AT-SPI's
   `StateType` has 45 members and none of them names one. The sentence was
   written from the Windows model rather than from a measurement, which is
   the mistake this document exists to prevent.
@@ -2628,7 +2628,7 @@ operator's applications ever appear, which is the check that makes
 **Cost.** The nested stack takes several seconds to stand up, so the L1 tests
 share one and are marked slow.
 
-### D#34. AT-SPI gives out the password, and hides which field is one
+### D#34a. AT-SPI gives out the password, and hides which field is one
 
 **Context.** L2 asks which controls answer `Text` and which only `Name`
 (`docs/LINUX.md` measurement 2). The answer is dull -- entries answer
@@ -2756,6 +2756,73 @@ machine; a real target on a loaded desktop is the case that would move it,
 and that is #27's territory rather than this one's. `deadline` is
 deliberately free of `gi`, so its semantics are tested on any host and only
 the hung-application case needs a desktop.
+
+### D#34b. A Linux read withholds by class, because it cannot detect by field
+
+**Context.** D#34a's measurement found that AT-SPI hands out a password
+field's contents in cleartext, and that `Gtk.Entry(visibility=False)` is
+indistinguishable from a plain entry. Three options were left open. This
+settles them.
+
+**Option 3 is dead, measured properly this time.** The earlier note dismissed
+"find a second signal" on one reading of `get_attributes()`, which was not
+good enough. Every surface an accessible exposes was diffed between a plain
+entry and a hidden one: role, description, accessible id, attributes,
+interfaces, the full 45-member state set, action count and names, relations,
+default text attributes. **Thirteen surfaces, and the only differences are
+the content itself** -- character count, text, and the offsets derived from
+them. GTK's input-purpose is not on the bus. There is no signal.
+
+`SINGLE_LINE` would have narrowed the affected class usefully, since a
+password is never multi-line. GTK does not set it. Measured, not assumed --
+the third assumption in this effort that a measurement killed.
+
+**Why Windows never had to decide this.** Windows refuses a cross-process
+`WM_GETTEXT` on a password field, so the value is not available to leak;
+`is_protected` exists there only to tell "protected" from "hung", because
+both come back empty-handed (D37). The platform is fail-closed and the driver
+explains. On Linux the platform is fail-*open* and the driver has to be the
+one that closes. That is the whole difference, and it is why the Windows
+design does not port.
+
+**The decision: withhold by class.** A secret is typed into an editable text
+entry, so an editable text entry does not disclose its contents by default.
+
+| what | verdict |
+|---|---|
+| role `password text` (`Gtk.PasswordEntry`) | **protected** -- never disclosed, opt-in cannot reach it |
+| role `text` + `EDITABLE` | **withheld** -- not read at all unless the caller asks |
+| labels, tables, tabs, buttons, captions | **allowed** -- read normally |
+
+Option 1 (refuse on role alone) was rejected because it is a guard that
+misses the commoner idiom while looking complete, which is worse than no
+guard. Option 2 is what this is, narrowed: the blast radius is *editable text
+entries*, not all text, so the reads `read` mostly exists for are untouched.
+
+**The value is not fetched, not merely not returned.** A value that has been
+read exists in this process and reaches a traceback, a log line or a debugger
+without anyone deciding it should. `read` is not called for a withheld field.
+
+**What makes the default affordable.** D29 has `set_value` check the display
+after writing, and that needs a *comparison*, not a disclosure -- the driver
+already knows what it typed. `confirms()` answers yes or no, so nothing
+reaches a result, the operator directory's trace (D62), or a model's context.
+A field that did not answer returns neither: that is the deadline expiring
+(D#9), and reporting it as a mismatch would send a caller to fix a value that
+may be correct.
+
+**What this costs, stated plainly.** A caller that genuinely wants the text of
+an editable field must ask, and the asking is what lands in the trace instead
+of the secret. And a plain, non-secret entry is withheld alongside the
+password one -- that is the finding rather than a defect, because a policy
+that let the plain one through would let a hidden one through too.
+
+**What it does not cover.** A vendor toolkit that gives its password entries
+some role other than `password text` is in the withheld class, which is safe.
+One that draws an entry as something not in `_TYPED_INTO` at all would read
+normally, and that is the hole -- narrow, and worth re-measuring against the
+first real Linux target rather than guessed at now. Qt is unmeasured
+throughout.
 
 ## Open, for whoever picks this up
 
