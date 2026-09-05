@@ -38,7 +38,13 @@ ENTRY_POINTS = {
 #: with the reason beside each entry. Meant to be empty. Its first run
 #: found the `minimized` isolation strategy unwired (D49 built it, D52
 #: wired only hidden_desktop); B0 wired it and emptied the list.
-KNOWN_UNWIRED: dict[str, str] = {}
+KNOWN_UNWIRED: dict[str, str] = {
+    "ghostdriver.backends.linux.deadline": (
+        "Measured and tested (D#9), and reachable from nothing because the "
+        "Linux backend has no contract functions yet to call it. It goes when "
+        "the first read lands -- see #9 and #34."
+    ),
+}
 
 
 def _module_name(path: Path) -> str:
@@ -175,7 +181,8 @@ TESTS = Path(__file__).resolve().parent
 #: and never imported by the test process, so each is its platform's toolkit at
 #: module scope on purpose.
 IMPORT_TIME_PLATFORM_ALLOWED = {"fixtureapp.py", "fixtureapp_gtk.py",
-                                "linux_atspi_probe.py"}
+                                "linux_atspi_probe.py",
+                                "linux_timeout_probe.py"}
 
 #: Modules that exist on one platform only. `ctypes.WinDLL` raises
 #: AttributeError off Windows; `gi` and `pyatspi` are simply absent off a

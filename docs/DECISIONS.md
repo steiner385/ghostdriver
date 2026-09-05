@@ -2699,6 +2699,64 @@ says "the password comes back in cleartext" is the thing that will fail
 loudly on the day it stops being true, which is the day the driver can
 stop working around it.
 
+### D#9. AT-SPI will not bound a call, so the caller does
+
+**Context.** L2 asks "what an unresponsive control does to a bus call (D4)
+and what timeout is right". On Windows the OS answers it:
+`SendMessageTimeout` with `SMTO_ABORTIFHUNG` returns `None` and the caller
+moves on. The Linux question is worse in kind, and `docs/LINUX.md` says so:
+AT-SPI is D-Bus, so an application that stops running its main loop stops
+answering the *bus*, and a caller waits on the application rather than on one
+control.
+
+**`Atspi.set_timeout()` exists and does nothing.** Measured against the GTK
+fixture hung for 15 seconds, reading one entry:
+
+| timeout set | caller waited |
+|---|---|
+| default | 13.1s |
+| `set_timeout(500, 15000)` | 12.6s |
+| `set_timeout(2000, 15000)` | 14.1s |
+
+All three blocked until the application came back. The variation is when the
+read started relative to the hang, not the setting. An earlier 8-second hang
+blocked for 8.0s and then *succeeded*, so the call is bounded by the
+application's recovery and nothing else.
+
+**So the deadline is the driver's.** `backends/linux/deadline.py` runs the
+call on a worker and gives the caller back control on schedule. Measured, a
+caller allowing 0.5s got control back in 0.5001s while the application stayed
+hung for another fourteen seconds, and the read reported *did not answer*
+rather than blocking.
+
+**The number is 200ms, the same as Windows', and measured rather than
+copied.** A healthy read over 200 samples: p50 0.19ms, p99 0.46ms, max
+1.88ms; a 33-node tree walk 9.2ms end to end. 200ms is about a hundred times
+the worst read seen -- room for a loaded machine, none for a hung one. Keeping
+the Windows number means the contract reads identically on both platforms,
+which is worth more than a Linux-specific figure with no better claim.
+
+**The cost, stated rather than discovered.** The worker is *parked*, not
+leaked: it is inside a C call, nothing here can cancel or safely kill it, and
+it returns on its own when the application recovers -- observed at 13.08s for
+a 15s hang. Reads issued against an application that stays hung park one
+worker each until it comes back. The pool is bounded at eight and its threads
+are daemons, so a wedged target cannot stop the process exiting; what it can
+do is make the ninth concurrent read wait. Accepted: the alternative is
+killing threads inside a foreign C stack.
+
+**`None` still means did not answer.** Never *answered with nothing*. An
+exception is re-raised rather than folded into a timeout, because a control
+that answered with an error answered. Both are the distinction conftest calls
+load-bearing, and collapsing them is how a caller silently asserts a field is
+empty when it never replied.
+
+**What this does not settle.** The number comes from one fixture on one idle
+machine; a real target on a loaded desktop is the case that would move it,
+and that is #27's territory rather than this one's. `deadline` is
+deliberately free of `gi`, so its semantics are tested on any host and only
+the hung-application case needs a desktop.
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on
