@@ -2895,11 +2895,23 @@ with the target on the nested one, and require it never to change. D75 said
 this could not be asked, because a bare `Xvfb` has no such property. With a
 window manager on the nested display (D#11) it can.
 
-**It never moves.** The operator was running a full GNOME session on `:0`
-throughout: the target was focused, driven with a real click, iconified, left
-to grab its own foreground on a timer, and put away again. `:0`'s active
-window was the same handle at every step. The isolation is structural -- a
-different X server, not a policy -- and is now asserted rather than assumed.
+**Nothing this run launched ever became the operator's foreground.** The
+operator was running a full GNOME session on `:0` throughout: the target was
+focused, driven with a real click, iconified, left to grab its own foreground
+on a timer, and put away again. At no point did a window belonging to a
+process the run launched own `:0`'s active window. The isolation is
+structural -- a different X server, not a policy -- and is now asserted
+rather than assumed.
+
+**Stated as attribution, not stillness, and that was a correction.** The
+first version of this test asserted the operator's active window was the
+*same handle* at every step. It passed alone and failed in a full suite run,
+because the operator clicked something -- which is not a defect in anything.
+The Windows focus guard had the framing right all along and this one now
+matches it: what must never happen is that a window belonging to a process
+this run launched becomes the foreground (`tests/test_zz_focus_guard.py`).
+The operator's foreground may move freely; it may never move *to the
+target*.
 
 **The control comes first, and this is why.** "The foreground did not move"
 is trivially true of a harness that did nothing at all, and an earlier run of

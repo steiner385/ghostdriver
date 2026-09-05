@@ -812,6 +812,28 @@ def _use_utf8(stream) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Every command, with the one failure they all share handled once.
+
+    A platform with no backend refuses at the first contract call, and that
+    refusal is careful: it names what is missing and where to read about it.
+    Letting it escape turned every command into a stack trace on Linux, which
+    is the opposite of what `test_unknown_pid_reports_error_not_traceback`
+    asks for -- and that test could not catch this, because it is Windows-only
+    and the refusal only fires where there is no backend.
+
+    Caught here rather than in each command: there are twelve of them and the
+    failure is the platform's, not any one command's.
+    """
+    from .backends import UnsupportedPlatform
+
+    try:
+        return _dispatch(argv)
+    except UnsupportedPlatform as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+
+def _dispatch(argv: list[str] | None = None) -> int:
     _use_utf8(sys.stdout)
     _use_utf8(sys.stderr)
     args = build_parser().parse_args(argv)

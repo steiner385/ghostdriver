@@ -105,13 +105,26 @@ def test_the_control_proves_the_target_was_actually_driven(l6):
     "operator_after_drive", "operator_after_iconify",
     "operator_after_present", "operator_final",
 ])
-def test_the_operators_foreground_never_moves(l6, moment):
-    """The guarantee. The operator is running their own desktop throughout --
-    including while the target is driven, iconified, and while it deliberately
-    grabs the foreground on its own display."""
-    assert l6[moment] == l6["baseline"], (
-        f"the operator's active window changed at {moment}: "
-        f"{l6['baseline']} -> {l6[moment]}"
+def test_no_window_this_run_launched_ever_became_the_operators(l6, moment):
+    """The guarantee, stated as attribution rather than stillness.
+
+    An earlier version of this test asserted the operator's active window was
+    the *same handle* throughout, and it failed the first time it ran while
+    someone was using the machine -- because they clicked something, which is
+    not a defect in the driver. The Windows focus guard has always framed it
+    correctly: what must never happen is that *a window belonging to a
+    process this run launched* becomes the operator's foreground
+    (`tests/test_zz_focus_guard.py`).
+
+    So the operator's foreground may move freely. It may never move *to the
+    target*, including while the target is deliberately grabbing the
+    foreground on its own display.
+    """
+    fixture_pid = _field(l6["baseline"], "fixture_pid")
+    owner = _field(l6[moment], "owner_pid")
+    assert owner != fixture_pid, (
+        f"at {moment} the operator's foreground was owned by the process this "
+        f"run launched (pid {owner}) -- the target took the operator's focus"
     )
 
 

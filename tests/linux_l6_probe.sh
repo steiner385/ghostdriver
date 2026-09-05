@@ -26,14 +26,25 @@ BX=$(j 'd["bounds"]["drawn_button"]["x"]+d["bounds"]["drawn_button"]["w"]//2')
 BY=$(j 'd["bounds"]["drawn_button"]["y"]+d["bounds"]["drawn_button"]["h"]//2')
 want=$(printf 0x%x "$XB")
 
-opact(){ DISPLAY=$OP xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | sed 's/.*# //'; }
+# The operator's active window *and who owns it*. Attribution, not stillness:
+# the operator is a person using their own computer, and their foreground
+# changes because they clicked something. What must never happen is that a
+# window belonging to a process this run launched becomes theirs -- which is
+# exactly what the Windows focus guard checks (tests/test_zz_focus_guard.py).
+opact(){
+  local w
+  w=$(DISPLAY=$OP xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | sed 's/.*# //')
+  local pid="none"
+  [ -n "$w" ] && [ "$w" != "0x0" ] && pid=$(DISPLAY=$OP xprop -id "$w" _NET_WM_PID 2>/dev/null | sed 's/.*= //')
+  echo "win=$w owner_pid=${pid:-none}"
+}
 nsact(){ xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | sed 's/.*# //'; }
 ev(){ grep -c recalculated /tmp/gd-l6-probe.json || true; }
 hidden(){ xprop -id "$XB" _NET_WM_STATE 2>/dev/null | grep -c HIDDEN; }
 colours(){ xwd -id "$XB" -silent > "/tmp/gd-l6-$1.xwd" 2>/dev/null
            convert "/tmp/gd-l6-$1.xwd" -format "%k" info: 2>/dev/null || echo 0; }
 
-OP0=$(opact); echo "OPERATOR baseline $OP0"
+echo "OPERATOR baseline $(opact) fixture_pid=$B_PID"
 for i in $(seq 1 10); do xdotool windowactivate "$XB" 2>/dev/null; sleep 1
   [ "$(nsact)" = "$want" ] && break; done
 [ "$(nsact)" = "$want" ] && echo "CONTROL focus ok" || { echo "ABORT focus"; exit 1; }

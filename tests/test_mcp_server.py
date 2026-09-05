@@ -310,3 +310,4 @@ def test_capture_warns_against_using_pixels_as_proof(server):
 
     assert "do not use it to confirm" in description
     assert "expect" in description
+

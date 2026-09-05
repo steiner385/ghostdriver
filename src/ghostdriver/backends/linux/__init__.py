@@ -28,8 +28,11 @@ class _LinuxBackend:
             raise AttributeError(f"the backend contract has no {name!r}")
         raise UnsupportedPlatform(
             f"{name} is not implemented on Linux yet. The backend is specified "
-            "in docs/LINUX.md; building it needs a Linux desktop to measure "
-            "against (a nested X server and an AT-SPI bus are enough)."
+            "in docs/LINUX.md, and is being built by measurement: the nested "
+            "display, its AT-SPI bus, reading, the read deadline, the "
+            "disclosure policy and the foreground guarantee are done and "
+            "recorded. What is missing is the contract functions themselves. "
+            "docs/LINUX.md tracks what has been measured and what has not."
         )
 
 
