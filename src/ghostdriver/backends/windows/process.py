@@ -8,10 +8,13 @@ process with six modules rather than a hundred.
 
 import ctypes
 from ctypes import wintypes
-from dataclasses import dataclass, field
 
 import psutil
 
+# ProcessFacts lives in the model layer so the Linux backend fills the same
+# shape rather than keeping a copy that drifts. Imported (not redefined)
+# here because this is where every Windows caller looks for it.
+from ...model.process import ProcessFacts
 from . import winapi
 
 advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
@@ -47,20 +50,6 @@ INTEGRITY_RIDS = {
 DPI_AWARENESS = {0: "unaware", 1: "system", 2: "per-monitor"}
 
 MODULE_SUFFIXES = (".dll", ".bpl", ".exe", ".ocx", ".drv", ".cpl")
-
-
-@dataclass
-class ProcessFacts:
-    pid: int
-    executable: str
-    bitness: str          # "x86" | "x64" | "unknown"
-    wow64: bool
-    integrity_level: str | None
-    dpi_awareness: str
-    modules: list[str] = field(default_factory=list)
-    #: False when the module list could not be read. `modules` is then empty
-    #: because nothing was legible, not because nothing matched.
-    modules_readable: bool = True
 
 
 def list_modules(pid: int) -> list[str] | None:
