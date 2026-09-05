@@ -125,3 +125,12 @@ that is the bug the project exists to prevent, so do not silence it.
   (D53). Do not loosen a sandbox or elevate to make an unfitted target work.
 - **Do not "fix" a flaky test with a retry.** A retry takes the evidence with
   it; instrument it so the next occurrence explains itself (D45).
+- **Never gate a guard on the condition it exists to detect.** Two tests
+  claimed to prevent a stack trace and could not run where the stack trace
+  happens: one asserted "an error, not a traceback" and was `@on_windows`,
+  where a backend exists; the other tested the wrong dependency version from
+  inside a module that skipped unless the right version was installed. The
+  tell is a gate naming the same condition as the assertion, with opposite
+  polarity. Put the test where the failure is *possible* — or make it
+  platform-neutral by construction, by making the subject fail on purpose.
+  Audit and remaining debt: issue #39.
