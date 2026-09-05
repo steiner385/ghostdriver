@@ -39,6 +39,11 @@ ENTRY_POINTS = {
 #: found the `minimized` isolation strategy unwired (D49 built it, D52
 #: wired only hidden_desktop); B0 wired it and emptied the list.
 KNOWN_UNWIRED: dict[str, str] = {
+    "ghostdriver.backends.linux.protection": (
+        "The disclosure policy (D#34b), measured and tested, and reachable "
+        "from nothing because the Linux backend has no read to apply it in. "
+        "It goes when that read lands -- see #10 onward."
+    ),
     "ghostdriver.backends.linux.deadline": (
         "Measured and tested (D#9), and reachable from nothing because the "
         "Linux backend has no contract functions yet to call it. It goes when "
@@ -272,7 +277,10 @@ _SEQUENTIAL = re.compile(r"^### ([DR])(\d+)\.", re.M)
 
 #: The live series. `### D#34.` -- numbered from the issue the decision came
 #: out of, so GitHub allocates it and two branches cannot pick the same one.
-_BY_ISSUE = re.compile(r"^### D#(\d+)\.", re.M)
+#: A trailing letter (`D#34a`) splits one issue that produced two decisions,
+#: and is part of the identifier: D#34a and D#34b are different, and a bare
+#: D#34 twice is still a duplicate.
+_BY_ISSUE = re.compile(r"^### D#(\d+[a-z]?)\.", re.M)
 
 #: Where the counter stopped. Nothing may extend it.
 LAST_SEQUENTIAL_DECISION = 77

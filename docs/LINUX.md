@@ -135,7 +135,7 @@ a foreground grab *is*).
 2. **Reading.** Names, roles, states, text of every fixture control;
    which controls answer `Text` and which only `Name`; what an unresponsive
    control does to a bus call (D4) and what timeout is right.
-   **Done (D#34, D#9).** Entries answer `Text`, buttons do not, and the
+   **Done (D#34a, D#9).** Entries answer `Text`, buttons do not, and the
    owner-drawn grid answers neither. Two findings the measurement did not
    go looking for: AT-SPI hands out password contents in cleartext and one
    of the two ways to make a password field is undetectable (#34); and
