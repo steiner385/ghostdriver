@@ -169,6 +169,12 @@ a foreground grab *is*).
    above, on the operator's display, with the target on the nested one:
    it must never change. Then the watchdog: iconify, wait, the timer
    modal, re-iconify, capture.
+   **Done (D#13).** It never moves. Two corrections: an iconified window is
+   still `IsViewable` under a compositor, so `_NET_WM_STATE_HIDDEN` is the
+   signal rather than map state; and an iconified window *can* still be
+   captured -- pixel-identical -- which is what makes the minimized strategy
+   possible, but that is a property of the compositor rather than of X11 and
+   a lighter window manager is unmeasured.
 7. **Restore.** Un-hide via `_NET_WM_STATE` and see whether the window
    manager focuses the window (D55 says assume it does until measured).
 8. **An embedded document.** A Chromium engine on the nested display, the
