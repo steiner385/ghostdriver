@@ -2886,6 +2886,74 @@ about a configuration rather than about GTK. The sends came from `xdotool`
 3.20160805.1; a hand-rolled `XSendEvent` with different propagation could
 behave differently, and that remains the one cheap check nobody has done.
 
+### D#13. The operator's foreground never moves, and what "put away" means on Linux
+
+**Context.** L6 is the guarantee the project exists to provide, and
+`docs/LINUX.md` asks for it the way the Windows suite does: read
+`_NET_ACTIVE_WINDOW` on the operator's display before and after every action,
+with the target on the nested one, and require it never to change. D75 said
+this could not be asked, because a bare `Xvfb` has no such property. With a
+window manager on the nested display (D#11) it can.
+
+**Nothing this run launched ever became the operator's foreground.** The
+operator was running a full GNOME session on `:0` throughout: the target was
+focused, driven with a real click, iconified, left to grab its own foreground
+on a timer, and put away again. At no point did a window belonging to a
+process the run launched own `:0`'s active window. The isolation is
+structural -- a different X server, not a policy -- and is now asserted
+rather than assumed.
+
+**Stated as attribution, not stillness, and that was a correction.** The
+first version of this test asserted the operator's active window was the
+*same handle* at every step. It passed alone and failed in a full suite run,
+because the operator clicked something -- which is not a defect in anything.
+The Windows focus guard had the framing right all along and this one now
+matches it: what must never happen is that a window belonging to a process
+this run launched becomes the foreground (`tests/test_zz_focus_guard.py`).
+The operator's foreground may move freely; it may never move *to the
+target*.
+
+**The control comes first, and this is why.** "The foreground did not move"
+is trivially true of a harness that did nothing at all, and an earlier run of
+this measurement reported exactly that: a still foreground next to a drive
+that had silently failed. The probe now proves it can drive the target before
+any non-effect is allowed to mean anything, and the test skips rather than
+passes when it cannot.
+
+**Two things the Windows model got right for the wrong reason here.**
+
+*What iconified looks like.* On Windows, minimized is a window state you ask
+about directly. Under a compositing window manager an iconified window is
+still `IsViewable` -- `Map State` does not move at all. `_NET_WM_STATE_HIDDEN`
+is the signal, and code that asks the Windows question gets the wrong answer
+confidently.
+
+*Whether a hidden window can still be captured.* This is what makes the
+minimized strategy possible: on Windows, `PrintWindow` asks the window to
+render itself, so a minimized target still yields a picture (D49, D55). X11
+has no equivalent call, and an unmapped window's contents are not guaranteed
+to survive. Measured: under the compositor they do, and not merely
+"non-empty" -- the iconified capture is *pixel-identical* to the mapped one,
+1601 unique colours both, RMSE 0. Checked that way on purpose, because a
+capture that succeeds and returns a blank buffer is worse than one that fails
+(D66, and the black Chromium capture in D77).
+
+**That is a property of the compositor, not of X11.** A non-compositing
+window manager is expected to lose the contents, and is unmeasured. The
+minimized strategy on Linux therefore carries a dependency the Windows one
+does not, and it should be stated wherever the strategy is offered rather
+than discovered by whoever runs it under something lighter.
+
+**The watchdog has something real to watch.** The fixture calls `present()`
+on a timer -- which is what a foreground grab *is* -- and it clears
+`HIDDEN` and takes the nested foreground. Reproduced end to end: iconify,
+grab, re-iconify, capture still good. D49's watchdog does not prevent the
+flap; it makes it observable, and on Linux the thing to observe is
+`_NET_WM_STATE_HIDDEN` going away.
+
+**Unmeasured.** A non-compositing window manager, Wayland, and the soak that
+spec §13 still lists as never having run.
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on
