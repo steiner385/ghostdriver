@@ -1,12 +1,18 @@
-"""The Linux backend: specified, not yet built.
+"""The Linux backend: specified, being measured, not yet built.
 
 docs/LINUX.md says what it will be -- AT-SPI for the tree and actuation, a
 nested X server for the structural isolation guarantee -- and, more
 importantly, what has to be *measured* first, because every corner of the
 Windows backend that mattered was a measurement contradicting a model.
-None of that can be measured on the machine this was written on, so this
-package answers every contract name with the same refusal rather than
-with code nobody has run.
+
+That measuring has started, and has already contradicted the plan twice: a
+bare Xvfb has no EWMH, and the nested display needs a D-Bus session bus of
+its own before it isolates anything (D#8). `deadline` is the first piece
+that survived it -- AT-SPI will not bound a call against a hung application,
+so the caller has to (D#9).
+
+Every *contract* name still answers with the same refusal, because none of
+them has been built.
 """
 
 from typing import Any

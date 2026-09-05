@@ -135,6 +135,12 @@ a foreground grab *is*).
 2. **Reading.** Names, roles, states, text of every fixture control;
    which controls answer `Text` and which only `Name`; what an unresponsive
    control does to a bus call (D4) and what timeout is right.
+   **Done (D#34, D#9).** Entries answer `Text`, buttons do not, and the
+   owner-drawn grid answers neither. Two findings the measurement did not
+   go looking for: AT-SPI hands out password contents in cleartext and one
+   of the two ways to make a password field is undetectable (#34); and
+   `Atspi.set_timeout()` does not bound a call at all, so the deadline is
+   imposed by the driver instead -- 200ms, the same as Windows'.
 3. **Tier 1.** `Action.DoAction` on the real button, the custom-drawn
    button (expected: no action), the entry (`Value` / `EditableText.SetText`
    -- expected: the D21 split on the bound entry).
