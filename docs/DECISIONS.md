@@ -2954,7 +2954,7 @@ flap; it makes it observable, and on Linux the thing to observe is
 **Unmeasured.** A non-compositing window manager, Wayland, and the soak that
 spec §13 still lists as never having run.
 
-### D#40. Slice 1: the window tree, and what the contract assumed
+### D#40a. Slice 1: the window tree, and what the contract assumed
 
 **Context.** Every Linux decision so far measured something. This one builds:
 six contract names -- `enumerate_process`, `top_level_windows`,
@@ -3068,6 +3068,54 @@ is its *text*, and it overrides an explicitly set accessible label. So a label
 cannot be given a stable name, and a locator matching one matches its
 contents -- which change. Anything that needs to find a label reliably has to
 match on something else.
+
+### D#40b. Slice 2: reading, and the third state the contract has no room for
+
+**Context.** Slice 2 wires `read_window_text`, `is_protected`,
+`capture_window` and `CaptureError`. The policy was already decided --
+withhold by class (D#34b), bound by a caller-side deadline (D#9) -- so this
+was meant to be plumbing. It was not.
+
+**`is_protected` stays narrow, and that is a decision.** It is tempting to
+answer `True` for the whole withheld class: an editable entry might be a
+password and nothing distinguishes them. It would be wrong, because
+`is_protected` is *also* what refuses to type into a field (D38,
+`tools/acting.py`). Widened, the driver could never type into any text field
+at all, which is most of what it exists to do.
+
+So the two questions are deliberately different: **the disclosure policy
+governs reading, and the role governs typing.** A `Gtk.Entry` with hidden
+characters is withheld but not protected -- undisclosed, still typeable --
+and that is the only combination that keeps both properties.
+
+**The contract has two states and the platform needs three.**
+`read_window_text` returns `str | None`, and `None` means *did not answer*.
+On Windows that is unambiguous: the OS refuses the read only for a password
+field, so `is_protected` tells the two apart, which is exactly what D37 is
+about.
+
+Here `None` has three causes -- withheld, protected, and a real timeout --
+and `is_protected` separates only the declared widget. **A healthy plain text
+field therefore reads exactly like a hung one**, which is the confusion D37
+was written to prevent, arriving from the other direction.
+
+Not fixed in this slice, and not smuggled around. The fix is a disclosure
+opt-in through the contract (`disclose=`, which D#34b's `read()` already
+takes), and that changes a signature Windows shares, on a platform this work
+cannot verify. Filed instead.
+
+**Two smaller things the wiring settled.**
+
+*A control with no `Text` interface answers with its caption.* Buttons do not
+implement `Text`, and `WM_GETTEXT` answers such a window with its caption
+rather than failing, so the accessible name is the honest equivalent and
+keeps both platforms answering the same question. A control that implements
+`Text` and raises anyway did not answer, and `None` says so.
+
+*A capture is of a window, not a control.* Only toplevels have an X id (D#8),
+so a handle anywhere in the tree captures its window and `region` crops. The
+size is decoded from the PNG rather than reported from the request, because
+a capture that returns bytes and no picture is the trap D66 names.
 
 ## Open, for whoever picks this up
 

@@ -39,11 +39,6 @@ ENTRY_POINTS = {
 #: found the `minimized` isolation strategy unwired (D49 built it, D52
 #: wired only hidden_desktop); B0 wired it and emptied the list.
 KNOWN_UNWIRED: dict[str, str] = {
-    "ghostdriver.backends.linux.protection": (
-        "The disclosure policy (D#34b), measured and tested, and reachable "
-        "from nothing because the Linux backend has no read to apply it in. "
-        "It goes when that read lands -- see #10 onward."
-    ),
 }
 
 
@@ -183,7 +178,8 @@ TESTS = Path(__file__).resolve().parent
 IMPORT_TIME_PLATFORM_ALLOWED = {"fixtureapp.py", "fixtureapp_gtk.py",
                                 "linux_atspi_probe.py",
                                 "linux_timeout_probe.py",
-                                "linux_tier1_probe.py"}
+                                "linux_tier1_probe.py",
+                                "linux_reading_probe.py"}
 
 #: Modules that exist on one platform only. `ctypes.WinDLL` raises
 #: AttributeError off Windows; `gi` and `pyatspi` are simply absent off a
