@@ -2824,6 +2824,68 @@ normally, and that is the hole -- narrow, and worth re-measuring against the
 first real Linux target rather than guessed at now. Qt is unmeasured
 throughout.
 
+### D#11. Tier 3 does not exist on GTK4/X11, confirmed under a window manager
+
+**Context.** `docs/LINUX.md` names measurement 4 as the one that decides
+"whether the Windows ladder maps to Linux at all". D75 answered it
+provisionally and flagged two reasons not to trust the answer: no window
+manager was running, and the sends came from one tool. This settles the first
+and leaves the second stated.
+
+**A window manager does run on the nested display.** D75 said none was
+installed; D#8 corrected that to "installed but the nested one refused to
+start". Both were wrong about the consequence. `gnome-shell --x11` runs on a
+nested display perfectly well **under its own `dbus-run-session`** -- the
+earlier refusal (`org.gnome.Shell already exists on bus`) was the shared
+session bus, the same root cause as D#8's finding. With it running, `:83`
+carries `_NET_SUPPORTING_WM_CHECK`, `_NET_ACTIVE_WINDOW` and
+`_NET_CLIENT_LIST`. **That unblocks L6 and L7 (#13, #14)**, which D75 said
+could not be asked at all.
+
+**The measurement, with every experiment behind a passing control.**
+
+| | control | result |
+|---|---|---|
+| `XTest` key, target focused | -- | **acted** (grid copied) |
+| `XTest` click, pointer on the control | -- | **acted** (counter 0→1) |
+| `XSendEvent` key, target **focused** | both above | **ignored** |
+| `XSendEvent` key, target **unfocused** | both above | **ignored** |
+| `XSendEvent` button, target focused, pointer away | both above | **ignored** |
+| `XSendEvent` button, target unfocused, pointer away | both above | **ignored** |
+
+**GTK 4.14.5 ignores a sent event in every configuration tested.** So tier 3
+-- the rung that drives a chosen window without taking the operator's focus
+or pointer -- does not exist here.
+
+**This corrects D75 as well as confirming it.** D75 recorded one case that
+*worked*: a sent key to a window that already held focus. Under a window
+manager it does not, so that row was an artefact of a display with no
+window manager and degenerate focus handling. The conclusion is unchanged and
+now rests on cleaner evidence.
+
+**What follows.** The ladder on Linux is tier 1, then tier 4 under isolation.
+Tier 4 takes the real focus and pointer and is excluded by default (D9), so
+it is only acceptable where the input being taken is not the operator's --
+which makes the nested X server **mandatory rather than preferred**, where
+`docs/LINUX.md` had it as the simpler of two options. MPX moves from "measure
+it after the nested server works" to the only route that could drive a target
+on the operator's own display, and is now worth its own measurement.
+
+**On method, because this measurement lied three times before it told the
+truth.** Three runs produced a confident negative from a harness that could
+not have produced a positive: once with no window manager, once with the
+pointer aimed at coordinates the window manager had moved the window away
+from, and once with focus that silently never took. Each looked exactly like
+a real result. The probe now runs its controls **first** and aborts if they
+fail, and `tests/test_linux_tier3.py` skips rather than passes when they do,
+because a green test that proved nothing is worse than a missing one.
+
+**What is still not settled.** GTK 4.14.5 and GNOME Shell only. **Qt is
+unmeasured**, and LINUX.md is right that "GTK ignores sent events" is a fact
+about a configuration rather than about GTK. The sends came from `xdotool`
+3.20160805.1; a hand-rolled `XSendEvent` with different propagation could
+behave differently, and that remains the one cheap check nobody has done.
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on
