@@ -18,7 +18,7 @@ them has been built.
 from typing import Any
 
 from .. import CONTRACT, UnsupportedPlatform
-from . import tree
+from . import reading, tree
 
 #: What is wired, and where it lives. Everything else still refuses. The map
 #: is explicit rather than "try the import and see", so a name that is not
@@ -27,11 +27,20 @@ from . import tree
 #: `tree` is safe to import here even on Windows -- it keeps `gi` inside its
 #: functions -- and importing it plainly rather than by name keeps it visible
 #: to the reachability guard, which reads imports and cannot follow a string.
-_WIRED: dict[str, Any] = dict.fromkeys(
-    ("enumerate_process", "top_level_windows", "direct_children",
-     "process_facts", "descendants", "parent_map"),
-    tree,
-)
+_WIRED: dict[str, Any] = {
+    # slice 1, the window tree (#40)
+    **dict.fromkeys(
+        ("enumerate_process", "top_level_windows", "direct_children",
+         "process_facts", "descendants", "parent_map"),
+        tree,
+    ),
+    # slice 2, reading -- under the deadline (D#9) and the disclosure
+    # policy (D#34b)
+    **dict.fromkeys(
+        ("read_window_text", "is_protected", "capture_window", "CaptureError"),
+        reading,
+    ),
+}
 
 
 class _LinuxBackend:
@@ -44,8 +53,8 @@ class _LinuxBackend:
         if wired is not None:
             return getattr(wired, name)
         raise UnsupportedPlatform(
-            f"{name} is not implemented on Linux yet. The window tree is "
-            "wired (#40 slice 1); this is not part of it. The backend is specified "
+            f"{name} is not implemented on Linux yet. The window tree and "
+            "reading are wired (#40 slices 1-2); this is not part of them. The backend is specified "
             "in docs/LINUX.md, and is being built by measurement: the nested "
             "display, its AT-SPI bus, reading, the read deadline, the "
             "disclosure policy and the foreground guarantee are done and "
