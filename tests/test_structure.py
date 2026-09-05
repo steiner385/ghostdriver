@@ -44,11 +44,6 @@ KNOWN_UNWIRED: dict[str, str] = {
         "from nothing because the Linux backend has no read to apply it in. "
         "It goes when that read lands -- see #10 onward."
     ),
-    "ghostdriver.backends.linux.deadline": (
-        "Measured and tested (D#9), and reachable from nothing because the "
-        "Linux backend has no contract functions yet to call it. It goes when "
-        "the first read lands -- see #9 and #34."
-    ),
 }
 
 

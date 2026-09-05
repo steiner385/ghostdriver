@@ -2954,6 +2954,70 @@ flap; it makes it observable, and on Linux the thing to observe is
 **Unmeasured.** A non-compositing window manager, Wayland, and the soak that
 spec §13 still lists as never having run.
 
+### D#40. Slice 1: the window tree, and what the contract assumed
+
+**Context.** Every Linux decision so far measured something. This one builds:
+six contract names -- `enumerate_process`, `top_level_windows`,
+`direct_children`, `process_facts`, `descendants`, `parent_map` -- answer for
+real, and `ghostdriver list-targets` lists a target on Linux.
+
+**Why this went before the remaining measurements.** L3, L5, L7 and L8 are
+still unmeasured, and the spec order says do them first. Slice 1 needs only
+L1, and it answers a question no further measurement can: *are these
+measurements sufficient to implement against?* The contract was written from
+the Windows backend; if a name needs something AT-SPI cannot give, that is
+much cheaper to find on the first slice than after four more measurements
+taken on the assumption that it fits. It found two things.
+
+**First: the contract returned a type no other backend could name.**
+`ProcessFacts` was defined in `backends/windows/process.py`, which binds
+Win32 at import, so the Linux backend could not import the shape it was
+contracted to return. Nothing outside that module imported it -- the
+platform-neutral layer duck-typed it -- which works exactly until a second
+backend exists. Moved to `model/process.py` so both fill one definition
+rather than each keeping a copy that drifts.
+
+Its Windows-flavoured fields are kept rather than generalised, because
+`probe/runner.py` writes every one into the profile and the profile is a
+document an operator reads and diffs. Linux answers `wow64=False`,
+`integrity_level=None`, `dpi_awareness="unknown"` -- the absence, not a
+plausible reading. X11 scaling is a different model and mapping it would be
+a guess dressed as a measurement.
+
+**Second: `WindowNode` assumes Win32's three certainties**, and none of them
+survives:
+
+| Field | Win32 | Here |
+|---|---|---|
+| `handle` | every control has one | only toplevels have an X id, so handles are **minted** and kept in a registry that a new enumeration clears |
+| `class_name` | a vendor class, often the decisive toolkit evidence (D47) | the AT-SPI **role name**, which is coarser: every button is `push button` |
+| `text` | `WM_GETTEXT` | the accessible **name**, never the Text interface |
+
+The minted handle is not a workaround: `WindowNode` already documents a
+handle as opaque, backend-supplied and valid only for the enumeration that
+produced it, because Win32 recycles them. Minting is a different way to be
+unsafe to persist, and the contract already forbade persisting them.
+
+That `text` is the name and not the contents is load-bearing. A tree walk
+that returned contents would hand back every password on screen, which is
+the bug D#34b exists to prevent, and a caller enumerating a window has not
+asked to read anything.
+
+**The coarser `class_name` has a cost worth naming.** D47 leaned on vendor
+class names as toolkit evidence, and role names carry none of that. Linux
+toolkit inference will have to come from the loaded objects instead --
+`/proc/<pid>/maps`, which `process_facts` now reads -- rather than from the
+tree. That is what `infer_toolkit` already prefers when modules are
+readable, so the fallback is the primary here.
+
+**Three guards fired on this change, all correctly.** The reachability guard
+caught `tree` reached only through a dynamic import (fixed by importing it
+plainly, which is safe because `tree` keeps `gi` inside its functions); the
+unwired list shrank on its own, because `tree` now calls `deadline`; and
+`test_linux_refuses_every_name` was *right until it wasn't* -- it encoded
+"nothing is built", and now asserts the thing that stays true as the backend
+fills in.
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on

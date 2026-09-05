@@ -18,6 +18,20 @@ them has been built.
 from typing import Any
 
 from .. import CONTRACT, UnsupportedPlatform
+from . import tree
+
+#: What is wired, and where it lives. Everything else still refuses. The map
+#: is explicit rather than "try the import and see", so a name that is not
+#: here refuses with an explanation instead of an AttributeError from three
+#: modules down.
+#: `tree` is safe to import here even on Windows -- it keeps `gi` inside its
+#: functions -- and importing it plainly rather than by name keeps it visible
+#: to the reachability guard, which reads imports and cannot follow a string.
+_WIRED: dict[str, Any] = dict.fromkeys(
+    ("enumerate_process", "top_level_windows", "direct_children",
+     "process_facts", "descendants", "parent_map"),
+    tree,
+)
 
 
 class _LinuxBackend:
@@ -26,8 +40,12 @@ class _LinuxBackend:
     def __getattr__(self, name: str) -> Any:
         if name not in CONTRACT:
             raise AttributeError(f"the backend contract has no {name!r}")
+        wired = _WIRED.get(name)
+        if wired is not None:
+            return getattr(wired, name)
         raise UnsupportedPlatform(
-            f"{name} is not implemented on Linux yet. The backend is specified "
+            f"{name} is not implemented on Linux yet. The window tree is "
+            "wired (#40 slice 1); this is not part of it. The backend is specified "
             "in docs/LINUX.md, and is being built by measurement: the nested "
             "display, its AT-SPI bus, reading, the read deadline, the "
             "disclosure policy and the foreground guarantee are done and "

@@ -38,13 +38,40 @@ def test_a_name_outside_the_contract_is_an_attribute_error_not_a_lookup():
             _ = current().teleport
 
 
-def test_linux_refuses_every_name_and_points_at_the_specification():
-    backend = load("linux")
+def test_linux_answers_what_is_wired_and_refuses_the_rest_by_name():
+    """This asserted that Linux refuses *every* contract name, which was true
+    while nothing was built and became wrong the moment slice 1 landed (#40).
 
+    Rewritten to the thing that stays true as the backend fills in: whatever
+    is wired is callable, everything else refuses, and the refusal still says
+    where to read about the gap. Nothing here hard-codes which names are in
+    which group, so the next slice does not have to edit this test -- it only
+    has to be honest in `_WIRED`.
+    """
+    backend = load("linux")
     assert backend.platform == "linux"
+
+    wired, refused = [], []
     for name in CONTRACT:
-        with pytest.raises(UnsupportedPlatform, match=r"docs/LINUX\.md"):
+        try:
             getattr(backend, name)
+        except UnsupportedPlatform as exc:
+            assert "docs/LINUX.md" in str(exc), name
+            refused.append(name)
+        else:
+            wired.append(name)
+
+    assert wired, "nothing is wired; slice 1 of #40 should have landed"
+    assert refused, "everything is wired; this test and #40 are both done"
+    assert set(wired).isdisjoint(refused)
+
+
+def test_the_window_tree_is_the_part_that_is_wired():
+    """Names the slice, so that wiring something by accident is visible."""
+    backend = load("linux")
+    for name in ("enumerate_process", "top_level_windows", "direct_children",
+                 "process_facts", "descendants", "parent_map"):
+        assert callable(getattr(backend, name)), name
 
 
 def test_an_unknown_platform_is_refused_by_name():

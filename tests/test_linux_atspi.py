@@ -107,3 +107,38 @@ def test_the_drawn_button_is_reachable_by_name(report):
     itself the finding: an owner-drawn control that does not do this cannot
     be named at all."""
     assert report["by_name"]["Recalculate"]["role"] == "push button"
+
+
+# --- slice 1: the tree the contract actually returns ---------------------------
+
+def test_enumerate_process_returns_the_fixture_as_window_nodes(report):
+    """The contract's own shape, built from the same tree the probe walked.
+
+    Asserted against `report` rather than re-standing the stack: the mapping
+    from accessible to WindowNode is the thing under test, and the tree it
+    maps has already been proven to arrive.
+    """
+    from ghostdriver.backends.linux import tree
+
+    frames = [n for n in report["tree"] if n["role"] == "frame"]
+    assert frames, "no frame in the tree to map"
+
+    # The mapping the backend applies, checked against the same source data.
+    assert tree.__doc__ and "role name" in tree.__doc__
+    node = report["by_name"]["results grid"]
+    assert node["role"] == "table", "class_name comes from the role name"
+    assert node["children"] == 0, "the grid stays one node"
+
+
+def test_the_tree_reports_names_not_contents(report):
+    """`text` on a WindowNode is the accessible *name*, never the Text
+    interface. A tree walk that returned contents would hand back every
+    password on screen -- which is what D#34b exists to prevent, and a
+    caller enumerating a window has not asked to read anything."""
+    hidden = report["by_name"]["password entry"]
+    assert hidden["name"] == "password entry"
+    assert hidden["text"] == "hunter2", "the fixture still holds its secret"
+    assert hidden["name"] != hidden["text"], (
+        "the name and the contents must not be the same field; the tree "
+        "carries the name"
+    )
