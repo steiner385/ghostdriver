@@ -3157,6 +3157,62 @@ restore without raising, and that is unmeasured. The two routes tried are the
 specified ones; a WM that answers a bare map differently would change this
 answer.
 
+### D#40c. Slice 5a: a second sampler, not a second policy
+
+**Context.** Slice 5 is isolation and interference -- five contract names,
+615 lines on Windows. The first instinct was that most of it was
+platform-neutral and should be lifted out of the Windows backend, the way
+`ProcessFacts` was in D#40a. That instinct was wrong, and the codebase said
+so before any code moved.
+
+`ghostdriver/isolation.py` describes itself as "pure policy. It is fed
+observations and returns decisions; the sampling [is elsewhere]", and
+`backends/windows/isolate.py` opens with "the policy in
+`ghostdriver.isolation` decides; this samples". **The seam already existed
+and was already in the right place.** So Linux supplies a second sampler
+feeding the same `Watchdog`, and nothing was moved. Worth recording because
+the wrong move -- hoisting a class that was already correctly placed --
+would have looked like tidying.
+
+**What is actually platform-specific is small**: what a sample *is*, and how
+a window is put away.
+
+| | Windows | here |
+|---|---|---|
+| on screen | a visible, non-minimized window of the family | a managed top-level the WM has not marked `_NET_WM_STATE_HIDDEN` (D#13) |
+| put away | `minimize_no_activate` | a `WM_CHANGE_STATE` client message -- the call D#13 measured as non-activating |
+| still there | `IsWindow` | the window answers `get_attributes` |
+
+**A real X connection, not `xprop`.** The watch polls; a sample is several
+round trips, and shelling out per poll would spawn two processes each time.
+`python-xlib` is declared as a Linux dependency for the same reason
+`pywin32` is declared for Windows -- the difference between a watchdog and a
+fork bomb.
+
+**The poll is slower here, deliberately.** 100ms against the Windows 20ms. A
+sample costs X round trips rather than local calls, and the thing being
+watched -- a window flapping into view -- has a human-visible duration.
+
+**Putting a window away is safe; taking it back is not.** There is no quiet
+un-hide (D#14), so the watchdog only ever iconifies. On Windows D55's
+"nothing ever un-minimizes" is a policy; here it is the only thing available.
+
+**One test had to be loosened, and the reason is a finding.** The fixture's
+`present()` produces `unexpected_foreground` on some runs and
+`unexpected_restore` on others, because GNOME Shell does not reliably grant
+focus to a presenting window. Both are escapes; both are captured and put
+back. The test asserts *an escape*, not which kind -- pinning the kind would
+pin whether the window manager happened to grant focus that run, which is
+neither stable nor this backend's decision. The policy that tells the two
+apart is neutral and already tested.
+
+**Not done in this slice.** `HiddenDesktop` and `OperatorNotice` are the
+genuinely platform-shaped remainder -- a nested X server as a first-class
+strategy, and a notice on the operator's own display -- and `InterferenceWatch`
+needs a decision of its own: it is injectable by construction and its logic
+is neutral, so it wants lifting rather than reimplementing, which touches
+Windows.
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on
