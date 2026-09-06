@@ -3117,6 +3117,46 @@ so a handle anywhere in the tree captures its window and `region` crops. The
 size is decoded from the PNG rather than reported from the request, because
 a capture that returns bytes and no picture is the trap D66 names.
 
+### D#14. Restoring a window and focusing it are one operation
+
+**Context.** L7 asks whether the window manager focuses a window that has
+been un-hidden. D55 said to assume it does until measured, and D4 permits
+`restore` at `read_only` precisely because it is the operator's escape hatch
+-- the one place a focus change is legitimate.
+
+**The answer is stronger than the assumption.** Under GNOME Shell you cannot
+un-hide a window *without* focusing it.
+
+| route | what it asks for | hidden after | active after |
+|---|---|---|---|
+| `XMapWindow` (ICCCM de-iconify) | nothing else | **still hidden** | unchanged |
+| `_NET_ACTIVE_WINDOW` (EWMH activate) | focus | **restored** | the restored window |
+
+Both legitimate routes are covered: `_NET_WM_STATE_HIDDEN` is
+window-manager-managed and a client may not set it, so a bare map and an
+activation are the only two ways to ask. The map does nothing at all -- not
+half a restore, nothing -- and activation restores and focuses in the same
+motion.
+
+**So restoring and focusing cannot be separated**, and D55's "assume it
+focuses" turns out to understate it: there is no version that does not. That
+is fine for `restore` itself, which exists to hand the window back and whose
+whole point is that the person gets it. What it rules out is any code path
+that wants a window *visible but not focused* -- on this window manager there
+is not one, and anything designed around that possibility has to be
+redesigned rather than configured.
+
+**It also means D55's rule is load-bearing here in a way it is not on
+Windows.** "Nothing ever un-minimizes" is a policy on Windows and a
+*necessity* on Linux: an accidental un-hide is an accidental focus steal,
+with no gentler failure available.
+
+**Measured under GNOME Shell only.** A window manager with a different focus
+policy -- one honouring focus-stealing prevention, say -- could plausibly
+restore without raising, and that is unmeasured. The two routes tried are the
+specified ones; a WM that answers a bare map differently would change this
+answer.
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on

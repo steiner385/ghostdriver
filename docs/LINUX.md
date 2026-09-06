@@ -182,6 +182,12 @@ a foreground grab *is*).
    a lighter window manager is unmeasured.
 7. **Restore.** Un-hide via `_NET_WM_STATE` and see whether the window
    manager focuses the window (D55 says assume it does until measured).
+   **Done (D#14), and stronger than assumed: you cannot un-hide without
+   focusing.** A bare map leaves the window hidden; activation restores and
+   focuses in one motion, and those are the only two routes a client has --
+   `_NET_WM_STATE_HIDDEN` is WM-managed and not client-settable. So D55's
+   "nothing ever un-minimizes" is a necessity here rather than a policy: an
+   accidental un-hide is an accidental focus steal.
 8. **An embedded document.** A Chromium engine on the nested display, the
    wake, the click, the typing -- D58 again.
 
