@@ -19,6 +19,9 @@ class Locator:
     visible: bool | None = True
     index: int | None = None
     #: `enabled=true|false`: every element reports it, so it filters (D66).
+    #: It is the WS_DISABLED bit, not availability: an owner-drawn control
+    #: greys itself without clearing the bit, so `enabled=false` will not
+    #: catch one that is effectively disabled. Filter on it, do not trust it.
     enabled: bool | None = None
     #: `handle=0x0001ABCD`: the `handle_ephemeral` of one result, valid
     #: until the window goes -- one control, named exactly (D66).

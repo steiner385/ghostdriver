@@ -3213,6 +3213,54 @@ needs a decision of its own: it is injectable by construction and its logic
 is neutral, so it wants lifting rather than reimplementing, which touches
 Windows.
 
+### D#51. `enabled` is a bit, not availability, and the contract now says so
+
+**The field report.** `find` returned `enabled: true` for an owner-drawn
+command button (a Delphi/VCL control) that rendered grey and did nothing.
+The backend owner-draws that control and never sets `WS_DISABLED`, so
+`enabled` -- which is `IsWindowEnabled` for a window node -- answered a
+different question than the tester was asking. It is not "the user can use
+this"; it is only "the `WS_DISABLED` bit is clear." Roughly a third of a
+session's assertions read `enabled`, and on an owner-drawn control it is
+silently wrong in the reassuring direction -- the opposite blind spot from
+the modal case the `WindowNode` docstring already records, where a control
+reports `enabled` while unreachable *through* a disabled ancestor.
+
+**Three options, cheapest first, and why the cheapest is barred.** The
+report offered: (1) caveat the field when the class is a known owner-drawn
+one; (2) return the flag's provenance; (3) rename it so it cannot be read
+as "the user can use this."
+
+Option 1 is not available here: we keep **no target knowledge in any repo**,
+so a list of owner-drawn class names has nowhere to live. Option 3 breaks a
+published surface -- `enabled=` is a documented locator filter and a field
+a third of assertions already read, so a rename is a migration, not a fix.
+
+**What was actually done: option 2, at the contract, not per element.** The
+provenance of `enabled` is *constant* -- every window-node value is
+`IsWindowEnabled`; an owner-drawn control paints its own greyed state
+without clearing the bit. A constant fact stamped on every element is the
+noise the `actionable`-only-when-False rule (D66) exists to avoid. So the
+provenance goes where the caller reads it and where it costs nothing per
+element: the `find` and `describe` tool descriptions now say `enabled` is
+the `WS_DISABLED` bit and not proof a control will act, and point at
+`capture` / `expect={changed}` to confirm availability. The `enabled=`
+locator-filter doc and the `WindowNode` / `AccessibleElement` docstrings
+carry the same wording, so the source and the contract agree.
+
+**Why the value was not touched.** `IsWindowEnabled` really did return true;
+the reading was wrong, not the measurement. The fix is to say what the
+measurement is, not to fake a better one -- a per-element "is it owner-drawn"
+verdict would need the `surfaces` probe, which `find` deliberately does not
+run.
+
+**A guard test, because a promise in prose gets broken.** `test_find_and_
+describe_disclaim_enabled_as_availability` asserts both descriptions still
+name `IsWindowEnabled` and `owner-drawn`, so the caveat cannot regress out
+of the interface silently (the D60 lesson). Platform-neutral text and a
+platform-neutral test: verifiable anywhere, motivated by a Windows target.
+*(issue #51)*
+
 ### D#12. Modality is declared here, and nothing is disabled
 
 **Context.** L5 asks what `_NET_WM_STATE` and AT-SPI say about a modal, and
