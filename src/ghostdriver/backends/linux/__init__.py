@@ -18,7 +18,7 @@ them has been built.
 from typing import Any
 
 from .. import CONTRACT, UnsupportedPlatform
-from . import reading, tree
+from . import isolate, reading, tree
 
 #: What is wired, and where it lives. Everything else still refuses. The map
 #: is explicit rather than "try the import and see", so a name that is not
@@ -40,6 +40,9 @@ _WIRED: dict[str, Any] = {
         ("read_window_text", "is_protected", "capture_window", "CaptureError"),
         reading,
     ),
+    # slice 5a, the minimized watch -- sampling for the neutral policy in
+    # ghostdriver.isolation, which decides (D#13, D#14)
+    **dict.fromkeys(("MinimizedWatch", "WatchError"), isolate),
 }
 
 
@@ -54,7 +57,8 @@ class _LinuxBackend:
             return getattr(wired, name)
         raise UnsupportedPlatform(
             f"{name} is not implemented on Linux yet. The window tree and "
-            "reading are wired (#40 slices 1-2); this is not part of them. The backend is specified "
+            "reading and the minimized watch are wired (#40 slices 1, 2, 5a); "
+            "this is not part of them. The backend is specified "
             "in docs/LINUX.md, and is being built by measurement: the nested "
             "display, its AT-SPI bus, reading, the read deadline, the "
             "disclosure policy and the foreground guarantee are done and "

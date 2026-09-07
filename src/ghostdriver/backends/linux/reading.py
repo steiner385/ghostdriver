@@ -27,6 +27,7 @@ shares. Filed rather than smuggled in.
 
 from __future__ import annotations
 
+import subprocess
 from typing import Any
 
 from . import protection
@@ -125,7 +126,6 @@ def capture_window(
     identical (D#13) -- which is what makes the minimized strategy possible
     here, and is a property of the compositor rather than of X11.
     """
-    import subprocess
 
     xid = _toplevel_xid(_accessible(handle))
     if xid is None:
@@ -133,6 +133,19 @@ def capture_window(
             "no X window behind this handle. Only a toplevel has one; a "
             "control is an accessible with no drawable of its own."
         )
+    return capture_xid(xid, region=region)
+
+
+def capture_xid(
+    xid: int, *, region: tuple[int, int, int, int] | None = None
+) -> tuple[bytes, int, int]:
+    """The same capture, for a caller that already knows the X window.
+
+    The watchdog knows its target by xid and must not re-resolve it: picking
+    the tree with the most visible nodes flips to a proxy once the target is
+    put away, and the watch would then photograph the wrong window forever
+    (the reason the Windows watch locks its handle once).
+    """
     crop = []
     if region is not None:
         left, top, right, bottom = region
@@ -154,7 +167,6 @@ def capture_window(
 
 def _toplevel_xid(accessible: Any) -> int | None:
     """Walk up to the frame, and ask X for the window carrying its pid."""
-    import subprocess
 
     node = accessible
     while node is not None:
@@ -180,7 +192,6 @@ def _toplevel_xid(accessible: Any) -> int | None:
 
 
 def _pid_of(xid: int) -> int | None:
-    import subprocess
 
     try:
         got = subprocess.run(["xprop", "-id", str(xid), "_NET_WM_PID"],
