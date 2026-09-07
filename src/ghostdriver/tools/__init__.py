@@ -23,6 +23,8 @@ import functools
 import inspect
 import time
 
+from ..backends import AccessibilityUnavailable
+from ..model.result import ErrorKind
 from .actuation import ActuationTools
 from .core import MAX_ELEMENTS, SENSITIVE_HINT, _element, _error
 from .discovery import DiscoveryTools
@@ -89,6 +91,17 @@ def _traced_and_reporting(fn, *, session_tool: bool):
                         result["watchdog_events"] = events
                     if watch.suspended_reason:
                         result["watchdog_suspended"] = watch.suspended_reason
+            return result
+        except AccessibilityUnavailable as exc:
+            # The platform is supported and its accessibility service is not
+            # running -- a headless box, a container, a session with no
+            # DISPLAY. Ordinary, and something a caller can act on, so it
+            # leaves as a result rather than an exception (D10).
+            #
+            # Caught here rather than in each tool because every tool that
+            # reaches the tree can raise it, and the alternative to catching
+            # it at all used to be the process aborting outright (#58).
+            result = _error(ErrorKind.NOT_ACTIONABLE, str(exc))
             return result
         except Exception as exc:
             self._tracer().record({

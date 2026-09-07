@@ -48,6 +48,28 @@ CONTRACT: tuple[str, ...] = (
 )
 
 
+class AccessibilityUnavailable(RuntimeError):
+    """The platform is supported; its accessibility service is not running.
+
+    Distinct from `UnsupportedPlatform`, which says this backend does not
+    implement something. Here the backend implements it perfectly well and
+    the service it depends on is absent -- a headless box, a container, a
+    session with no `DISPLAY`, or a desktop where nobody enabled
+    accessibility. That is an ordinary condition, not a defect, and the two
+    call for completely different things from a caller.
+
+    It exists because the alternative was **the process dying**. AT-SPI
+    reports a failed bus connection through GLib's `g_error()`, which is
+    fatal by contract: it aborts with SIGTRAP, with no Python exception to
+    catch and no result to return (#58). So the bus is checked before it is
+    reached for, and this is what that check raises.
+
+    Not a CONTRACT name: nothing on Windows can raise it, and a name every
+    backend must implement is the wrong shape for a condition only one of
+    them has.
+    """
+
+
 class UnsupportedPlatform(RuntimeError):
     """No backend drives this platform yet."""
 

@@ -16,6 +16,59 @@ on_linux = pytest.mark.skipif(
 )
 
 
+def _version_tuple(text: str) -> tuple[int, ...]:
+    """The leading numeric components of a version, for comparison.
+
+    Stops at the first component that is not a plain integer, so `2.1.1`,
+    `2.1.0rc1` and `2.1` all compare the way a reader expects without
+    depending on `packaging` being installed.
+    """
+    parts: list[int] = []
+    for piece in text.split("."):
+        if not piece.isdigit():
+            break
+        parts.append(int(piece))
+    return tuple(parts)
+
+
+def mcp_or_skip(minimum: str = "2.1"):
+    """Import `mcp`, or skip -- gated on the **distribution** version.
+
+    `pytest.importorskip(..., minversion=...)` reads the *module's*
+    `__version__` attribute, and mcp 2.1.1 ships without one. So a correct
+    install was read as version `None`, judged below the minimum, and the
+    entire protocol-layer suite skipped with a reason that looked plausible:
+    "module 'mcp' has __version__ None, required is: '2.1'" (#53).
+
+    That is the trap this project is built around -- a green run that
+    verified less than it looks -- in its most dangerous form, because the
+    skip *explained itself* and the explanation was wrong.
+
+    The version a package manager installed lives in distribution metadata,
+    which every distribution has, rather than in an attribute a module may or
+    may not set by convention. So this reads `importlib.metadata.version`.
+
+    **A missing distribution still skips; a too-old one skips saying what it
+    found.** Both are real answers about the environment. What no longer
+    happens is a good install being mistaken for either.
+
+    The minimum is 2.1 because 1.x is importable but renamed `FastMCP` to
+    `MCPServer` at the 2.0 boundary -- it answers the import and then fails
+    every test with a `ModuleNotFoundError` on an inner path.
+    """
+    import importlib.metadata
+
+    try:
+        installed = importlib.metadata.version("mcp")
+    except importlib.metadata.PackageNotFoundError:
+        pytest.skip("the protocol layer is an optional extra: "
+                    "pip install -e .[server]")
+    if _version_tuple(installed) < _version_tuple(minimum):
+        pytest.skip(f"mcp {installed} is installed; the protocol layer needs "
+                    f"{minimum} or newer (1.x renamed FastMCP to MCPServer)")
+    return importlib.import_module("mcp")
+
+
 @functools.cache
 def user32():
     """`user32`, bound on the first call rather than at import.
