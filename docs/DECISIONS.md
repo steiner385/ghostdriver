@@ -3717,6 +3717,20 @@ may try to *start* a session bus with `dbus-launch`, and on a box that has it
 the child would find a bus after all -- a test that proves nothing while
 appearing to pass.
 
+**There are two external services, and each machine hid the other's gap.**
+The first fix guarded the accessibility bus and passed everywhere it was
+tried. Run on a second box -- one that *has* a bus and no `DISPLAY` -- and it
+failed again, this time with a raw `Xlib.error.DisplayNameError` reaching the
+caller as an unexpected error. This backend depends on the accessibility bus
+*and* the X display, a machine can be missing either independently, and
+testing on one host would have shipped a half-fix that looked complete.
+
+Both preflights raise the same exception, because to a caller it is the same
+fact: the desktop this backend reads is not there. And the tests assert that
+the refusal names *a* missing service and *a* remedy, rather than which one
+-- pinning the order would make them pass on one box and fail on the next for
+no real reason.
+
 **`AccessibilityUnavailable` is deliberately not a CONTRACT name.** It says
 the platform is supported and a service it depends on is absent, which is
 different from `UnsupportedPlatform` ("this backend does not implement
