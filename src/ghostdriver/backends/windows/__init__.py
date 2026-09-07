@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 _WHERE: dict[str, str | None] = {
     "enumerate_process": "enumerate", "top_level_windows": "enumerate", "direct_children": "enumerate",
     "process_facts": "process", "descendants": "process", "parent_map": "process",
-    "read_window_text": "text", "is_protected": "text",
+    "read_window_text": "text", "is_protected": "text", "disclosure": "text",
     "capture_window": "capture", "CaptureError": "capture",
     "top_level_state": "modality", "blocking_ancestor": "modality",
     "snapshot": "modality", "surface_of": "modality",

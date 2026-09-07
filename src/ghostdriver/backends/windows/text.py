@@ -13,13 +13,27 @@ them changes anything, which is what lets them run at the read-only tier.
 from . import winapi
 
 
-def read_window_text(hwnd: int, timeout_ms: int = 200) -> str | None:
+def read_window_text(hwnd: int, timeout_ms: int = 200, *,
+                     disclose: bool = False) -> str | None:
     """Return the control's text.
 
     Returns "" when the control answered and has no text, and None when it
     did not answer at all. Callers must not collapse the two: "no caption"
     and "target is not responding" are different facts.
+
+    **`disclose` is accepted and has no effect here, deliberately.** This
+    platform never withholds: the OS itself refuses a cross-process
+    `WM_GETTEXT` on a password field, so a value that must be protected is
+    not available to hand over and there is nothing to opt into. Linux has
+    to withhold in software, because a hidden entry is indistinguishable
+    from a plain one by inspection (D#34b), and the opt-in exists for it.
+
+    Kept in the signature rather than pushed onto the caller, because the
+    tool layer is platform-neutral (D59) and must not have to know which
+    backend it is talking to. `disclosure()` is the name that reports the
+    difference where a caller needs it (D#43).
     """
+    del disclose
     length = winapi.send_message_timeout(
         hwnd, winapi.WM_GETTEXTLENGTH, 0, 0, timeout_ms
     )
@@ -63,3 +77,27 @@ def is_protected(hwnd: int) -> bool:
     them to diagnose a hang that is not happening.
     """
     return bool(winapi.send_message_timeout(hwnd, EM_GETPASSWORDCHAR, 0, 0))
+
+
+def disclosure(hwnd: int) -> str:
+    """Why a read of this control may come back empty-handed: the third state.
+
+    `read_window_text` returns `str | None`, and `None` has to carry every
+    empty-handed outcome. Here there are two -- the control did not answer,
+    or the OS protects it -- and `is_protected` has always separated them
+    (D37). On Linux there is a third, because a driver that cannot tell a
+    hidden entry from a plain one declines to look at either (D#34b), and
+    without a name for it a healthy text field reads exactly like a hung one.
+
+    So the state gets a name rather than borrowing `None`. Three values:
+
+    * `"allowed"` -- the value is returned as read.
+    * `"protected"` -- the platform hides it and always will.
+    * `"withheld"` -- the driver did not look, and `disclose=True` would
+      make it look.
+
+    **This platform never answers `"withheld"`**, and that is the honest
+    answer rather than a gap: it does not withhold anything, because it does
+    not have to. The OS is fail-closed on the one field that matters.
+    """
+    return "protected" if is_protected(hwnd) else "allowed"

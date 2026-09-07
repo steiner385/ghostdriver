@@ -3497,6 +3497,89 @@ position D#40d found AT-SPI does not report. They wait on slice 5b.
 
 Evidence: #40 slice 4; D#10; D#11; D#12; D#34b; D#40d; D10; D53; issue #43.
 
+### D#43. The third state gets a name instead of borrowing `None`
+
+**Context.** `read_window_text` returns `str | None`, and `None` meant *did
+not answer*. On Windows that is unambiguous: the OS refuses a cross-process
+`WM_GETTEXT` only for a password field, so `is_protected` tells the two
+apart, which is what D37 is about.
+
+On Linux `None` had **three** causes, and only two were separable:
+
+| cause | had a name |
+|---|---|
+| the control did not answer within the deadline (D#9) | -- |
+| the toolkit declares it a password field | yes, `is_protected` |
+| an editable entry, withheld because nothing distinguishes it from a password (D#34b) | **no** |
+
+So a perfectly healthy plain text field read exactly like a hung one. That
+is the confusion D37 exists to prevent, arriving from the other direction --
+and a caller told the first goes off diagnosing a hang that is not
+happening.
+
+**Two changes, and the second is the one that closes it.**
+
+`read_window_text` grows `disclose: bool = False`. Windows accepts and
+ignores it -- there is nothing to opt into where the OS itself refuses --
+and Linux passes it to `protection.read`, which has taken exactly that
+parameter since D#34b with nothing able to reach it.
+
+But an opt-in alone does not close the bug: with `disclose=False` a withheld
+field still returns `None`. So the contract also grows **`disclosure()`**,
+answering `"allowed"`, `"protected"` or `"withheld"`. It reads no value --
+the verdict comes from role and states alone -- so asking is safe on a field
+whose contents must not be fetched.
+
+**Rejected: let the tool layer work it out.** It already has the
+`WindowNode`, and `class_name` on Linux is the accessible role, so it could
+tell a withheld entry from a silent one with no contract change. Rejected
+because it puts platform-specific reasoning in the platform-neutral layer,
+which is what D59's boundary exists to prevent. Stated rather than left for
+someone to rediscover and assume it was missed.
+
+**Windows never answers `"withheld"`, and that is honest rather than a gap.**
+It does not withhold, because it does not have to.
+
+**`disclose` does not override `protected`.** A field the toolkit *declares*
+a password is never disclosed, at any grain. That verdict is not a guess, so
+there is nothing for a caller to know better about.
+
+**And the cost that cannot be avoided is now written down.** Asking for
+disclosure on the *undeclared* hidden entry returns the secret -- because the
+driver genuinely cannot tell it from a plain one. Withholding by class buys
+safety by default; it cannot buy safety against a caller who explicitly asks,
+and pretending otherwise would be a guarantee this platform cannot keep.
+`tests/test_linux_reading_wired.py` asserts exactly that, so the cost is
+visible rather than discovered.
+
+**The asking lands in the trace; the answer does not (D62), and that needed
+no code.** The tool wrapper already records every call's `args` and, of the
+result, only `ok` and any error. So `disclose=true` appears as the request it
+was while the values it returned do not. An explicit trace call was written
+first and then deleted -- it was both redundant and reaching for an attribute
+that does not exist.
+
+**A tool module hit D60's limit, and the fix moved code.** `discovery.py`
+went to 428 lines. The reporting logic -- what an empty-handed read *means*
+and how to say so -- is platform-neutral policy that was living in a tool, so
+it moved to `ghostdriver/disclosure.py`: pure, testable without a desktop,
+and the same shape from both backends (D59). The limit is a test precisely
+so that this happens rather than the number growing (D60).
+
+**Why this mattered more than it looked.** D#40e found that slice 4a cannot
+verify its own writes: `read_window_text` answers `None` for an entry before
+*and* after a successful write, so an action's effect is unconfirmable
+through the contract and the test suite has to read the fixture's own
+`changed` events, which a real caller does not have. This issue was filed as
+a reading bug; it was blocking acting.
+
+**Verified on Linux only.** `env: both` -- the signature change and the new
+contract name are implemented on Windows and must be re-verified there.
+`test_the_specification_exists_and_covers_the_contract` caught the new name
+missing from `docs/LINUX.md`, which is the guard working.
+
+Evidence: issue #43; D#34b; D#9; D37; D38; D59; D60; D62; D#40e.
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on

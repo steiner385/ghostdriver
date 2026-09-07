@@ -95,22 +95,69 @@ def test_only_the_declared_password_widget_reports_protected(wired):
     assert wired["controls"]["plain entry"]["protected"] is False
 
 
-def test_a_plain_entry_is_indistinguishable_from_one_that_did_not_answer(wired):
-    """The known cost, asserted so it cannot be forgotten.
+def test_a_plain_entry_still_reads_as_none_by_default(wired):
+    """Withholding is unchanged by D#43: the default is still not to look.
+
+    What changed is that `None` is no longer the *only* thing a caller gets
+    -- see the next test. This one pins the policy itself, so a disclosure
+    opt-in cannot quietly become a disclosure default.
+    """
+    plain = wired["controls"]["plain entry"]
+    assert plain["read"] is None and plain["protected"] is False
+
+
+def test_a_withheld_field_now_says_so_instead_of_borrowing_none(wired):
+    """The fix D#43 made, asserted from the direction of the bug it closed.
 
     `None` means "did not answer" everywhere else in this contract, and on
     Windows that is unambiguous because the OS refuses the read only for
-    password fields (D37). Here it also means "withheld", and `is_protected`
-    separates only the declared widget -- so a perfectly healthy text field
-    reads exactly like a hung one.
+    password fields (D37). Here it also meant "withheld", and `is_protected`
+    separates only the *declared* widget -- so a perfectly healthy text field
+    read exactly like a hung one, and a caller told the first went off
+    diagnosing a hang that was not happening.
 
-    That is the confusion D37 exists to prevent, and this slice does not fix
-    it: the fix is a disclosure opt-in through the contract, which changes a
-    signature Windows shares. Tracked, not smuggled in.
+    `disclosure` gives the third state its own name, and the three fixture
+    controls land on three different answers:
+
+    * `password widget` -- `Gtk.PasswordEntry`, which carries the role --
+      is **protected**.
+    * `plain entry` and `password entry` -- an ordinary entry and one told
+      not to show its characters -- are both **withheld**, because nothing
+      AT-SPI exposes tells them apart (D#34b). That they agree here *is*
+      the finding.
+    * `status`, a label, is **allowed**.
     """
-    plain = wired["controls"]["plain entry"]
-    assert plain["read"] is None and plain["protected"] is False, (
-        "a caller cannot tell this from a control that never replied"
+    controls = wired["controls"]
+    assert controls["password widget"]["disclosure"] == "protected"
+    assert controls["plain entry"]["disclosure"] == "withheld"
+    assert controls["password entry"]["disclosure"] == "withheld"
+    assert controls["status"]["disclosure"] == "allowed"
+
+
+def test_asking_for_disclosure_returns_the_value_but_never_the_protected_one(wired):
+    """The opt-in works, and only for the withheld state.
+
+    A caller that has thought about it can have a plain field's contents.
+    The *declared* password widget is not disclosed even on request: that
+    verdict is not a guess, so there is nothing for a caller to know better
+    about, and a measurement never overrules a person at any grain in the
+    other direction either (D#34b, D35).
+
+    **`password entry` discloses, and that is the honest cost of D#34b.**
+    It is a hidden field, and asking for it returns the secret -- because
+    the driver genuinely cannot tell it from `plain entry`. Withholding by
+    class buys safety by default; it cannot buy safety against a caller who
+    explicitly asks, and pretending otherwise would be a guarantee this
+    platform cannot keep.
+    """
+    controls = wired["controls"]
+    assert controls["plain entry"]["read_disclosed"] == "plain", controls
+    assert controls["password widget"]["read_disclosed"] is None, (
+        "a declared password field was disclosed on request; disclose must "
+        "not override protected"
+    )
+    assert controls["status"]["read_disclosed"] == "ready", (
+        "disclose must not change what an allowed field returns"
     )
 
 

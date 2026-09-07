@@ -2,6 +2,7 @@
 
 import base64
 
+from .. import disclosure as disclosure_report
 from ..backends import current
 from ..model.element import AccessibleElement
 from ..model.locator import Locator
@@ -21,7 +22,9 @@ from .guidance import BLOCKED_HINT, HUNG_HINT
 
 #: Above this fraction of non-background pixels a control has painted
 #: something, whatever it says when asked for its text.
-INK_THRESHOLD = 0.02
+#: Re-exported from the reporting policy, which owns it now.
+#: `tools/acting.py` imports it from here.
+INK_THRESHOLD = disclosure_report.INK_THRESHOLD
 
 
 #: The longest one wait_for call will wait. A screen that takes forty
@@ -143,8 +146,29 @@ class DiscoveryTools(_ToolboxCore):
         return result
 
     def read(
-        self, session_id: str, locator: str, *, all_windows: bool = False
+        self, session_id: str, locator: str, *, all_windows: bool = False,
+        disclose: bool = False,
     ) -> dict:
+        """Read what a locator matches.
+
+        `disclose` asks for the contents of a field the driver would
+        otherwise decline to look at. It exists because one platform cannot
+        tell a hidden entry from a plain one by inspection, so it withholds
+        both by class (D#34b) -- and without a way to ask, a caller with a
+        legitimate need for a plain text field's value has none.
+
+        It never overrides `protected`: a field the toolkit *declares* a
+        password is not disclosed at any grain, because that one is not a
+        guess.
+
+        **The asking is what is recorded, never the answer** (D62), and it
+        needs no code here to be so. The tracer records every tool's `args`
+        and, of the result, only `ok` and any error -- so `disclose=true`
+        lands in the trace as the request it was, while the values it
+        returned do not. An operator reading a session back can see that a
+        value was exposed and which locator exposed it, without the value
+        being written down.
+        """
         try:
             session = self.sessions.authorize(session_id, "read")
         except GhostdriverError as exc:
@@ -158,6 +182,7 @@ class DiscoveryTools(_ToolboxCore):
             return _error(ErrorKind.NOT_FOUND, str(exc), locator=locator)
 
         is_protected = current().is_protected
+        disclosure = current().disclosure
 
         values = []
         for node in matches[:MAX_ELEMENTS]:
@@ -172,45 +197,22 @@ class DiscoveryTools(_ToolboxCore):
                     **({"selected": node.selected} if node.selected is not None else {}),
                 })
                 continue
-            raw = read_window_text(node.handle)
-            value = {
-                "class": node.class_name,
-                # None and "" are different answers: one is a control that
-                # never replied, the other is a control that replied with
-                # nothing. Collapsing them asserts a field is empty when it
-                # may be full.
-                "text": raw,
-                "answered": raw is not None,
-            }
-            # A third answer, and it was previously reported as the first.
-            # The system refuses a cross-process read of a password field,
-            # so it comes back unanswered -- identical to a control that has
-            # stopped pumping messages, and a caller told the wrong one goes
-            # off diagnosing a hang that is not happening. Only asked when
-            # the read came back empty-handed, so the ordinary path pays
-            # nothing.
+            raw = read_window_text(node.handle, disclose=disclose)
+            value = disclosure_report.describe(node.class_name, raw)
             if raw == "" and node.visible:
-                # Empty answer, painted content: the read path does not work
-                # on this control, and saying "empty" would be wrong (D66).
                 try:
                     ink = session.run(lambda h=node.handle: current().ink_fraction(h))
                 except Exception:
                     ink = 0.0
-                if ink > INK_THRESHOLD:
-                    value["read_unreliable"] = True
-                    value["rendered_ink"] = ink
-                    value["note"] = (
-                        "answers empty to a text query but renders content; the "
-                        "read path is unreliable on this control. Verify by "
-                        "capture, or through the value's effect elsewhere"
-                    )
-            if raw is None and is_protected(node.handle):
-                value["protected"] = True
-                value["reason"] = (
-                    "this field hides its contents; the system does not "
-                    "disclose them to another process, and this tool will "
-                    "not type into it. If a person must fill it in, use "
-                    "await_human"
+                disclosure_report.note_unreliable(value, ink)
+            # Why a read came back empty-handed, asked only when it did --
+            # so the ordinary path pays nothing, and neither call reads the
+            # value itself.
+            if raw is None:
+                disclosure_report.explain_empty_handed(
+                    value,
+                    protected=is_protected(node.handle),
+                    verdict=disclosure(node.handle),
                 )
             values.append(value)
         return {

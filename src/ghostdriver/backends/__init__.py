@@ -23,8 +23,12 @@ CONTRACT: tuple[str, ...] = (
     # the window tree
     "enumerate_process", "top_level_windows", "direct_children", "process_facts", "descendants",
     "parent_map",
-    # reading
-    "read_window_text", "is_protected", "capture_window", "CaptureError",
+    # reading. `disclosure` names the third state: a read can come back
+    # empty-handed because the control did not answer, because the platform
+    # protects it, or -- on a platform that cannot tell those apart by
+    # inspection -- because the driver declined to look (D#43).
+    "read_window_text", "is_protected", "disclosure", "capture_window",
+    "CaptureError",
     # modality and state
     "top_level_state", "blocking_ancestor", "snapshot", "surface_of",
     "restore_process",
