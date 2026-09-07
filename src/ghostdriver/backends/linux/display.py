@@ -21,6 +21,8 @@ import contextlib
 import threading
 from typing import Any
 
+from .. import AccessibilityUnavailable
+
 _LOCK = threading.Lock()
 _DISPLAY: Any = None
 
@@ -30,13 +32,32 @@ def _display() -> Any:
 
     Not per-call: opening an X connection costs a round trip, and a watch
     that opened one per sample would spend more time connecting than looking.
+
+    The second of this backend's two external dependencies, and the one a
+    machine can be missing while having the other. #58 guarded the
+    accessibility bus after a box with no bus aborted the process; a box
+    *with* a bus and no `DISPLAY` then failed here instead, with a raw
+    `Xlib.error.DisplayNameError` reaching the caller as an unexpected
+    error. Two services, two preflights -- and each machine hid the other's
+    gap, which is why this was found by running on both.
+
+    Reported as the same `AccessibilityUnavailable`, because to a caller it
+    is the same fact: the desktop this backend reads is not there.
     """
     global _DISPLAY
     with _LOCK:
         if _DISPLAY is None:
-            from Xlib import display
+            from Xlib import display, error
 
-            _DISPLAY = display.Display()
+            try:
+                _DISPLAY = display.Display()
+            except (error.DisplayNameError, error.DisplayConnectionError) as exc:
+                raise AccessibilityUnavailable(
+                    f"cannot open the X display: {exc}. This backend reads "
+                    "the window manager over X, so it needs a DISPLAY "
+                    "pointing at a running server -- on a headless box that "
+                    "has to be arranged deliberately, for instance with Xvfb."
+                ) from exc
         return _DISPLAY
 
 
