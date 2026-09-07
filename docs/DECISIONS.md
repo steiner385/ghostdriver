@@ -2551,6 +2551,50 @@ can report failure while `focus` shows it open) is a matter of naming
 its pixels, is the way in, and that is a measurement for the next
 session, not a line of code.
 
+### D78. The capture/restore flakes traced to a leaked watch on a reused pid (#4)
+
+**Context.** Two tests failed intermittently and undiagnosed (#4):
+`test_capture_returns_a_png` and
+`test_restore_is_a_no_op_when_nothing_is_minimized`. Both reduce to one
+symptom -- a fresh, off-screen, never-activated target window found
+*minimized* mid-test, which makes `capture` fail (a minimized window has
+nothing to render) and `restore` non-trivial (it finds something to
+un-minimize). #4 had ruled out test order and reproduction under load,
+and instrumented the two failures to pay for themselves.
+
+**The mechanism.** The only thing in this codebase that minimizes a
+window is a `MinimizedWatch`, and the only way one touches an *unrelated*
+window is a leak: a prior test's watch still running against a pid the OS
+has since reused for the fresh target. Its poll enumerates
+`top_level_windows(self.pid)` -- now the *new* process's windows --
+finds the fresh window on screen, reads that as an escape, and minimizes
+it. The watch's own locked handle is the dead process's and does nothing;
+the fresh window is collateral. This is a plausible, complete explanation
+of both flakes at once, and it is timing-dependent exactly as observed:
+it needs a watch to outlive its test *and* the pid to be reused before
+the watch's next poll.
+
+**Why it should already be closed.** The self-stop guard added with the
+tree-following watches (a watch whose locked window is gone stops rather
+than keep sampling a pid the OS may reuse) removes the mechanism: a
+leaked watch sees its window is gone on its next poll and exits before it
+can act. Reproduced deterministically in
+`tests/test_flaky_watch_leak.py` -- a watch holding a dead window's handle
+with a live target on the (reused) pid stops without minimizing that
+window -- so a regression of the guard fails there, not as a
+one-in-hundreds flake elsewhere.
+
+**What was added, and what stays open.** The `win32_target` fixture now
+names any live watch thread, and fails loudly if a `minimized-watch-<pid>`
+is alive for *its own* pid -- the smoking gun, turned from inference into
+a message. Twelve rounds interleaving the watch-heavy modules with the
+two tests under load produced no failure. That is consistent with the
+guard having closed it, but it does not *prove* the historical flakes
+were this cause -- only that this cause is now reproduced, fixed and
+instrumented. Per #4's own rule, the issue stays open until a real
+occurrence is caught (now diagnosed on sight) or ruled impossible; what
+changed is that the next occurrence, if any, names its cause.
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on
