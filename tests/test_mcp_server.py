@@ -177,9 +177,14 @@ def test_a_tool_reached_through_dispatch_returns_its_result(server):
     if payload["ok"]:
         assert "targets" in payload
     else:
-        # The one refusal a correctly-wired server may give here.
+        # The one refusal a correctly-wired server may give here: a desktop
+        # service it needs is absent. Either of the two counts -- which one
+        # is noticed first is an implementation detail, and one machine can
+        # be missing the accessibility bus while another is missing the X
+        # display (#58).
         assert payload["error"]["kind"] == "not_actionable", payload
-        assert "accessibility" in payload["error"]["message"].lower()
+        message = payload["error"]["message"].lower()
+        assert "accessibility" in message or "display" in message, payload
 
 
 def test_an_error_comes_back_as_a_result_not_an_exception(server):

@@ -96,5 +96,13 @@ def test_the_refusal_says_what_is_missing_and_what_to_do(answered):
     """
     assert answered["kind"] == "not_actionable"
     message = answered["message"].lower()
-    assert "accessibility" in message or "d-bus" in message, answered
-    assert "at-spi-bus-launcher" in message, answered
+
+    # Either missing service is a correct answer. This backend needs two --
+    # the accessibility bus and the X display -- and a machine can lack
+    # either independently, so pinning which one is reported first would
+    # make this pass on one box and fail on the next for no real reason.
+    assert ("accessibility" in message or "d-bus" in message
+            or "display" in message), answered
+
+    # What is not negotiable: the refusal names something to *do* about it.
+    assert ("at-spi-bus-launcher" in message or "xvfb" in message), answered
