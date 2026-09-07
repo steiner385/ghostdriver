@@ -16,7 +16,12 @@ The attribute names shared with `WindowNode` (`text`, `visible`, `enabled`,
 the denylist check and the actuation gate read those names, and an element
 answers them in the terms that make sense for it. `handle` is the *host*
 window -- the nearest window that owns the element -- because that is
-where a posted message to it would go.
+where a posted message to it would go. `enabled` here is the UIA
+provider's own IsEnabled, which is more honest than a window's WS_DISABLED
+bit but is still the provider's claim, not proof: a control that
+owner-draws its greyed state can report enabled and do nothing, so
+availability is confirmed with `capture` or an `expect={changed}`
+actuation, not read off this flag.
 """
 
 from dataclasses import dataclass

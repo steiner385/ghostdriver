@@ -3297,6 +3297,54 @@ two passes give the same answer there before this is settled.
 
 Evidence: issue #23; D74; `tests/test_quality.py`; `pyproject.toml`.
 
+### D#51. `enabled` is a bit, not availability, and the contract now says so
+
+**The field report.** `find` returned `enabled: true` for an owner-drawn
+command button (a Delphi/VCL control) that rendered grey and did nothing.
+The backend owner-draws that control and never sets `WS_DISABLED`, so
+`enabled` -- which is `IsWindowEnabled` for a window node -- answered a
+different question than the tester was asking. It is not "the user can use
+this"; it is only "the `WS_DISABLED` bit is clear." Roughly a third of a
+session's assertions read `enabled`, and on an owner-drawn control it is
+silently wrong in the reassuring direction -- the opposite blind spot from
+the modal case the `WindowNode` docstring already records, where a control
+reports `enabled` while unreachable *through* a disabled ancestor.
+
+**Three options, cheapest first, and why the cheapest is barred.** The
+report offered: (1) caveat the field when the class is a known owner-drawn
+one; (2) return the flag's provenance; (3) rename it so it cannot be read
+as "the user can use this."
+
+Option 1 is not available here: we keep **no target knowledge in any repo**,
+so a list of owner-drawn class names has nowhere to live. Option 3 breaks a
+published surface -- `enabled=` is a documented locator filter and a field
+a third of assertions already read, so a rename is a migration, not a fix.
+
+**What was actually done: option 2, at the contract, not per element.** The
+provenance of `enabled` is *constant* -- every window-node value is
+`IsWindowEnabled`; an owner-drawn control paints its own greyed state
+without clearing the bit. A constant fact stamped on every element is the
+noise the `actionable`-only-when-False rule (D66) exists to avoid. So the
+provenance goes where the caller reads it and where it costs nothing per
+element: the `find` and `describe` tool descriptions now say `enabled` is
+the `WS_DISABLED` bit and not proof a control will act, and point at
+`capture` / `expect={changed}` to confirm availability. The `enabled=`
+locator-filter doc and the `WindowNode` / `AccessibleElement` docstrings
+carry the same wording, so the source and the contract agree.
+
+**Why the value was not touched.** `IsWindowEnabled` really did return true;
+the reading was wrong, not the measurement. The fix is to say what the
+measurement is, not to fake a better one -- a per-element "is it owner-drawn"
+verdict would need the `surfaces` probe, which `find` deliberately does not
+run.
+
+**A guard test, because a promise in prose gets broken.** `test_find_and_
+describe_disclaim_enabled_as_availability` asserts both descriptions still
+name `IsWindowEnabled` and `owner-drawn`, so the caveat cannot regress out
+of the interface silently (the D60 lesson). Platform-neutral text and a
+platform-neutral test: verifiable anywhere, motivated by a Windows target.
+*(issue #51)*
+
 ### D#12. Modality is declared here, and nothing is disabled
 
 **Context.** L5 asks what `_NET_WM_STATE` and AT-SPI say about a modal, and
@@ -3363,6 +3411,50 @@ above were deadlines rather than defects. The skips are honest -- a probe that
 produces no report skips rather than failing -- but a silent skip is exactly
 the hazard `CLAUDE.md` warns about, so this is a real cost and it is growing.
 Worth consolidating onto one shared nested stack before it grows further.
+
+### D#4. The capture/restore flakes traced to a leaked watch on a reused pid
+
+**Context.** Two tests failed intermittently and undiagnosed (#4):
+`test_capture_returns_a_png` and
+`test_restore_is_a_no_op_when_nothing_is_minimized`. Both reduce to one
+symptom -- a fresh, off-screen, never-activated target window found
+*minimized* mid-test, which makes `capture` fail (a minimized window has
+nothing to render) and `restore` non-trivial (it finds something to
+un-minimize). #4 had ruled out test order and reproduction under load,
+and instrumented the two failures to pay for themselves.
+
+**The mechanism.** The only thing in this codebase that minimizes a
+window is a `MinimizedWatch`, and the only way one touches an *unrelated*
+window is a leak: a prior test's watch still running against a pid the OS
+has since reused for the fresh target. Its poll enumerates
+`top_level_windows(self.pid)` -- now the *new* process's windows --
+finds the fresh window on screen, reads that as an escape, and minimizes
+it. The watch's own locked handle is the dead process's and does nothing;
+the fresh window is collateral. This is a plausible, complete explanation
+of both flakes at once, and it is timing-dependent exactly as observed:
+it needs a watch to outlive its test *and* the pid to be reused before
+the watch's next poll.
+
+**Why it should already be closed.** The self-stop guard added with the
+tree-following watches (a watch whose locked window is gone stops rather
+than keep sampling a pid the OS may reuse) removes the mechanism: a
+leaked watch sees its window is gone on its next poll and exits before it
+can act. Reproduced deterministically in
+`tests/test_flaky_watch_leak.py` -- a watch holding a dead window's handle
+with a live target on the (reused) pid stops without minimizing that
+window -- so a regression of the guard fails there, not as a
+one-in-hundreds flake elsewhere.
+
+**What was added, and what stays open.** The `win32_target` fixture now
+names any live watch thread, and fails loudly if a `minimized-watch-<pid>`
+is alive for *its own* pid -- the smoking gun, turned from inference into
+a message. Twelve rounds interleaving the watch-heavy modules with the
+two tests under load produced no failure. That is consistent with the
+guard having closed it, but it does not *prove* the historical flakes
+were this cause -- only that this cause is now reproduced, fixed and
+instrumented. Per #4's own rule, the issue stays open until a real
+occurrence is caught (now diagnosed on sight) or ruled impossible; what
+changed is that the next occurrence, if any, names its cause. *(issue #4)*
 
 ## Open, for whoever picks this up
 
