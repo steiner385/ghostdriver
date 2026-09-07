@@ -100,6 +100,27 @@ def minimized(hwnd):
     return winapi.is_minimized(hwnd)
 
 
+def wait_for_watchdog_events(call, timeout_s=15.0):
+    """Poll `call` until the watchdog has reported its escape, or the deadline
+    passes (#66).
+
+    The watch runs on its own thread: it catches the escape, captures and
+    restores the window, then queues the event to ride on the *next* tool
+    result. A fixed `sleep` raced that -- enough polls on a dev box, not
+    always on a slower CI runner, where the single read landed before the
+    event was queued. Waiting for it is not a retry that hides a flake: an
+    empty result means nothing is queued yet, so it consumes nothing, and the
+    first result that carries events is still the one and only report -- the
+    "reported once, the next call carries nothing" contract downstream holds.
+    """
+    deadline = time.monotonic() + timeout_s
+    result = call()
+    while not result.get("watchdog_events") and time.monotonic() < deadline:
+        time.sleep(0.1)
+        result = call()
+    return result
+
+
 # --- attach ---------------------------------------------------------------
 
 def test_attaching_minimized_puts_the_target_away_without_taking_focus(box, target):
@@ -158,8 +179,7 @@ def test_a_window_the_target_raises_is_caught_captured_and_reported(
     session = attached(box, modal_target["pid"])["session_id"]
 
     raise_modal(modal_target)
-    time.sleep(1.2)  # a few watchdog polls after the modal
-    result = box.modals(session)
+    result = wait_for_watchdog_events(lambda: box.modals(session))
 
     assert result["ok"], result
     events = result.get("watchdog_events")
@@ -180,9 +200,8 @@ def test_events_ride_on_whichever_tool_is_called_next(box, modal_target):
     tool to ask. `describe` reports it as readily as `modals` would."""
     session = attached(box, modal_target["pid"])["session_id"]
     raise_modal(modal_target)
-    time.sleep(1.2)
 
-    result = box.describe(session)
+    result = wait_for_watchdog_events(lambda: box.describe(session))
 
     assert result["ok"]
     assert result.get("watchdog_events"), result.keys()
