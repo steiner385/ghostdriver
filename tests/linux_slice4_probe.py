@@ -35,9 +35,45 @@ Prints one JSON line.
 
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
 import time
+
+
+def _events(stream, sink):
+    """The fixture's own account of what happened, off its stdout.
+
+    This is the only way to verify a write here, and the reason is worth
+    stating. `read_window_text` answers **None** for an editable entry --
+    not because it failed, but because D#34b withholds by class: nothing on
+    this platform distinguishes a plain entry from a password field, so the
+    policy declines to disclose either. And the fixture's mirror label
+    commits on *focus-out*, which an API write never causes, so a stale
+    mirror is expected rather than evidence of a split.
+
+    What is left is the `changed` signal, which is what a GTK binding
+    actually listens to. The fixture emits one per change, so these lines
+    answer "did the toolkit's own input path see the write" directly rather
+    than by inference (D#10).
+    """
+    for line in stream:
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                sink.put(json.loads(line))
+            except ValueError:
+                pass
+
+
+def _drain(sink):
+    out = []
+    while True:
+        try:
+            out.append(sink.get_nowait())
+        except queue.Empty:
+            return out
 
 
 def _snap(pid):
@@ -101,6 +137,8 @@ def main():
     )
     announced = json.loads(app.stdout.readline())
     pid = announced["pid"]
+    sink: queue.Queue = queue.Queue()
+    threading.Thread(target=_events, args=(app.stdout, sink), daemon=True).start()
     time.sleep(3)
 
     from ghostdriver.actuate import Actuator
@@ -160,6 +198,14 @@ def main():
         empty = actuator.perform(backend.verbs.send_keys(entry.handle, ["a"]))
         report["send_keys_result"] = {"ok": empty.ok, "error": empty.error}
 
+        time.sleep(0.6)
+        # D#10 pinned an intermediate state worth confirming through the
+        # contract: `set_text_contents` clears and re-inserts, so `changed`
+        # fires **twice** and the first carries an empty value nobody wrote.
+        report["events_after_write"] = [
+            e for e in _drain(sink) if e.get("event") == "bound_changed"
+        ]
+
         report["before_modal_blocking_ancestor"] = backend.blocking_ancestor(
             entry.handle
         )
@@ -205,6 +251,11 @@ def main():
             during["mirror_saw_it"] = (
                 _pick(nodes, ("label",), "written-while-held") is not None
             )
+            # The question this probe exists for: did the *binding* hear a
+            # write made while the application was held by a modal?
+            during["events"] = [
+                e for e in _drain(sink) if e.get("event") == "bound_changed"
+            ]
         report["during_modal"] = during
 
     print(json.dumps(report), flush=True)
