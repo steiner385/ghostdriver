@@ -3213,6 +3213,73 @@ needs a decision of its own: it is injectable by construction and its logic
 is neutral, so it wants lifting rather than reimplementing, which touches
 Windows.
 
+### D#12. Modality is declared here, and nothing is disabled
+
+**Context.** L5 asks what `_NET_WM_STATE` and AT-SPI say about a modal, and
+whether a sent event to a held window is honoured. The second needs no
+measurement: D#11 found sent events ignored in every configuration, held or
+not, so modality has nothing to add to it. The first inverts the Windows
+mechanism.
+
+**Both layers declare it.**
+
+| | during the modal |
+|---|---|
+| the modal, AT-SPI | role `frame`, states `ACTIVE, MODAL, SENSITIVE, SHOWING, VISIBLE` |
+| the modal, X | `_NET_WM_STATE_MODAL`, `_NET_WM_STATE_SKIP_TASKBAR`, and `WM_TRANSIENT_FOR` naming the owner |
+| the owner, AT-SPI | `SENSITIVE, SHOWING, VISIBLE` -- it lost `ACTIVE` and **nothing else** |
+
+`WM_TRANSIENT_FOR` is the `owner` field `TopLevel` already carries, available
+directly rather than derived. And modality is *stated* rather than inferred,
+which is a better position than Windows, where it is only visible as a side
+effect.
+
+**The Windows mechanism does not port, and that is the finding.** D48's
+`blocking_ancestor` walks up looking for a window that reports **disabled**,
+because on Windows a modal disables its owner. Here the owner keeps
+`SENSITIVE` throughout. A driver asking whether anything above a control is
+disabled gets "no" while the application is completely held.
+
+So the check runs the other way round: not *is anything above me disabled*
+but **is anything modal transient-for me**. Slice 3 has to be built that way,
+and `blocking_ancestor` returns the modal rather than a disabled ancestor.
+
+**D48's trap is sharper here.** There, the mistake was asking the *control*
+instead of the top-level -- the top-level did report disabled, so the
+information existed one level up. Here no accessible reports anything wrong
+at any level, including the top-level, so the information is not in the
+accessibility tree at all. It is in the window manager. A driver that stays
+inside AT-SPI cannot see modality, and will actuate into a held application
+with every state it can read saying the application is fine.
+
+**One signal that moves but must not be used alone.** The owner loses
+`ACTIVE`. So does any window when anything else takes focus, modal or not.
+Recorded so it is not mistaken for a modality check.
+
+**A role would not have helped either.** The modal comes back as role
+`frame`, not `dialog` -- looking for a dialog role finds nothing.
+
+**A late correction to slice 5a, found by running these two suites
+together.** Putting a window away is a *message* to the window manager here,
+not a call: `iconify` returns as soon as it is sent, and
+`_NET_WM_STATE_HIDDEN` appears whenever the window manager gets round to it.
+Windows' `minimize_no_activate` is synchronous, so nothing on that side ever
+had to wait -- and `MinimizedWatch.start()`, written from the Windows shape,
+read the state back immediately and sometimes saw the window still out. It
+passed alone and failed under load, which is the signature of a race rather
+than a defect in the thing being watched.
+
+`start()` now waits for confirmation and raises `WatchError` if the window
+manager never acts, because a caller that gets a watch back and finds the
+target still on screen cannot tell "not yet" from "never".
+
+**Seven suites now stand up a nested X server and five of those a window
+manager.** They pass individually and contend when run together; two failures
+above were deadlines rather than defects. The skips are honest -- a probe that
+produces no report skips rather than failing -- but a silent skip is exactly
+the hazard `CLAUDE.md` warns about, so this is a real cost and it is growing.
+Worth consolidating onto one shared nested stack before it grows further.
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on
