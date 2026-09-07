@@ -71,3 +71,38 @@ def test_unknown_pid_reports_error_not_traceback(capsys):
     code = main(["describe", "--pid", "999999"])
     assert code != 0
     assert "no windows" in capsys.readouterr().err.lower()
+
+
+# --- an unsupported platform is an error, not a traceback ----------------------
+
+def test_an_unsupported_platform_reports_an_error_not_a_traceback(capsys, monkeypatch):
+    """Kicking the tires on Linux produced a traceback from every command.
+
+    `UnsupportedPlatform` subclasses `RuntimeError`, not `GhostdriverError`,
+    so none of the CLI's handlers caught it and it escaped from
+    `list-targets`, `describe`, `find`, `read` and the rest alike. The
+    backend's refusal is careful and says where to read about the gap -- and
+    a person running the tool saw a stack trace instead.
+
+    `test_unknown_pid_reports_error_not_traceback` above states the same
+    principle, and is `@on_windows`, so nothing checked it on the platform
+    where the refusal actually fires. This one is platform-neutral: it makes
+    the backend refuse wherever it runs.
+    """
+    from ghostdriver import backends
+    from ghostdriver.backends import UnsupportedPlatform
+
+    def refuse():
+        raise UnsupportedPlatform("top_level_windows is not implemented on Linux yet.")
+
+    # Patched at the source: the CLI imports `current` inside each command,
+    # which is what keeps the module importable on a platform it cannot drive.
+    monkeypatch.setattr(backends, "current", refuse)
+
+    code = main(["list-targets"])
+
+    assert code != 0
+    err = capsys.readouterr().err
+    assert "Traceback" not in err, err
+    assert "not implemented on Linux" in err, err
+    assert err.lower().startswith("error:"), err

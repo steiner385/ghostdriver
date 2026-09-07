@@ -10,6 +10,19 @@ written so a decision can be *disagreed with* later — which needs the reason,
 not just the outcome. New decisions go at the end of the current iteration,
 numbered, with the evidence.
 
+**Number a new decision from its issue.** The decision that came out of
+issue 34 is `### D#34.`; if the thing you decided has no issue, open one
+first. GitHub hands each issue number out once, so two people working at the
+same time cannot pick the same one.
+
+D1–D77 are the old scheme, numbered from a counter, and are frozen — several
+hundred references across the source tree point at them. `tests/test_structure.py`
+fails if anything extends that counter, so you do not have to remember this.
+
+Numbers now skip and arrive out of order, because issue numbers do. That is
+expected, and two tests deliberately assert that neither contiguity nor
+sorting is required — don't add a guard for either.
+
 ## Environment-gated issues
 
 **This repository cannot be fully worked from one machine.** Most issues are
@@ -112,3 +125,12 @@ that is the bug the project exists to prevent, so do not silence it.
   (D53). Do not loosen a sandbox or elevate to make an unfitted target work.
 - **Do not "fix" a flaky test with a retry.** A retry takes the evidence with
   it; instrument it so the next occurrence explains itself (D45).
+- **Never gate a guard on the condition it exists to detect.** Two tests
+  claimed to prevent a stack trace and could not run where the stack trace
+  happens: one asserted "an error, not a traceback" and was `@on_windows`,
+  where a backend exists; the other tested the wrong dependency version from
+  inside a module that skipped unless the right version was installed. The
+  tell is a gate naming the same condition as the assertion, with opposite
+  polarity. Put the test where the failure is *possible* — or make it
+  platform-neutral by construction, by making the subject fail on purpose.
+  Audit and remaining debt: issue #39.

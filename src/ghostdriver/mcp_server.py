@@ -151,8 +151,28 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     """Construct the server. Importable without starting anything."""
     import json
 
-    from mcp.server.mcpserver import Context, MCPServer
-    from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
+    try:
+        from mcp.server.mcpserver import Context, MCPServer
+        from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
+    except ImportError as exc:
+        # `import mcp` succeeding proves nothing: FastMCP was renamed to
+        # MCPServer at the 2.0 boundary, so a 1.x install answers the import
+        # and then fails on an inner path whose name explains nothing to the
+        # person reading it. Say what is actually wrong.
+        installed = "not installed"
+        try:
+            from importlib.metadata import version
+
+            installed = version("mcp")
+        except Exception:
+            pass
+        raise RuntimeError(
+            "the protocol layer needs the mcp package at 2.1 or later "
+            f"(found: {installed}). It is the optional [server] extra: "
+            "pip install -e '.[server]'. Versions 1.x are not "
+            "interchangeable with 2.x -- FastMCP was renamed to MCPServer at "
+            f"that boundary, which is why the import failed as {exc}."
+        ) from exc
 
     # The closures below call through this; with GHOSTDRIVER_DEV set it
     # rebuilds the toolbox from freshly imported modules on change (D68).
@@ -866,14 +886,25 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     return server
 
 
-def main() -> None:
-    """Entry point for `ghostdriver-mcp`."""
+def main() -> int:
+    """Entry point for `ghostdriver-mcp`.
+
+    A missing or wrong-version dependency is a broken install, not a crash:
+    it is reported the way the CLI reports an unsupported platform, because
+    the person reading it needs the sentence, not the stack.
+    """
     if dev_reload_enabled():
         print("ghostdriver: dev reload on (GHOSTDRIVER_DEV). Implementation modules "
               "re-import when their files change; session, policy, consent, model "
               "and the server itself need a reconnect.", file=sys.stderr, flush=True)
-    build_server().run(transport="stdio")
+    try:
+        server = build_server()
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    server.run(transport="stdio")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

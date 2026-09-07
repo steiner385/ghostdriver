@@ -32,10 +32,12 @@ import argparse
 import json
 import os
 import sys
+import time
 
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 gi.require_version("GdkX11", "4.0")
 from gi.repository import Gdk, GdkX11, GLib, Gtk  # noqa: E402
 
@@ -86,7 +88,7 @@ def _drawn_button(status):
     """D21's "a button that is not a BUTTON": a DrawingArea that paints itself
     and acts only on the press/release *pair*. A press alone does nothing, so
     a driver that synthesises half the pair sees no effect and no error."""
-    area = Gtk.DrawingArea()
+    area = Gtk.DrawingArea(accessible_role=Gtk.AccessibleRole.BUTTON)
     area.set_content_width(140)
     area.set_content_height(32)
     area.set_focusable(True)
@@ -130,8 +132,21 @@ def _bound_entry(mirror):
     entry.set_text("original")
     _label(entry, "bound entry")
 
+    # Did the toolkit's own input path see the write? D21's split on Windows
+    # was a value that reached the control while the binding never heard of
+    # it, so the display and the committed value disagreed. `changed` is what
+    # a GTK binding listens to, so reporting it answers the question directly
+    # rather than by inference.
+    entry.connect("changed", lambda *_: _event(event="bound_changed",
+                                               text=entry.get_text()))
+
     focus = Gtk.EventControllerFocus()
-    focus.connect("leave", lambda *_: mirror.set_text(entry.get_text()))
+
+    def commit(*_):
+        mirror.set_text(entry.get_text())
+        _event(event="bound_committed", text=entry.get_text())
+
+    focus.connect("leave", commit)
     entry.add_controller(focus)
     mirror.set_text(entry.get_text())
     return entry
@@ -142,7 +157,7 @@ def _grid(status):
     as one node however many rows it paints. Ctrl+C is the only route to its
     exact text (D50, D65) -- unless --grid-no-copy takes even that away, so a
     prober's honest "no route works" verdict can be tested."""
-    area = Gtk.DrawingArea()
+    area = Gtk.DrawingArea(accessible_role=Gtk.AccessibleRole.TABLE)
     area.set_content_width(340)
     area.set_content_height(90)
     area.set_focusable(True)
@@ -187,6 +202,9 @@ def _toolbar():
         button = Gtk.Button()
         button.set_icon_name(icon)
         _label(button, name)
+        # An observable effect, so "the action returned true" can be told
+        # apart from "the action did something".
+        button.connect("clicked", lambda _b, n=name: _event(event="toolbar", name=n))
         box.append(button)
     return box
 
@@ -202,7 +220,11 @@ def _pages(status):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         button = Gtk.Button(label="Apply")
         _label(button, "Apply")
-        button.connect("clicked", lambda _b, p=page: status.set_text(f"applied on {p}"))
+        def applied(_b, p=page):
+            status.set_text(f"applied on {p}")
+            _event(event="applied", page=p)
+
+        button.connect("clicked", applied)
         box.append(Gtk.Label(label=f"{page} page"))
         box.append(button)
         stack.add_titled(box, page.lower(), page)
@@ -242,6 +264,22 @@ def _raise_modal(main, status):
     return False
 
 
+def _hang(seconds):
+    """Stop servicing the main loop, without exiting.
+
+    D4's unresponsive control, in the shape Linux gives it. On Windows a
+    window whose thread never pumps cannot service WM_GETTEXT and a
+    cross-process send hits its timeout. Here the equivalent is worse in
+    kind: AT-SPI is D-Bus, so an application that stops running its main
+    loop stops answering the *bus*, and a caller with no per-call timeout
+    waits on it rather than on one control.
+    """
+    _event(event="hanging", seconds=seconds)
+    time.sleep(seconds)
+    _event(event="resumed")
+    return False
+
+
 def _grab_foreground(main, status):
     """The one place present() is called. This is what a foreground grab *is*,
     and it is here so L6 can measure a real one rather than assume."""
@@ -272,6 +310,12 @@ def build(options):
     secret.set_text("hunter2")
     _label(secret, "password entry")
 
+    # Two ways to hide a value, because they may not look the same to AT-SPI:
+    # an Entry told not to show its characters, and the dedicated widget.
+    secret2 = Gtk.PasswordEntry()
+    secret2.set_text("hunter3")
+    _label(secret2, "password widget")
+
     bound = _bound_entry(mirror)
     drawn = _drawn_button(status)
     grid = _grid(status)
@@ -280,7 +324,7 @@ def build(options):
     toolbar = _toolbar()
 
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-    for child in (toolbar, plain, secret, bound, mirror, drawn, grid,
+    for child in (toolbar, plain, secret, secret2, bound, mirror, drawn, grid,
                   stack, tabs, status):
         box.append(child)
     main.set_child(box)
@@ -295,6 +339,8 @@ def build(options):
         GLib.timeout_add(options.modal_after, _raise_modal, main, status)
     if options.present_after:
         GLib.timeout_add(options.present_after, _grab_foreground, main, status)
+    if options.hang_after:
+        GLib.timeout_add(options.hang_after, _hang, options.hang_for)
 
     # The grid holds focus from the start, so the copy route can be measured
     # without a window manager to route focus for us.
@@ -303,7 +349,7 @@ def build(options):
     STATE.update(main=main, status=status, grid=grid, bound=bound,
                  mirror=mirror, page_buttons=page_buttons,
                  widgets={"drawn_button": drawn, "grid": grid, "plain_edit": plain,
-                          "password": secret, "bound_edit": bound,
+                          "password": secret, "password_widget": secret2, "bound_edit": bound,
                           "bound_mirror": mirror, "status": status,
                           "tabs": tabs, "toolbar": toolbar, "pages": stack})
     return main
@@ -340,6 +386,7 @@ def announce(main):
             "status": "status",
             "plain_edit": "plain entry",
             "password": "password entry",
+            "password_widget": "password widget",
             "bound_edit": "bound entry",
             "bound_mirror": "bound mirror",
             "drawn_button": "Recalculate",
@@ -365,10 +412,22 @@ def main(argv=None):
     parser.add_argument("--grid-no-copy", dest="grid_copies", action="store_false",
                         help="make the grid ignore Ctrl+C, so an honest "
                              "'no route works' verdict can be tested")
+    parser.add_argument("--hang-after", type=int, default=0, metavar="MS",
+                        help="stop servicing the main loop this long after start; "
+                             "0 disables. The application stops answering the bus, "
+                             "not just one control.")
+    parser.add_argument("--hang-for", type=float, default=20.0, metavar="S",
+                        help="how long the hang lasts")
     parser.add_argument("--quit-after", type=int, default=0, metavar="MS",
                         help="exit this long after start; for unattended runs")
     parser.set_defaults(offscreen=True, grid_copies=True)
     options = parser.parse_args(argv)
+
+    # Without these the AT-SPI application node comes back named "Unnamed",
+    # which leaves a locator nothing to match the *application* on -- the
+    # Linux counterpart of the process/main-window pairing D3 does on Windows.
+    GLib.set_prgname("ghostdriver-fixture")
+    GLib.set_application_name("Ghostdriver GTK fixture")
 
     if not Gtk.init_check():
         print(json.dumps({"error": "no display"}), flush=True)

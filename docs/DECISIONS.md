@@ -2551,7 +2551,736 @@ can report failure while `focus` shows it open) is a matter of naming
 its pixels, is the way in, and that is a measurement for the next
 session, not a line of code.
 
-### D78. The capture/restore flakes traced to a leaked watch on a reused pid (#4)
+> **A note on numbering.** Decisions D1-D77 are numbered sequentially and
+> are frozen -- several hundred references across the source tree point at
+> them. From here on a decision is numbered by the **issue** it came out of:
+> `D#8` is the decision that came out of issue 8. Issue numbers are handed
+> out once by GitHub, so two people working at the same time cannot pick the
+> same one, which a hand-kept counter could not manage -- it collided three
+> times in a day. Numbers therefore skip and arrive out of order, and that is
+> expected. If a decision has no issue, open one for it first.
+
+### D#8. L1 stands up, and the isolation needs a session bus of its own
+
+*(Numbered from its issue rather than from a counter, and this entry is why.
+It was D76, then D77, then D78: three times, two machines branched from the
+same `main`, read the same highest number, and both were right. A shared
+counter that every branch reads before any branch writes cannot be made
+safe by care. An issue number is handed out by GitHub once, so the question
+does not arise.)*
+
+**Correcting D75 first.** D75 said no window manager was installed and that
+`at-spi-bus-launcher` and the AT-SPI bindings were missing. All three were
+wrong, and wrong the same way: each was checked with `command -v` or an
+`import`, and absence from `PATH` was read as absence from the machine. The
+operator runs GNOME Shell on `:0` with full EWMH; `at-spi-bus-launcher` is at
+`/usr/libexec/`, off `PATH` by design; and the bindings are `Atspi 2.0`
+through GObject introspection, which is a third route `docs/LINUX.md` did not
+list beside "pyatspi (or raw D-Bus)". Nothing had to be installed. The lesson
+is the cheap one: ask the system what it has, do not ask `PATH` whether it
+has the names you thought of.
+
+**The fourth piece.** `docs/LINUX.md` measurement 1 names three: `Xvfb`,
+`at-spi-bus-launcher`, and something to list the tree. It needs a fourth, and
+the fourth is what makes the strategy an isolation strategy rather than a
+convenience: **its own D-Bus session bus.** AT-SPI is discovered *through*
+the session bus, so a nested display that shares the operator's bus finds the
+operator's accessibility bus and enumerates the operator's applications.
+`dbus-run-session` keeps them apart.
+
+This was found the honest way: `gnome-shell` refused to start on the nested
+display with "org.gnome.Shell already exists on bus and --replace not
+specified" -- a singleton on the *session* bus, not a display conflict.
+
+**The guarantee is now asserted, not assumed.** With the operator running a
+full desktop on `:0`, the nested bus reports **one** desktop child: the
+fixture. `test_the_nested_bus_sees_only_the_fixture` fails if any of the
+operator's applications ever appear, which is the check that makes
+`HiddenDesktop` mean something on Linux.
+
+**What the tree showed.**
+
+* A `WindowNode` on Linux is an AT-SPI **frame** carrying the window title,
+  not an X window. Only toplevels have X ids; controls are accessibles.
+* The application node reported `Unnamed` until the fixture called
+  `GLib.set_prgname`. An unnamed application node leaves a locator nothing to
+  match the *application* on -- the counterpart of the process/main-window
+  pairing D3 does on Windows -- so a real target that does not set it will
+  have to be matched by pid alone.
+* **An owner-drawn control is invisible to a locator by default.** A
+  `Gtk.DrawingArea` comes back as a generic `panel` with an empty name, and
+  an accessible *label* alone does not change that: it took an accessible
+  *role* before the drawn button and the grid appeared as `push button` and
+  `table`. So on Linux the D56 problem is sharper than on Windows, where a
+  window class is always there to match: a control that declares no role is
+  not merely hard to name, it is indistinguishable from layout.
+* The grid is one `table` node with **zero children** while painting three
+  rows. That asymmetry is D50 exactly, and it is why the copy route matters.
+* All three entries -- plain, bound, and password -- report role `text`. The
+  password one is not a distinct role, so `is_protected` cannot be answered
+  from the role and must read `STATE_PROTECTED` (D33's constraint 4, D37,
+  D38). Confirming that state is L2's job.
+  **Wrong, corrected by D#34a: there is no `STATE_PROTECTED`.** AT-SPI's
+  `StateType` has 45 members and none of them names one. The sentence was
+  written from the Windows model rather than from a measurement, which is
+  the mistake this document exists to prevent.
+
+**Cost.** The nested stack takes several seconds to stand up, so the L1 tests
+share one and are marked slow.
+
+### D#34a. AT-SPI gives out the password, and hides which field is one
+
+**Context.** L2 asks which controls answer `Text` and which only `Name`
+(`docs/LINUX.md` measurement 2). The answer is dull -- entries answer
+`Text`, buttons do not -- and on the way to it two things turned up that
+are not about reading at all. Measured against GTK 4.14.5.
+
+**First: there is no `PROTECTED` state.** D#8 said `is_protected` would have
+to read `STATE_PROTECTED`. It cannot: AT-SPI's `StateType` has 45 members
+and none of them is one. That sentence was written from the Windows model
+(`EM_GETPASSWORDCHAR`, D33 constraint 4) rather than from a measurement.
+Corrected in place there.
+
+**Second: one of the two ways to make a password field is invisible.**
+
+| Widget | role | states | interfaces |
+|---|---|---|---|
+| `Gtk.Entry` | `text` | EDITABLE, FOCUSABLE, SENSITIVE, SHOWING, VISIBLE | Accessible, Action, EditableText, Text |
+| `Gtk.Entry` + `set_visibility(False)` | `text` | *identical* | *identical* |
+| `Gtk.PasswordEntry` | `password text` | *identical* | *identical* |
+
+The dedicated widget carries a distinct **role**, and that is the only
+signal there is. An ordinary entry told not to show its characters is
+indistinguishable from one that does -- same role, same states, same
+interfaces. So a Linux `is_protected` built on the role will be right about
+`Gtk.PasswordEntry` and wrong about the other, and the other is the older
+and commoner idiom.
+
+**Third, and worse: both hand out the secret.**
+
+```
+password entry   role=text           get_text() -> 'hunter2'
+password widget  role=password text  get_text() -> 'hunter3'
+```
+
+The screen shows bullets; the bus returns the value. `Atspi.Text.get_text`
+does not redact, for either widget.
+
+**Why this matters more than it would on Windows.** D37 says a password
+field is protected rather than unresponsive, and D38 that nothing types into
+a field that hides its contents. Both were built on `EM_GETPASSWORDCHAR`,
+which answers the question honestly, and on a read path that never had the
+value to leak in the first place. On Linux the toolkit enforces neither: a
+`read` that passed the `Text` interface through would put a real password
+into a tool result, into the per-call trace the operator directory keeps
+(D62), and into a model's context.
+
+**So the driver has to enforce what the toolkit does not**, and it cannot
+do it reliably, because the signal is missing for the commonest case. The
+honest options, none of them free:
+
+1. **Refuse `Text` on anything with role `password text`,** and accept that
+   `Gtk.Entry(visibility=False)` slips through. Catches the widget a
+   modern application uses; misses the older idiom.
+2. **Never return `Text` from an editable single-line entry at all** unless
+   the caller has said it wants values. Safe and blunt: it takes ordinary
+   form-filling verification with it, which is most of what `read` is for.
+3. **Ask X, not AT-SPI.** GTK sets an input-purpose on password entries; if
+   that is visible over the bus as an attribute it would be a second signal.
+   `get_attributes()` returned only `toolkit=GTK` on all three here, so on
+   this evidence it is not -- but it was one measurement and worth a second.
+
+Not decided here. It is recorded, pinned by tests that fail if GTK ever
+changes either behaviour, and tracked, because choosing between those is a
+policy decision and the Linux backend is not built yet.
+
+**The tests assert the leak on purpose.** That is not approval. A test that
+says "the password comes back in cleartext" is the thing that will fail
+loudly on the day it stops being true, which is the day the driver can
+stop working around it.
+
+### D#9. AT-SPI will not bound a call, so the caller does
+
+**Context.** L2 asks "what an unresponsive control does to a bus call (D4)
+and what timeout is right". On Windows the OS answers it:
+`SendMessageTimeout` with `SMTO_ABORTIFHUNG` returns `None` and the caller
+moves on. The Linux question is worse in kind, and `docs/LINUX.md` says so:
+AT-SPI is D-Bus, so an application that stops running its main loop stops
+answering the *bus*, and a caller waits on the application rather than on one
+control.
+
+**`Atspi.set_timeout()` exists and does nothing.** Measured against the GTK
+fixture hung for 15 seconds, reading one entry:
+
+| timeout set | caller waited |
+|---|---|
+| default | 13.1s |
+| `set_timeout(500, 15000)` | 12.6s |
+| `set_timeout(2000, 15000)` | 14.1s |
+
+All three blocked until the application came back. The variation is when the
+read started relative to the hang, not the setting. An earlier 8-second hang
+blocked for 8.0s and then *succeeded*, so the call is bounded by the
+application's recovery and nothing else.
+
+**So the deadline is the driver's.** `backends/linux/deadline.py` runs the
+call on a worker and gives the caller back control on schedule. Measured, a
+caller allowing 0.5s got control back in 0.5001s while the application stayed
+hung for another fourteen seconds, and the read reported *did not answer*
+rather than blocking.
+
+**The number is 200ms, the same as Windows', and measured rather than
+copied.** A healthy read over 200 samples: p50 0.19ms, p99 0.46ms, max
+1.88ms; a 33-node tree walk 9.2ms end to end. 200ms is about a hundred times
+the worst read seen -- room for a loaded machine, none for a hung one. Keeping
+the Windows number means the contract reads identically on both platforms,
+which is worth more than a Linux-specific figure with no better claim.
+
+**The cost, stated rather than discovered.** The worker is *parked*, not
+leaked: it is inside a C call, nothing here can cancel or safely kill it, and
+it returns on its own when the application recovers -- observed at 13.08s for
+a 15s hang. Reads issued against an application that stays hung park one
+worker each until it comes back. The pool is bounded at eight and its threads
+are daemons, so a wedged target cannot stop the process exiting; what it can
+do is make the ninth concurrent read wait. Accepted: the alternative is
+killing threads inside a foreign C stack.
+
+**`None` still means did not answer.** Never *answered with nothing*. An
+exception is re-raised rather than folded into a timeout, because a control
+that answered with an error answered. Both are the distinction conftest calls
+load-bearing, and collapsing them is how a caller silently asserts a field is
+empty when it never replied.
+
+**What this does not settle.** The number comes from one fixture on one idle
+machine; a real target on a loaded desktop is the case that would move it,
+and that is #27's territory rather than this one's. `deadline` is
+deliberately free of `gi`, so its semantics are tested on any host and only
+the hung-application case needs a desktop.
+
+### D#34b. A Linux read withholds by class, because it cannot detect by field
+
+**Context.** D#34a's measurement found that AT-SPI hands out a password
+field's contents in cleartext, and that `Gtk.Entry(visibility=False)` is
+indistinguishable from a plain entry. Three options were left open. This
+settles them.
+
+**Option 3 is dead, measured properly this time.** The earlier note dismissed
+"find a second signal" on one reading of `get_attributes()`, which was not
+good enough. Every surface an accessible exposes was diffed between a plain
+entry and a hidden one: role, description, accessible id, attributes,
+interfaces, the full 45-member state set, action count and names, relations,
+default text attributes. **Thirteen surfaces, and the only differences are
+the content itself** -- character count, text, and the offsets derived from
+them. GTK's input-purpose is not on the bus. There is no signal.
+
+`SINGLE_LINE` would have narrowed the affected class usefully, since a
+password is never multi-line. GTK does not set it. Measured, not assumed --
+the third assumption in this effort that a measurement killed.
+
+**Why Windows never had to decide this.** Windows refuses a cross-process
+`WM_GETTEXT` on a password field, so the value is not available to leak;
+`is_protected` exists there only to tell "protected" from "hung", because
+both come back empty-handed (D37). The platform is fail-closed and the driver
+explains. On Linux the platform is fail-*open* and the driver has to be the
+one that closes. That is the whole difference, and it is why the Windows
+design does not port.
+
+**The decision: withhold by class.** A secret is typed into an editable text
+entry, so an editable text entry does not disclose its contents by default.
+
+| what | verdict |
+|---|---|
+| role `password text` (`Gtk.PasswordEntry`) | **protected** -- never disclosed, opt-in cannot reach it |
+| role `text` + `EDITABLE` | **withheld** -- not read at all unless the caller asks |
+| labels, tables, tabs, buttons, captions | **allowed** -- read normally |
+
+Option 1 (refuse on role alone) was rejected because it is a guard that
+misses the commoner idiom while looking complete, which is worse than no
+guard. Option 2 is what this is, narrowed: the blast radius is *editable text
+entries*, not all text, so the reads `read` mostly exists for are untouched.
+
+**The value is not fetched, not merely not returned.** A value that has been
+read exists in this process and reaches a traceback, a log line or a debugger
+without anyone deciding it should. `read` is not called for a withheld field.
+
+**What makes the default affordable.** D29 has `set_value` check the display
+after writing, and that needs a *comparison*, not a disclosure -- the driver
+already knows what it typed. `confirms()` answers yes or no, so nothing
+reaches a result, the operator directory's trace (D62), or a model's context.
+A field that did not answer returns neither: that is the deadline expiring
+(D#9), and reporting it as a mismatch would send a caller to fix a value that
+may be correct.
+
+**What this costs, stated plainly.** A caller that genuinely wants the text of
+an editable field must ask, and the asking is what lands in the trace instead
+of the secret. And a plain, non-secret entry is withheld alongside the
+password one -- that is the finding rather than a defect, because a policy
+that let the plain one through would let a hidden one through too.
+
+**What it does not cover.** A vendor toolkit that gives its password entries
+some role other than `password text` is in the withheld class, which is safe.
+One that draws an entry as something not in `_TYPED_INTO` at all would read
+normally, and that is the hole -- narrow, and worth re-measuring against the
+first real Linux target rather than guessed at now. Qt is unmeasured
+throughout.
+
+### D#11. Tier 3 does not exist on GTK4/X11, confirmed under a window manager
+
+**Context.** `docs/LINUX.md` names measurement 4 as the one that decides
+"whether the Windows ladder maps to Linux at all". D75 answered it
+provisionally and flagged two reasons not to trust the answer: no window
+manager was running, and the sends came from one tool. This settles the first
+and leaves the second stated.
+
+**A window manager does run on the nested display.** D75 said none was
+installed; D#8 corrected that to "installed but the nested one refused to
+start". Both were wrong about the consequence. `gnome-shell --x11` runs on a
+nested display perfectly well **under its own `dbus-run-session`** -- the
+earlier refusal (`org.gnome.Shell already exists on bus`) was the shared
+session bus, the same root cause as D#8's finding. With it running, `:83`
+carries `_NET_SUPPORTING_WM_CHECK`, `_NET_ACTIVE_WINDOW` and
+`_NET_CLIENT_LIST`. **That unblocks L6 and L7 (#13, #14)**, which D75 said
+could not be asked at all.
+
+**The measurement, with every experiment behind a passing control.**
+
+| | control | result |
+|---|---|---|
+| `XTest` key, target focused | -- | **acted** (grid copied) |
+| `XTest` click, pointer on the control | -- | **acted** (counter 0→1) |
+| `XSendEvent` key, target **focused** | both above | **ignored** |
+| `XSendEvent` key, target **unfocused** | both above | **ignored** |
+| `XSendEvent` button, target focused, pointer away | both above | **ignored** |
+| `XSendEvent` button, target unfocused, pointer away | both above | **ignored** |
+
+**GTK 4.14.5 ignores a sent event in every configuration tested.** So tier 3
+-- the rung that drives a chosen window without taking the operator's focus
+or pointer -- does not exist here.
+
+**This corrects D75 as well as confirming it.** D75 recorded one case that
+*worked*: a sent key to a window that already held focus. Under a window
+manager it does not, so that row was an artefact of a display with no
+window manager and degenerate focus handling. The conclusion is unchanged and
+now rests on cleaner evidence.
+
+**What follows.** The ladder on Linux is tier 1, then tier 4 under isolation.
+Tier 4 takes the real focus and pointer and is excluded by default (D9), so
+it is only acceptable where the input being taken is not the operator's --
+which makes the nested X server **mandatory rather than preferred**, where
+`docs/LINUX.md` had it as the simpler of two options. MPX moves from "measure
+it after the nested server works" to the only route that could drive a target
+on the operator's own display, and is now worth its own measurement.
+
+**On method, because this measurement lied three times before it told the
+truth.** Three runs produced a confident negative from a harness that could
+not have produced a positive: once with no window manager, once with the
+pointer aimed at coordinates the window manager had moved the window away
+from, and once with focus that silently never took. Each looked exactly like
+a real result. The probe now runs its controls **first** and aborts if they
+fail, and `tests/test_linux_tier3.py` skips rather than passes when they do,
+because a green test that proved nothing is worse than a missing one.
+
+**What is still not settled.** GTK 4.14.5 and GNOME Shell only. **Qt is
+unmeasured**, and LINUX.md is right that "GTK ignores sent events" is a fact
+about a configuration rather than about GTK. The sends came from `xdotool`
+3.20160805.1; a hand-rolled `XSendEvent` with different propagation could
+behave differently, and that remains the one cheap check nobody has done.
+
+### D#13. The operator's foreground never moves, and what "put away" means on Linux
+
+**Context.** L6 is the guarantee the project exists to provide, and
+`docs/LINUX.md` asks for it the way the Windows suite does: read
+`_NET_ACTIVE_WINDOW` on the operator's display before and after every action,
+with the target on the nested one, and require it never to change. D75 said
+this could not be asked, because a bare `Xvfb` has no such property. With a
+window manager on the nested display (D#11) it can.
+
+**Nothing this run launched ever became the operator's foreground.** The
+operator was running a full GNOME session on `:0` throughout: the target was
+focused, driven with a real click, iconified, left to grab its own foreground
+on a timer, and put away again. At no point did a window belonging to a
+process the run launched own `:0`'s active window. The isolation is
+structural -- a different X server, not a policy -- and is now asserted
+rather than assumed.
+
+**Stated as attribution, not stillness, and that was a correction.** The
+first version of this test asserted the operator's active window was the
+*same handle* at every step. It passed alone and failed in a full suite run,
+because the operator clicked something -- which is not a defect in anything.
+The Windows focus guard had the framing right all along and this one now
+matches it: what must never happen is that a window belonging to a process
+this run launched becomes the foreground (`tests/test_zz_focus_guard.py`).
+The operator's foreground may move freely; it may never move *to the
+target*.
+
+**The control comes first, and this is why.** "The foreground did not move"
+is trivially true of a harness that did nothing at all, and an earlier run of
+this measurement reported exactly that: a still foreground next to a drive
+that had silently failed. The probe now proves it can drive the target before
+any non-effect is allowed to mean anything, and the test skips rather than
+passes when it cannot.
+
+**Two things the Windows model got right for the wrong reason here.**
+
+*What iconified looks like.* On Windows, minimized is a window state you ask
+about directly. Under a compositing window manager an iconified window is
+still `IsViewable` -- `Map State` does not move at all. `_NET_WM_STATE_HIDDEN`
+is the signal, and code that asks the Windows question gets the wrong answer
+confidently.
+
+*Whether a hidden window can still be captured.* This is what makes the
+minimized strategy possible: on Windows, `PrintWindow` asks the window to
+render itself, so a minimized target still yields a picture (D49, D55). X11
+has no equivalent call, and an unmapped window's contents are not guaranteed
+to survive. Measured: under the compositor they do, and not merely
+"non-empty" -- the iconified capture is *pixel-identical* to the mapped one,
+1601 unique colours both, RMSE 0. Checked that way on purpose, because a
+capture that succeeds and returns a blank buffer is worse than one that fails
+(D66, and the black Chromium capture in D77).
+
+**That is a property of the compositor, not of X11.** A non-compositing
+window manager is expected to lose the contents, and is unmeasured. The
+minimized strategy on Linux therefore carries a dependency the Windows one
+does not, and it should be stated wherever the strategy is offered rather
+than discovered by whoever runs it under something lighter.
+
+**The watchdog has something real to watch.** The fixture calls `present()`
+on a timer -- which is what a foreground grab *is* -- and it clears
+`HIDDEN` and takes the nested foreground. Reproduced end to end: iconify,
+grab, re-iconify, capture still good. D49's watchdog does not prevent the
+flap; it makes it observable, and on Linux the thing to observe is
+`_NET_WM_STATE_HIDDEN` going away.
+
+**Unmeasured.** A non-compositing window manager, Wayland, and the soak that
+spec §13 still lists as never having run.
+
+### D#40a. Slice 1: the window tree, and what the contract assumed
+
+**Context.** Every Linux decision so far measured something. This one builds:
+six contract names -- `enumerate_process`, `top_level_windows`,
+`direct_children`, `process_facts`, `descendants`, `parent_map` -- answer for
+real, and `ghostdriver list-targets` lists a target on Linux.
+
+**Why this went before the remaining measurements.** L3, L5, L7 and L8 are
+still unmeasured, and the spec order says do them first. Slice 1 needs only
+L1, and it answers a question no further measurement can: *are these
+measurements sufficient to implement against?* The contract was written from
+the Windows backend; if a name needs something AT-SPI cannot give, that is
+much cheaper to find on the first slice than after four more measurements
+taken on the assumption that it fits. It found two things.
+
+**First: the contract returned a type no other backend could name.**
+`ProcessFacts` was defined in `backends/windows/process.py`, which binds
+Win32 at import, so the Linux backend could not import the shape it was
+contracted to return. Nothing outside that module imported it -- the
+platform-neutral layer duck-typed it -- which works exactly until a second
+backend exists. Moved to `model/process.py` so both fill one definition
+rather than each keeping a copy that drifts.
+
+Its Windows-flavoured fields are kept rather than generalised, because
+`probe/runner.py` writes every one into the profile and the profile is a
+document an operator reads and diffs. Linux answers `wow64=False`,
+`integrity_level=None`, `dpi_awareness="unknown"` -- the absence, not a
+plausible reading. X11 scaling is a different model and mapping it would be
+a guess dressed as a measurement.
+
+**Second: `WindowNode` assumes Win32's three certainties**, and none of them
+survives:
+
+| Field | Win32 | Here |
+|---|---|---|
+| `handle` | every control has one | only toplevels have an X id, so handles are **minted** and kept in a registry that a new enumeration clears |
+| `class_name` | a vendor class, often the decisive toolkit evidence (D47) | the AT-SPI **role name**, which is coarser: every button is `push button` |
+| `text` | `WM_GETTEXT` | the accessible **name**, never the Text interface |
+
+The minted handle is not a workaround: `WindowNode` already documents a
+handle as opaque, backend-supplied and valid only for the enumeration that
+produced it, because Win32 recycles them. Minting is a different way to be
+unsafe to persist, and the contract already forbade persisting them.
+
+That `text` is the name and not the contents is load-bearing. A tree walk
+that returned contents would hand back every password on screen, which is
+the bug D#34b exists to prevent, and a caller enumerating a window has not
+asked to read anything.
+
+**The coarser `class_name` has a cost worth naming.** D47 leaned on vendor
+class names as toolkit evidence, and role names carry none of that. Linux
+toolkit inference will have to come from the loaded objects instead --
+`/proc/<pid>/maps`, which `process_facts` now reads -- rather than from the
+tree. That is what `infer_toolkit` already prefers when modules are
+readable, so the fallback is the primary here.
+
+**Three guards fired on this change, all correctly.** The reachability guard
+caught `tree` reached only through a dynamic import (fixed by importing it
+plainly, which is safe because `tree` keeps `gi` inside its functions); the
+unwired list shrank on its own, because `tree` now calls `deadline`; and
+`test_linux_refuses_every_name` was *right until it wasn't* -- it encoded
+"nothing is built", and now asserts the thing that stays true as the backend
+fills in.
+
+### D#10. Tier 1 works, cannot touch owner-drawn controls, and does not split
+
+**Context.** L3 asks three things of the accessibility API: does it drive a
+real button, does it fail on an owner-drawn one, and does writing a value
+show D21's split. Two answers match the Windows expectation and the third
+does not, which is the useful one.
+
+| | expected | measured |
+|---|---|---|
+| `Action.DoAction` on a real `Gtk.Button` | acts | **acts** -- `actions=['click']`, returns true, and the application observably ran the handler |
+| `Action.DoAction` on the custom-drawn `DrawingArea` | no action | **no action at all** -- `actions=[]`, the call raises |
+| `EditableText.set_text_contents` on the bound entry | D21's split | **no split** |
+
+**The owner-drawn negative is sharper than expected.** It is not that the
+action fails; there is no Action interface behind the control at all. The
+fixture gives that DrawingArea an accessible *role* (D#8), and a role turns
+out not to imply an implementation -- it is nameable and not drivable. So
+tier 1 cannot reach owner-drawn controls, which is what the rungs below
+exist for, and on Linux the only rung below is tier 4 under isolation
+(D#11).
+
+**No split, and that is a real divergence.** On Windows, writing a value went
+around the toolkit: the control displayed the new text while the binding
+never heard of it, so the shown and committed values disagreed until
+something forced a commit. That is D21, and it is why `WM_SETTEXT` was
+deleted rather than kept as a fast path (D25).
+
+`EditableText` goes *through* `GtkEditable`, so the widget's own `changed`
+signal fires and a binding sees the write. **Tier 1 is stronger on Linux than
+on Windows**, and the Windows reasoning for deleting the API-level write does
+not carry over. Slice 4 should use it as the tier-1 write path rather than
+inheriting the Windows conclusion.
+
+**One detail worth pinning rather than discovering.** `set_text_contents`
+clears and re-inserts, so `changed` fires **twice** and the first carries an
+*empty* value the caller never wrote. Harmless against a mirror; not harmless
+against a field that rejects empty, or one that fires a lookup per change. A
+driver that writes values has to know the intermediate state exists.
+
+**And a constraint for slice 4.** `Atspi.Component.grab_focus` does not work
+-- it raises. Tier 4 is the only actuation rung that exists here and it needs
+the target focused (D#11), so focus has to come from the window manager and
+keyboard navigation, not from the accessibility API. Recorded now because
+slice 4 would otherwise start by assuming the easy route exists.
+
+**Unrelated finding, from the probe failing.** A `Gtk.Label`'s accessible name
+is its *text*, and it overrides an explicitly set accessible label. So a label
+cannot be given a stable name, and a locator matching one matches its
+contents -- which change. Anything that needs to find a label reliably has to
+match on something else.
+
+### D#40b. Slice 2: reading, and the third state the contract has no room for
+
+**Context.** Slice 2 wires `read_window_text`, `is_protected`,
+`capture_window` and `CaptureError`. The policy was already decided --
+withhold by class (D#34b), bound by a caller-side deadline (D#9) -- so this
+was meant to be plumbing. It was not.
+
+**`is_protected` stays narrow, and that is a decision.** It is tempting to
+answer `True` for the whole withheld class: an editable entry might be a
+password and nothing distinguishes them. It would be wrong, because
+`is_protected` is *also* what refuses to type into a field (D38,
+`tools/acting.py`). Widened, the driver could never type into any text field
+at all, which is most of what it exists to do.
+
+So the two questions are deliberately different: **the disclosure policy
+governs reading, and the role governs typing.** A `Gtk.Entry` with hidden
+characters is withheld but not protected -- undisclosed, still typeable --
+and that is the only combination that keeps both properties.
+
+**The contract has two states and the platform needs three.**
+`read_window_text` returns `str | None`, and `None` means *did not answer*.
+On Windows that is unambiguous: the OS refuses the read only for a password
+field, so `is_protected` tells the two apart, which is exactly what D37 is
+about.
+
+Here `None` has three causes -- withheld, protected, and a real timeout --
+and `is_protected` separates only the declared widget. **A healthy plain text
+field therefore reads exactly like a hung one**, which is the confusion D37
+was written to prevent, arriving from the other direction.
+
+Not fixed in this slice, and not smuggled around. The fix is a disclosure
+opt-in through the contract (`disclose=`, which D#34b's `read()` already
+takes), and that changes a signature Windows shares, on a platform this work
+cannot verify. Filed instead.
+
+**Two smaller things the wiring settled.**
+
+*A control with no `Text` interface answers with its caption.* Buttons do not
+implement `Text`, and `WM_GETTEXT` answers such a window with its caption
+rather than failing, so the accessible name is the honest equivalent and
+keeps both platforms answering the same question. A control that implements
+`Text` and raises anyway did not answer, and `None` says so.
+
+*A capture is of a window, not a control.* Only toplevels have an X id (D#8),
+so a handle anywhere in the tree captures its window and `region` crops. The
+size is decoded from the PNG rather than reported from the request, because
+a capture that returns bytes and no picture is the trap D66 names.
+
+### D#14. Restoring a window and focusing it are one operation
+
+**Context.** L7 asks whether the window manager focuses a window that has
+been un-hidden. D55 said to assume it does until measured, and D4 permits
+`restore` at `read_only` precisely because it is the operator's escape hatch
+-- the one place a focus change is legitimate.
+
+**The answer is stronger than the assumption.** Under GNOME Shell you cannot
+un-hide a window *without* focusing it.
+
+| route | what it asks for | hidden after | active after |
+|---|---|---|---|
+| `XMapWindow` (ICCCM de-iconify) | nothing else | **still hidden** | unchanged |
+| `_NET_ACTIVE_WINDOW` (EWMH activate) | focus | **restored** | the restored window |
+
+Both legitimate routes are covered: `_NET_WM_STATE_HIDDEN` is
+window-manager-managed and a client may not set it, so a bare map and an
+activation are the only two ways to ask. The map does nothing at all -- not
+half a restore, nothing -- and activation restores and focuses in the same
+motion.
+
+**So restoring and focusing cannot be separated**, and D55's "assume it
+focuses" turns out to understate it: there is no version that does not. That
+is fine for `restore` itself, which exists to hand the window back and whose
+whole point is that the person gets it. What it rules out is any code path
+that wants a window *visible but not focused* -- on this window manager there
+is not one, and anything designed around that possibility has to be
+redesigned rather than configured.
+
+**It also means D55's rule is load-bearing here in a way it is not on
+Windows.** "Nothing ever un-minimizes" is a policy on Windows and a
+*necessity* on Linux: an accidental un-hide is an accidental focus steal,
+with no gentler failure available.
+
+**Measured under GNOME Shell only.** A window manager with a different focus
+policy -- one honouring focus-stealing prevention, say -- could plausibly
+restore without raising, and that is unmeasured. The two routes tried are the
+specified ones; a WM that answers a bare map differently would change this
+answer.
+
+### D#40c. Slice 5a: a second sampler, not a second policy
+
+**Context.** Slice 5 is isolation and interference -- five contract names,
+615 lines on Windows. The first instinct was that most of it was
+platform-neutral and should be lifted out of the Windows backend, the way
+`ProcessFacts` was in D#40a. That instinct was wrong, and the codebase said
+so before any code moved.
+
+`ghostdriver/isolation.py` describes itself as "pure policy. It is fed
+observations and returns decisions; the sampling [is elsewhere]", and
+`backends/windows/isolate.py` opens with "the policy in
+`ghostdriver.isolation` decides; this samples". **The seam already existed
+and was already in the right place.** So Linux supplies a second sampler
+feeding the same `Watchdog`, and nothing was moved. Worth recording because
+the wrong move -- hoisting a class that was already correctly placed --
+would have looked like tidying.
+
+**What is actually platform-specific is small**: what a sample *is*, and how
+a window is put away.
+
+| | Windows | here |
+|---|---|---|
+| on screen | a visible, non-minimized window of the family | a managed top-level the WM has not marked `_NET_WM_STATE_HIDDEN` (D#13) |
+| put away | `minimize_no_activate` | a `WM_CHANGE_STATE` client message -- the call D#13 measured as non-activating |
+| still there | `IsWindow` | the window answers `get_attributes` |
+
+**A real X connection, not `xprop`.** The watch polls; a sample is several
+round trips, and shelling out per poll would spawn two processes each time.
+`python-xlib` is declared as a Linux dependency for the same reason
+`pywin32` is declared for Windows -- the difference between a watchdog and a
+fork bomb.
+
+**The poll is slower here, deliberately.** 100ms against the Windows 20ms. A
+sample costs X round trips rather than local calls, and the thing being
+watched -- a window flapping into view -- has a human-visible duration.
+
+**Putting a window away is safe; taking it back is not.** There is no quiet
+un-hide (D#14), so the watchdog only ever iconifies. On Windows D55's
+"nothing ever un-minimizes" is a policy; here it is the only thing available.
+
+**One test had to be loosened, and the reason is a finding.** The fixture's
+`present()` produces `unexpected_foreground` on some runs and
+`unexpected_restore` on others, because GNOME Shell does not reliably grant
+focus to a presenting window. Both are escapes; both are captured and put
+back. The test asserts *an escape*, not which kind -- pinning the kind would
+pin whether the window manager happened to grant focus that run, which is
+neither stable nor this backend's decision. The policy that tells the two
+apart is neutral and already tested.
+
+**Not done in this slice.** `HiddenDesktop` and `OperatorNotice` are the
+genuinely platform-shaped remainder -- a nested X server as a first-class
+strategy, and a notice on the operator's own display -- and `InterferenceWatch`
+needs a decision of its own: it is injectable by construction and its logic
+is neutral, so it wants lifting rather than reimplementing, which touches
+Windows.
+
+### D#12. Modality is declared here, and nothing is disabled
+
+**Context.** L5 asks what `_NET_WM_STATE` and AT-SPI say about a modal, and
+whether a sent event to a held window is honoured. The second needs no
+measurement: D#11 found sent events ignored in every configuration, held or
+not, so modality has nothing to add to it. The first inverts the Windows
+mechanism.
+
+**Both layers declare it.**
+
+| | during the modal |
+|---|---|
+| the modal, AT-SPI | role `frame`, states `ACTIVE, MODAL, SENSITIVE, SHOWING, VISIBLE` |
+| the modal, X | `_NET_WM_STATE_MODAL`, `_NET_WM_STATE_SKIP_TASKBAR`, and `WM_TRANSIENT_FOR` naming the owner |
+| the owner, AT-SPI | `SENSITIVE, SHOWING, VISIBLE` -- it lost `ACTIVE` and **nothing else** |
+
+`WM_TRANSIENT_FOR` is the `owner` field `TopLevel` already carries, available
+directly rather than derived. And modality is *stated* rather than inferred,
+which is a better position than Windows, where it is only visible as a side
+effect.
+
+**The Windows mechanism does not port, and that is the finding.** D48's
+`blocking_ancestor` walks up looking for a window that reports **disabled**,
+because on Windows a modal disables its owner. Here the owner keeps
+`SENSITIVE` throughout. A driver asking whether anything above a control is
+disabled gets "no" while the application is completely held.
+
+So the check runs the other way round: not *is anything above me disabled*
+but **is anything modal transient-for me**. Slice 3 has to be built that way,
+and `blocking_ancestor` returns the modal rather than a disabled ancestor.
+
+**D48's trap is sharper here.** There, the mistake was asking the *control*
+instead of the top-level -- the top-level did report disabled, so the
+information existed one level up. Here no accessible reports anything wrong
+at any level, including the top-level, so the information is not in the
+accessibility tree at all. It is in the window manager. A driver that stays
+inside AT-SPI cannot see modality, and will actuate into a held application
+with every state it can read saying the application is fine.
+
+**One signal that moves but must not be used alone.** The owner loses
+`ACTIVE`. So does any window when anything else takes focus, modal or not.
+Recorded so it is not mistaken for a modality check.
+
+**A role would not have helped either.** The modal comes back as role
+`frame`, not `dialog` -- looking for a dialog role finds nothing.
+
+**A late correction to slice 5a, found by running these two suites
+together.** Putting a window away is a *message* to the window manager here,
+not a call: `iconify` returns as soon as it is sent, and
+`_NET_WM_STATE_HIDDEN` appears whenever the window manager gets round to it.
+Windows' `minimize_no_activate` is synchronous, so nothing on that side ever
+had to wait -- and `MinimizedWatch.start()`, written from the Windows shape,
+read the state back immediately and sometimes saw the window still out. It
+passed alone and failed under load, which is the signature of a race rather
+than a defect in the thing being watched.
+
+`start()` now waits for confirmation and raises `WatchError` if the window
+manager never acts, because a caller that gets a watch back and finds the
+target still on screen cannot tell "not yet" from "never".
+
+**Seven suites now stand up a nested X server and five of those a window
+manager.** They pass individually and contend when run together; two failures
+above were deadlines rather than defects. The skips are honest -- a probe that
+produces no report skips rather than failing -- but a silent skip is exactly
+the hazard `CLAUDE.md` warns about, so this is a real cost and it is growing.
+Worth consolidating onto one shared nested stack before it grows further.
+
+### D#4. The capture/restore flakes traced to a leaked watch on a reused pid
 
 **Context.** Two tests failed intermittently and undiagnosed (#4):
 `test_capture_returns_a_png` and
@@ -2593,7 +3322,7 @@ guard having closed it, but it does not *prove* the historical flakes
 were this cause -- only that this cause is now reproduced, fixed and
 instrumented. Per #4's own rule, the issue stays open until a real
 occurrence is caught (now diagnosed on sight) or ruled impossible; what
-changed is that the next occurrence, if any, names its cause.
+changed is that the next occurrence, if any, names its cause. *(issue #4)*
 
 ## Open, for whoever picks this up
 

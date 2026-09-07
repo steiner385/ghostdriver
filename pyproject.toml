@@ -8,6 +8,10 @@ dependencies = [
     "pywin32>=306; sys_platform == 'win32'",
     "comtypes>=1.2; sys_platform == 'win32'",
     "pywinauto>=0.6.8; sys_platform == 'win32'",
+    # The watches poll the display tens of times a second. Asking xprop for
+    # each sample would mean spawning two processes per poll; a real X
+    # connection is the difference between a watchdog and a fork bomb.
+    "python-xlib>=0.33; sys_platform == 'linux'",
 ]
 
 [project.optional-dependencies]

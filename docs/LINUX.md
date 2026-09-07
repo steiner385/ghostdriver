@@ -120,21 +120,47 @@ a foreground grab *is*).
    at-spi-bus-launcher --launch-immediately`, the fixture on it, and
    `pyatspi` (or raw D-Bus) listing the fixture's tree. Until this works
    nothing else can be measured. This is also `HiddenDesktop`.
-   **Correction (D75): it also needs a window manager.** A bare `Xvfb` sets
+   **Correction (D75): it also needs a window manager**, and one runs --
+   `gnome-shell --x11` under its own `dbus-run-session` (D#11), which
+   unblocks measurements 6 and 7. A bare `Xvfb` sets
    neither `_NET_CLIENT_LIST` nor `_NET_ACTIVE_WINDOW` -- both come from a
    WM, not the X server -- so measurements 6 and 7 cannot be asked without
    one, and enumeration must walk the tree instead.
+   **Correction (D#8): and a session bus of its own.** AT-SPI is discovered
+   through the D-Bus *session* bus, so a nested display sharing the
+   operator's finds the operator's a11y bus and enumerates the operator's
+   applications. `dbus-run-session` is what makes this an isolation strategy
+   rather than a convenience. Done: `tests/test_linux_atspi.py`, which
+   asserts the nested bus holds exactly the fixture. The bindings are
+   `Atspi 2.0` via GObject introspection -- a third route beside the
+   "pyatspi (or raw D-Bus)" named above.
 2. **Reading.** Names, roles, states, text of every fixture control;
    which controls answer `Text` and which only `Name`; what an unresponsive
    control does to a bus call (D4) and what timeout is right.
+   **Done (D#34a, D#9).** Entries answer `Text`, buttons do not, and the
+   owner-drawn grid answers neither. Two findings the measurement did not
+   go looking for: AT-SPI hands out password contents in cleartext and one
+   of the two ways to make a password field is undetectable (#34); and
+   `Atspi.set_timeout()` does not bound a call at all, so the deadline is
+   imposed by the driver instead -- 200ms, the same as Windows'.
 3. **Tier 1.** `Action.DoAction` on the real button, the custom-drawn
    button (expected: no action), the entry (`Value` / `EditableText.SetText`
    -- expected: the D21 split on the bound entry).
+   **Done (D#10).** First two as expected -- and the owner-drawn control has
+   no Action interface at all, so a role is nameable without being drivable.
+   The third went the other way: `EditableText` goes through GtkEditable, the
+   binding hears the write, and there is **no split**. Tier 1 is stronger
+   here than on Windows, so D25's reasoning does not carry over.
 4. **Tier 3.** `XSendEvent` `ButtonPress/Release` to the custom-drawn
    button's window: does GTK act on a sent event? This decides whether the
    Windows ladder maps to Linux at all. Then `KeyPress/Release` to the
    entry, and whether the mirror follows.
-   **Answered early, provisionally (D75): no.** GTK 4.14.5 routes input by
+   **Answered (D#11): no.** Confirmed under GNOME Shell on the nested
+   display, with every experiment behind a passing XTest control. The
+   provisional version follows; the one row it got wrong -- a sent key to a
+   focused window appearing to work -- was an artefact of running without a
+   window manager.
+   **Provisionally (D75): no.** GTK 4.14.5 routes input by
    the real input state and discards a sent event that does not match it --
    a key to an unfocused window and a button with the pointer elsewhere are
    both ignored, while `XTest` works. Tier 3 does not exist here; the ladder
@@ -144,12 +170,30 @@ a foreground grab *is*).
 5. **Modality.** The timer modal: what `_NET_WM_STATE` and AT-SPI say,
    and whether a sent event to the held window is honoured (on Windows a
    posted message is; D48).
+   **Done (D#12).** Both layers declare it -- `_NET_WM_STATE_MODAL` and
+   AT-SPI `STATE_MODAL`, with `WM_TRANSIENT_FOR` naming the owner. But the
+   owner is **not** disabled, so D48's walk-for-a-disabled-ancestor has no
+   counterpart: the check inverts to "is anything modal transient-for me",
+   and it cannot be answered from the accessibility tree at all. The sent-event
+   half needs no measurement -- D#11 found sent events ignored regardless.
 6. **The foreground.** `_NET_ACTIVE_WINDOW` before and after every action
    above, on the operator's display, with the target on the nested one:
    it must never change. Then the watchdog: iconify, wait, the timer
    modal, re-iconify, capture.
+   **Done (D#13).** It never moves. Two corrections: an iconified window is
+   still `IsViewable` under a compositor, so `_NET_WM_STATE_HIDDEN` is the
+   signal rather than map state; and an iconified window *can* still be
+   captured -- pixel-identical -- which is what makes the minimized strategy
+   possible, but that is a property of the compositor rather than of X11 and
+   a lighter window manager is unmeasured.
 7. **Restore.** Un-hide via `_NET_WM_STATE` and see whether the window
    manager focuses the window (D55 says assume it does until measured).
+   **Done (D#14), and stronger than assumed: you cannot un-hide without
+   focusing.** A bare map leaves the window hidden; activation restores and
+   focuses in one motion, and those are the only two routes a client has --
+   `_NET_WM_STATE_HIDDEN` is WM-managed and not client-settable. So D55's
+   "nothing ever un-minimizes" is a necessity here rather than a policy: an
+   accidental un-hide is an accidental focus steal.
 8. **An embedded document.** A Chromium engine on the nested display, the
    wake, the click, the typing -- D58 again.
 
