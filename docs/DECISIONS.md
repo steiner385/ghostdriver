@@ -3213,6 +3213,90 @@ needs a decision of its own: it is injectable by construction and its logic
 is neutral, so it wants lifting rather than reimplementing, which touches
 Windows.
 
+### D#23. The type gate runs once per backend, because one run assumes one platform
+
+**Context.** `test_mypy_finds_nothing` failed on Linux and passed on Windows,
+on the same tree. `[tool.mypy]` set no `platform`, so mypy assumed the
+**host**, and typeshed is conditional on it: on Linux `ctypes` correctly has
+no `WinDLL`, no `oledll`, no `WINFUNCTYPE`, no `WinError`. Twenty errors
+across eight files in `backends/windows`, none of them real.
+
+A gate that gives two answers for one tree is not a gate. Worse, it gives the
+*permissive* answer on the platform that has the backend, so the box that
+could act on a finding is the one that never sees it.
+
+**Rejected: `# type: ignore`.** `warn_unused_ignores = true` is set, so every
+ignore added to satisfy Linux becomes an unused-ignore *error* on Windows. It
+cannot be right on both hosts simultaneously -- which is the same shape as
+the bug.
+
+**Rejected: `platform = "win32"` globally.** Correct while `backends/linux`
+was a stub and wrong the moment it was not: mypy would check the Linux
+backend as though it were Windows. That is the original bug pointing the
+other way, and it would have been introduced by the fix for it.
+
+**The decision: one pass per backend, each naming its platform.** The shared
+tree plus one backend, with that backend's `--platform`. The shared tree is
+therefore checked under *every* platform, which is the property that matters
+-- it is the part both backends read, and it has to be clean under either
+assumption. Each backend is checked exactly once, under its own.
+
+| pass | `--platform` | checks |
+|---|---|---|
+| windows | `win32` | shared tree + `backends/windows` -- 69 files |
+| linux | `linux` | shared tree + `backends/linux` -- 56 files |
+
+**`--exclude` alone does not work, and the reason is worth keeping.**
+`--exclude` filters mypy's directory *crawl*; it does not stop mypy following
+an `import`. `backends.load()` imports every backend, so the excluded one is
+pulled into the build regardless -- excluding `backends/windows` on a
+`--platform linux` pass still produced 24 of the same errors. What separates
+them is `follow_imports = "silent"`: modules named on the command line are
+always checked in full, so the shared tree still reports; a
+followed-but-excluded backend is still *analysed*, so its types stay correct
+for its callers, without its errors being attributed to the wrong platform.
+
+That is a relaxation in name only. The gate names the whole of `src`, so
+nothing outside a deliberately excluded backend is ever merely followed.
+
+**A backend with no platform target is a test failure, not a silent gap.**
+`test_every_backend_declares_a_platform` fails both ways: a package under
+`backends/` with no entry in `BACKEND_PLATFORMS` would go unchecked by every
+pass while the gate stayed green, and an entry naming a backend that is gone
+is stale. This is the D74 failure mode again -- a green run that verified
+less than it appears to -- so it is a test rather than a note. Both
+directions were confirmed to fail before being relied on.
+
+**mypy is now bounded at both ends: `>=2.1,<3`.** A floor alone let the
+gate's verdict depend on who installed what and when; 2.x reports things 1.x
+does not. The bound states what has actually been run. `ruff` and `pytest`
+were considered and left with floors: their configuration pins the rule set
+and the gate does not turn on their version the way it turns on mypy's.
+
+**The `mcp` finding was environmental, and the pin was already right.** The
+other 19 errors were `structured_content` / `mime_type` / `read_only_hint`
+against an `mcp` **1.x** that a dev box had picked up from user site,
+shadowing the `[server]` extra's existing `>=2.1,<3`. Nothing in
+`pyproject.toml` needed changing; installing the pinned version cleared all
+19. The *runtime* symptom of that mistake is already guarded by
+`tests/test_mcp_dependency.py`, which is deliberately ungated (D#39's
+anti-pattern). The type gate is not guarded against it, and that is accepted:
+mypy's answer necessarily depends on the installed third-party surface.
+
+**What is still host-sensitive, and cannot be fixed here.**
+`ignore_missing_imports = true` means an *absent* package types as `Any`.
+`pywin32`, `comtypes` and `pywinauto` install only on Windows; `gi` only on
+Linux. So each host checks the other's third-party surface as `Any`. That is
+inherent -- you cannot type-check against a package you cannot install -- and
+it is narrower than the bug fixed here, which was about the *standard
+library*.
+
+**Verified on Linux only.** Both passes are clean on this box: 39 errors to
+0. `env: both` is the label because the Windows host has to confirm the same
+two passes give the same answer there before this is settled.
+
+Evidence: issue #23; D74; `tests/test_quality.py`; `pyproject.toml`.
+
 ### D#60. A foreground window of the expected class verifies an `expect`
 
 **The field report.** Driving a browser's file-picker,
