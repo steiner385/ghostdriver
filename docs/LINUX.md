@@ -170,6 +170,12 @@ a foreground grab *is*).
 5. **Modality.** The timer modal: what `_NET_WM_STATE` and AT-SPI say,
    and whether a sent event to the held window is honoured (on Windows a
    posted message is; D48).
+   **Done (D#12).** Both layers declare it -- `_NET_WM_STATE_MODAL` and
+   AT-SPI `STATE_MODAL`, with `WM_TRANSIENT_FOR` naming the owner. But the
+   owner is **not** disabled, so D48's walk-for-a-disabled-ancestor has no
+   counterpart: the check inverts to "is anything modal transient-for me",
+   and it cannot be answered from the accessibility tree at all. The sent-event
+   half needs no measurement -- D#11 found sent events ignored regardless.
 6. **The foreground.** `_NET_ACTIVE_WINDOW` before and after every action
    above, on the operator's display, with the target on the nested one:
    it must never change. Then the watchdog: iconify, wait, the timer

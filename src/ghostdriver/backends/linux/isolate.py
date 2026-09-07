@@ -138,13 +138,43 @@ class MinimizedWatch:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
+    #: How long to wait for the window manager to act on an iconify request.
+    #: Putting a window away is a *message* here, not a call: `iconify`
+    #: returns as soon as it is sent, and `_NET_WM_STATE_HIDDEN` appears
+    #: whenever the window manager gets round to it. Windows' equivalent is
+    #: synchronous, so nothing on that side has to wait -- and code written
+    #: from the Windows shape reads the state back too early and sees the
+    #: window still out. Measured failing exactly that way under load.
+    SETTLE_S = 3.0
+
     def start(self) -> None:
+        """Put the target away and confirm it went, before watching begins.
+
+        `start` promising the state it is there to keep is the whole point:
+        a caller that gets a watch back and finds the target still on screen
+        has no way to tell "not yet" from "never".
+        """
         if not display.exists(self.main_xid):
             raise WatchError(f"window {self.main_xid:#x} is gone; nothing to watch")
         if not display.is_hidden(self.main_xid):
             display.iconify(self.main_xid)
+            if not self._await_hidden():
+                raise WatchError(
+                    f"window {self.main_xid:#x} did not go away within "
+                    f"{self.SETTLE_S:.0f}s of being asked. Iconifying is a "
+                    "message to the window manager, so this means it declined "
+                    "or never answered, not that the request failed to send."
+                )
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+
+    def _await_hidden(self) -> bool:
+        deadline = time.monotonic() + self.SETTLE_S
+        while time.monotonic() < deadline:
+            if display.is_hidden(self.main_xid):
+                return True
+            time.sleep(0.05)
+        return display.is_hidden(self.main_xid)
 
     def stop(self) -> None:
         self._stop.set()
