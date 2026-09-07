@@ -21,10 +21,16 @@ class WindowNode:
     unknown rather than genuinely absent.
 
     `enabled` is the window's own flag and nothing more, which is less than
-    it sounds like. Measured on a modally blocked application: the top-level
-    reports disabled and every control inside it reports *enabled*, because
-    a modal disables the top-level and the children are only unreachable
-    through it. `actionable` is the question a caller is really asking --
+    it sounds like. It is the WS_DISABLED bit read by IsWindowEnabled, and
+    it is wrong in *both* directions. Measured on a modally blocked
+    application: the top-level reports disabled and every control inside it
+    reports *enabled*, because a modal disables the top-level and the
+    children are only unreachable through it. And an owner-drawn control --
+    one that paints itself rather than letting the OS draw it -- can render
+    its own greyed, do-nothing state without ever clearing the bit, so it
+    reports `enabled` while being unavailable. The flag answers "is
+    WS_DISABLED clear", never "will this act": that needs `capture` or an
+    `expect={changed}` actuation. `actionable` is the nearer question --
     this window and every ancestor enabled -- and it is None when no backend
     computed it rather than defaulting to the reassuring answer.
     """
