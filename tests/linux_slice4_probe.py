@@ -64,11 +64,25 @@ def _pick(nodes, class_names, name_contains=None):
     return None
 
 
-def _describe(node):
-    return None if node is None else {
+def _describe(node, *, value=False):
+    """`node.text` is the accessible *name*, not the contents.
+
+    For an entry the name is its label -- "bound entry" -- and stays that
+    whatever is typed into it. Reading what a control actually holds is
+    `read_window_text`, which is a different call through a different
+    interface, and confusing the two makes a write look like it did nothing.
+    """
+    if node is None:
+        return None
+    out = {
         "handle": node.handle, "class_name": node.class_name,
-        "text": node.text, "enabled": node.enabled,
+        "name": node.text, "enabled": node.enabled,
     }
+    if value:
+        from ghostdriver.backends import current
+
+        out["value"] = current().read_window_text(node.handle)
+    return out
 
 
 def _roles(nodes):
@@ -99,10 +113,10 @@ def main():
     # --- phase 1: one enumeration, everything that needs a live handle ----
     nodes = _snap(pid)
     report["roles"] = _roles(nodes)
-    button = _pick(nodes, ("push button",), "Recalculate")
+    button = _pick(nodes, ("push button",), "Apply")
     entry = _pick(nodes, ("text", "entry"), "bound entry")
     report["button"] = _describe(button)
-    report["entry"] = _describe(entry)
+    report["entry"] = _describe(entry, value=True)
 
     if button is not None:
         report["button_actions"] = linux_input.action_names(button.handle)
@@ -111,7 +125,7 @@ def main():
         # does not provide it.
         report["focus_via_component"] = linux_input.focus_via_component(button.handle)
 
-    drawn = _pick(nodes, ("drawing area",))
+    drawn = _pick(nodes, ("push button", "drawing area"), "Recalculate")
     report["drawn"] = _describe(drawn)
     if drawn is not None:
         report["drawn_actions"] = linux_input.action_names(drawn.handle)
@@ -153,7 +167,8 @@ def main():
     # --- phase 2: re-enumerate to read the write back --------------------
     time.sleep(0.6)
     nodes = _snap(pid)
-    report["entry_after"] = _describe(_pick(nodes, ("text", "entry"), "bound entry"))
+    report["entry_after"] = _describe(
+        _pick(nodes, ("text", "entry"), "bound entry"), value=True)
     # The mirror label proves the *binding* heard it. A write that only
     # changed the display would leave this stale -- that is D21 on Windows,
     # and per D#10 it does not happen here.
@@ -185,7 +200,7 @@ def main():
             time.sleep(0.6)
             nodes = _snap(pid)
             during["entry_after"] = _describe(
-                _pick(nodes, ("text", "entry"), "bound entry")
+                _pick(nodes, ("text", "entry"), "bound entry"), value=True
             )
             during["mirror_saw_it"] = (
                 _pick(nodes, ("label",), "written-while-held") is not None
