@@ -7,9 +7,10 @@ from ghostdriver.modality import (
 )
 
 
-def win(handle, *, cls="TForm", text="", visible=True, enabled=True, owner=0):
+def win(handle, *, cls="TForm", text="", visible=True, enabled=True, owner=0,
+        modal=False):
     return TopLevel(handle=handle, class_name=cls, text=text,
-                    visible=visible, enabled=enabled, owner=owner)
+                    visible=visible, enabled=enabled, owner=owner, modal=modal)
 
 
 def test_a_visible_dialog_over_a_disabled_owner_is_a_modal_block():
@@ -148,3 +149,94 @@ def test_the_dialog_still_blocks_when_it_owns_the_chain():
     blocks, _ = find_modal_blocks([main, dialog])
 
     assert [b.dialog.text for b in blocks] == ["Confirm Delete Record"]
+
+
+# -- a modal that declares itself, and an owner that never goes disabled ------
+#
+# The rule above is a Win32 signature: a modal disables its owner, so
+# "owner is disabled" is how a block is found. D#12 measured that this does
+# not hold on GTK/X11 -- the owner keeps `SENSITIVE` for the whole life of
+# the modal, and *nothing* at any level reports a problem. What the modal
+# does have is `_NET_WM_STATE_MODAL` and `WM_TRANSIENT_FOR`: it declares
+# itself, and names what it is holding.
+#
+# So the policy has to accept two signatures for the same fact. These tests
+# are neutral on purpose -- the fixture that produced the finding is Linux,
+# but "a window that says it is modal is holding its owner" is not.
+
+
+def test_a_window_that_declares_itself_modal_holds_an_enabled_owner():
+    """The GTK/X11 shape (D#12), which the Win32 rule cannot see.
+
+    The owner is enabled, visible and reports nothing wrong -- on Linux
+    nothing ever reports otherwise. If this returns no block, a driver
+    actuates into a held application with every state it can read saying
+    the application is fine.
+    """
+    main = win(1, text="Fixture", enabled=True)
+    dialog = win(2, text="Really quit?", owner=1, modal=True)
+
+    blocks, unexplained = find_modal_blocks([main, dialog])
+
+    assert [b.dialog.text for b in blocks] == ["Really quit?"]
+    assert blocks[0].blocked.handle == 1
+    assert unexplained == []
+
+
+def test_a_declared_modal_is_still_ignored_when_it_is_not_on_screen():
+    """The visibility rule is about where a caller is being sent, and that
+    does not change with the signature that found the block."""
+    main = win(1, text="Fixture", enabled=True)
+    dialog = win(2, text="Really quit?", owner=1, modal=True, visible=False)
+
+    blocks, unexplained = find_modal_blocks([main, dialog])
+
+    assert blocks == []
+    assert unexplained == []
+
+
+def test_a_declared_modal_owning_nothing_present_holds_nothing():
+    """`WM_TRANSIENT_FOR` can name a window that is not in this list -- a
+    different process, or one that has since gone. There is nothing to
+    report as held, and inventing one would name a window the operator
+    cannot go and deal with."""
+    orphan = win(2, text="Really quit?", owner=999, modal=True)
+
+    blocks, unexplained = find_modal_blocks([orphan])
+
+    assert blocks == []
+    assert unexplained == []
+
+
+def test_a_modeless_owned_window_is_still_not_a_block_on_either_signature():
+    """The regression the `modal` flag exists to avoid. Toolbars, palettes
+    and find dialogs are owned and visible and hold nothing; only the
+    declaration separates them from a modal now that the owner's `enabled`
+    no longer does."""
+    main = win(1, text="Fixture", enabled=True)
+    palette = win(2, text="Find", owner=1, modal=False)
+
+    blocks, unexplained = find_modal_blocks([main, palette])
+
+    assert blocks == []
+    assert unexplained == []
+
+
+def test_both_signatures_agree_when_both_are_present():
+    """Nothing says a platform cannot supply both, and a future one might.
+    One block, not two."""
+    main = win(1, text="Fixture", enabled=False)
+    dialog = win(2, text="Really quit?", owner=1, modal=True)
+
+    blocks, _ = find_modal_blocks([main, dialog])
+
+    assert len(blocks) == 1
+    assert blocks[0].dialog.handle == 2
+
+
+def test_a_declared_modal_makes_the_target_blocked():
+    """`is_blocked` is what the tool layer actually asks."""
+    main = win(1, text="Fixture", enabled=True)
+    dialog = win(2, text="Really quit?", owner=1, modal=True)
+
+    assert is_blocked([main, dialog])

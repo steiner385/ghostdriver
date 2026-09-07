@@ -30,6 +30,20 @@ class TopLevel:
     #: The window this one is owned by, or 0. Not a parent: an owned window
     #: is top-level in its own right.
     owner: int = 0
+    #: The window says of itself that it is modal, rather than the fact
+    #: being inferred from its owner going disabled.
+    #:
+    #: Two platforms, two signatures for one fact. Win32 has no such
+    #: declaration and does not need one -- showing a modal disables the
+    #: owner, so `enabled` carries it. GTK/X11 has the declaration
+    #: (`_NET_WM_STATE_MODAL`) and *nothing else*: the owner keeps
+    #: `SENSITIVE` for the whole life of the modal, so a backend that only
+    #: filled in `enabled` would report a completely held application as
+    #: fine (D#12).
+    #:
+    #: A backend sets whichever it can actually observe. False means "not
+    #: declared", never "not modal" -- on Windows it is always False.
+    modal: bool = False
     #: The system's own verdict: its thread has pumped no message for five
     #: seconds. A frozen application still answers a cached title, so
     #: nothing else here tells it from a busy one (D66).
@@ -62,6 +76,34 @@ class UnexplainedBlock:
     """
 
     blocked: TopLevel
+
+
+def _is_holding(window: TopLevel, owner: TopLevel) -> bool:
+    """Is this visible, owned `window` holding its `owner`?
+
+    Both callers have already established that `window` is visible and that
+    `owner` is the window it names. This decides only the modality itself.
+
+    There are two signatures for one fact, and a backend supplies whichever
+    it can observe (see `TopLevel.modal`):
+
+    - **Win32**: showing a modal *disables* its owner. There is no
+      declaration, so `owner.enabled` is the whole signal, and `modal` is
+      always False.
+    - **GTK/X11**: the modal declares itself with `_NET_WM_STATE_MODAL` and
+      names its owner with `WM_TRANSIENT_FOR`, and the owner keeps
+      `SENSITIVE` throughout. `enabled` never moves, so it carries nothing
+      (D#12).
+
+    A platform answering neither is not blocked. A platform answering both
+    is blocked once, not twice -- the caller de-duplicates by owner.
+    """
+    # Either, not both: these are two dialects of one fact, and no platform
+    # is required to speak both. Neither is preferred over the other, which
+    # would need list-wide context this does not have and would make a
+    # platform that answered both ambiguous for no gain -- the caller
+    # de-duplicates by owner, so agreement costs nothing.
+    return window.modal or not owner.enabled
 
 
 def find_modal_blocks(
@@ -99,7 +141,7 @@ def find_modal_blocks(
         for window in windows
         if window.visible
         and window.owner in by_handle
-        and not by_handle[window.owner].enabled
+        and _is_holding(window, by_handle[window.owner])
     ]
     # Windows that have something stacked on them. A disabled window in
     # this set is a link in a modal chain; one outside it is just another
