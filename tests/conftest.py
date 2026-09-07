@@ -846,4 +846,4 @@ def preserved_clipboard():
     try:
         yield before
     finally:
-        restore_clipboard(before)
+        restore_clipboard(before)

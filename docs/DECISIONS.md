@@ -3580,6 +3580,73 @@ missing from `docs/LINUX.md`, which is the guard working.
 
 Evidence: issue #43; D#34b; D#9; D37; D38; D59; D60; D62; D#40e.
 
+### D#39. Three kinds of platform gate, and only one of them was honest
+
+**Context.** CLAUDE.md's rule is "never gate a guard on the condition it
+exists to detect", and it was written after two guards were found doing
+exactly that. #39 asked whether the same failure existed at scale. It does:
+**370 of 956 test functions sit in 41 modules gated `on_windows` at module
+level.**
+
+**The audit found three groups, not the two the issue expected.**
+
+| group | needs | verdict |
+|---|---|---|
+| the subject *is* Win32 -- `WM_GETTEXT`, `EM_GETPASSWORDCHAR`, UIA, hidden desktops | Windows | gate is correct, leave it |
+| the subject is neutral but the *test* drives a real window | a target on some platform | parametrise over backends once both have one; still open |
+| the subject is neutral and no window is ever touched | **nothing but a session** | should never have been gated |
+
+The third group was the surprise, and it is where the debt was.
+`tests/test_tool_contracts.py` describes itself as "the contract every tool
+honours" and checks two platform-neutral promises -- a released session
+refuses every tool, and a session opened at a lower tier cannot call a higher
+tier's tool. Both are enforced inside `authorize`, **before** a locator is
+looked at or a control touched. They were gated `on_windows` for one reason:
+`win32_target` was the fixture that existed.
+
+So a neutral promise was verified on one platform only, which is the same
+failure as the two guards CLAUDE.md already names, at a different scale.
+
+**The fix is not a better fixture; it is not needing one.** The first attempt
+added a neutral `live_pid` fixture spawning a windowless process. It hung.
+`Toolbox.attach` enumerates the target's windows to describe what was
+attached to, and on Linux that reaches AT-SPI with no bus in the test
+process, where it **blocks rather than fails** -- which is precisely why
+nobody had noticed: the tests had never run there.
+
+`SessionManager.attach` touches no backend at all. It checks consent and
+returns a `Session`, which is exactly and only what a gate test needs. The
+tests now open a session through it, using this process's own pid, and no
+fixture is involved. Neutral by construction, which is what CLAUDE.md asks
+for, rather than neutral by arranging a target on every platform.
+
+**Measured: 60 of 60 contract tests now pass on Linux, up from 24 passed and
+36 skipped.** Across the suite, 589 pass where 552 did, and skips fall from
+465 to 430.
+
+**A guard, and it was wrong twice before it was right.** First attempt
+searched each file for `on_windows` and produced two false positives: the
+string appears in prose explaining why a gate was *removed*, and in
+`test_on_windows_every_contract_name_resolves_to_something_real`, a test
+whose subject really is the Windows backend. Second attempt matched any
+decorator, which would have condemned `test_backends.py` for holding one
+legitimately Windows-only test beside neutral ones.
+
+What it checks now is **module-level `pytestmark` only**, by AST, against a
+named list of files that must run everywhere. That is the failure mode #39
+actually measured: a whole file behind one gate. A single gated test inside
+an otherwise-neutral module is fine, and saying so keeps the guard from
+being the kind that gets deleted for crying wolf. Verified by re-gating
+`test_tool_contracts.py` on purpose and watching it fail.
+
+**Still open.** The second group -- tests that need a real target -- stays
+gated. Parametrising it needs a Linux target fixture, and every module that
+wants one currently pays for its own nested display and bus, which is slow
+and is why #48 proposed a shared stack. Not smuggled in here.
+
+Evidence: issue #39; CLAUDE.md ("never gate a guard on the condition it
+exists to detect"); D59; D#9.
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on

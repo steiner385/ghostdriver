@@ -184,6 +184,75 @@ IMPORT_TIME_PLATFORM_ALLOWED = {"fixtureapp.py", "fixtureapp_gtk.py",
                                 "linux_modality_probe.py",
                                 "linux_xid_probe.py"}
 
+#: Test modules that check **platform-neutral policy** and must therefore
+#: run on every platform. A gate on one of these does not skip a Windows
+#: test; it leaves a neutral promise verified on one platform only, which is
+#: how `test_tool_contracts.py` came to check "a released session refuses
+#: every tool" nowhere but Windows (#39).
+#:
+#: Adding to this list is cheap. Taking something off it means deciding the
+#: policy is not neutral after all, which is a decision worth writing down.
+MUST_RUN_EVERYWHERE = {"test_tool_contracts.py", "test_modality.py",
+                       "test_disturbance.py", "test_backends.py",
+                       "test_mcp_dependency.py"}
+
+
+def _module_level_gate(path) -> str | None:
+    """The platform gate applied to a whole module, if there is one.
+
+    `pytestmark = [on_windows, ...]` -- an assignment at module scope. A
+    decorator on a single test is *not* this: a module may legitimately hold
+    one Windows-only test beside neutral ones, and `test_backends.py` does.
+
+    Matched by AST rather than by searching for the name, because the name
+    also appears in prose explaining why a gate was removed, and in
+    `test_on_windows_every_contract_name_resolves_to_something_real` -- a
+    test whose subject really is the Windows backend. Both were false
+    positives on the first attempt at this guard.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "pytestmark"
+                   for t in node.targets):
+            continue
+        for name in ast.walk(node.value):
+            if isinstance(name, ast.Name) and name.id in ("on_windows", "on_linux"):
+                return name.id
+    return None
+
+
+def test_neutral_policy_tests_are_not_gated_to_one_platform():
+    """A neutral promise checked on one platform is not checked.
+
+    This is the wider half of #39. The narrow half was two guards gated on
+    the very condition they existed to detect; this is the same failure at
+    a different scale -- 370 of 897 test functions behind a module-level
+    `on_windows`, including a file describing itself as "the contract every
+    tool honours", whose refusal tests took a Win32 target purely because
+    that was the fixture that existed.
+
+    The fix those tests got is the one to copy: they open a session through
+    `SessionManager` rather than the `attach` tool, so no backend is
+    involved and the gate is exercised where the gate lives.
+    """
+    offenders = {}
+    for name in sorted(MUST_RUN_EVERYWHERE):
+        path = TESTS / name
+        if not path.exists():
+            offenders[name] = "listed here but missing"
+            continue
+        gate = _module_level_gate(path)
+        if gate:
+            offenders[name] = f"whole module gated with {gate}"
+    assert not offenders, (
+        "these check platform-neutral policy and must run everywhere, but "
+        "are gated to one platform: " + ", ".join(
+            f"{n} ({why})" for n, why in sorted(offenders.items()))
+    )
+
+
 #: Modules that exist on one platform only. `ctypes.WinDLL` raises
 #: AttributeError off Windows; `gi` and `pyatspi` are simply absent off a
 #: Linux desktop. Both directions are named so the guard is symmetric -- the
