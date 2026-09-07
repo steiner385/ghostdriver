@@ -3213,6 +3213,50 @@ needs a decision of its own: it is injectable by construction and its logic
 is neutral, so it wants lifting rather than reimplementing, which touches
 Windows.
 
+### D#60. A foreground window of the expected class verifies an `expect`
+
+**The field report.** Driving a browser's file-picker,
+`expect=class=#32770 visible=true` returned the *same* `postcondition_failed`
+whether the picker opened or not. The picker is a new top-level in a helper
+process; a bare-string `expect` resolves against the target's *main* window
+only, and a helper-process top-level is not in that tree in either case, so
+the postcondition carried no signal at all. The only thing that told success
+from failure was the result's own `focus` block: `thread_active_window` was
+`#32770` when it worked and `Chrome_WidgetWin_1` when it did not.
+
+**What was measured.** The dialog does not merely exist; it opens *as the
+foreground window*, and `GetForegroundWindow` reads that without touching
+anything (the same no-activation discipline as the focus block, D64). So the
+signal the report found by hand is available to the postcondition.
+
+**The fix, and the two guards that keep it honest.** When an expectation is
+purely "a window of this class is up" -- a class locator with no text,
+`selected`, `index`, `handle` or `within`, none of which a class alone can
+vouch for -- a foreground window whose class matches now counts as the
+effect landing. Two guards, because a false green is the same defect as the
+false red, pointed the other way:
+
+- **Class must match** the expected locator (`fnmatchcase`, as the resolver
+  matches it). "Any foreground change passes any expectation" would be the
+  false-green mirror.
+- **The window must belong to the target's own process tree**
+  (`_tree_pids`), so an unrelated same-class dialog the operator happens to
+  have focused -- another program's Open dialog -- is not read as this
+  target acting.
+
+A disturbance is still reported, not a verdict (D28): the foreground read
+does not *fail* anything, it only lets a real effect be recognised. And
+resolution is unchanged -- the corroboration is an added path, checked first
+only because it is cheap (three window reads) where resolution enumerates a
+tree.
+
+**Not widened.** An expectation that names specific text or a selection
+still needs the real element; the class of a foreground window cannot answer
+for it, so those short-circuit nothing. And `timeout_s` remains honoured for
+`changed` mode only; the locator path polls to the actuator's default window,
+within which the corroboration is re-checked each iteration -- the "re-check
+after a settle" the report also suggested, already there. *(issue #60)*
+
 ### D#51. `enabled` is a bit, not availability, and the contract now says so
 
 **The field report.** `find` returned `enabled: true` for an owner-drawn
