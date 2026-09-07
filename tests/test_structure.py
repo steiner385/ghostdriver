@@ -136,7 +136,11 @@ def test_the_source_tree_holds_no_profile_workflow_or_report():
     offenders = []
     for path in REPO.rglob("*"):
         parts = {p.lower() for p in path.relative_to(REPO).parts}
-        if parts & {".git", ".venv", "venv", "__pycache__", ".pytest_cache"}:
+        # `.github` is repository metadata -- CI workflows, issue templates --
+        # not the product's target knowledge. Its `workflows` directory is
+        # GitHub Actions, categorically not the saved-automation kind this
+        # guard keeps out of the tree, so the whole subtree is out of scope.
+        if parts & {".git", ".github", ".venv", "venv", "__pycache__", ".pytest_cache"}:
             continue
         name = path.name.lower()
         if path.is_file() and "profile" in name and name.endswith(".json") \
