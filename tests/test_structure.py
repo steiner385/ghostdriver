@@ -180,7 +180,8 @@ IMPORT_TIME_PLATFORM_ALLOWED = {"fixtureapp.py", "fixtureapp_gtk.py",
                                 "linux_timeout_probe.py",
                                 "linux_tier1_probe.py",
                                 "linux_reading_probe.py",
-                                "linux_watch_probe.py"}
+                                "linux_watch_probe.py",
+                                "linux_modality_probe.py"}
 
 #: Modules that exist on one platform only. `ctypes.WinDLL` raises
 #: AttributeError off Windows; `gi` and `pyatspi` are simply absent off a
