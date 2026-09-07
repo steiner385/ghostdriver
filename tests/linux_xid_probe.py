@@ -48,8 +48,6 @@ import gi
 gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi  # noqa: E402
 
-from Xlib import display as xdisplay  # noqa: E402
-
 WATCHED = ("SENSITIVE", "MODAL", "SHOWING", "VISIBLE", "ACTIVE")
 
 
@@ -62,7 +60,7 @@ def _attributes(node):
     """`get_attributes` is the cheapest possible answer if it carries an id."""
     try:
         got = node.get_attributes()
-    except Exception as exc:  # noqa: BLE001 -- the probe records, never fails
+    except Exception as exc:
         return {"error": repr(exc)}
     return dict(got) if got else {}
 
@@ -70,7 +68,7 @@ def _attributes(node):
 def _extents(node):
     try:
         got = node.get_extents(Atspi.CoordType.SCREEN)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"error": repr(exc)}
     return {"x": got.x, "y": got.y, "w": got.width, "h": got.height}
 
@@ -100,6 +98,12 @@ def _x_side(pid):
     top-level and the window manager is what knows about it, which is why a
     bare Xvfb has none of this (D75).
     """
+    # Inside the function, not at module scope: an import-time platform
+    # binding is a collection error rather than a skip, and takes the whole
+    # run down on another host (`test_no_test_module_binds_a_platform_at_
+    # import_time`).
+    from Xlib import display as xdisplay
+
     dsp = xdisplay.Display()
     root = dsp.screen().root
 
@@ -109,7 +113,7 @@ def _x_side(pid):
     def prop(window, name):
         try:
             got = window.get_full_property(atom(name), 0)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
         return got.value if got is not None else None
 
@@ -131,7 +135,7 @@ def _x_side(pid):
             coords = root.translate_coords(window, 0, 0)
             box = {"x": coords.x, "y": coords.y,
                    "w": geometry.width, "h": geometry.height}
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             box = {"error": repr(exc)}
         out[str(xid)] = {
             "name": bytes(name).decode("utf-8", "replace") if name else None,

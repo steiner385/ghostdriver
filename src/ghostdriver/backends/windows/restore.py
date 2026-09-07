@@ -21,35 +21,16 @@ keeping hidden.
 """
 
 import time
-from dataclasses import dataclass
 
+from ...model.restore import RestoreResult
 from . import winapi
 from .enumerate import top_level_windows
 
-
-@dataclass(frozen=True, slots=True)
-class RestoreResult:
-    """What `restore_process` did, and what it cost.
-
-    `foreground_before`/`foreground_after` are recorded so that the
-    non-interference claim is measured on every call rather than asserted
-    once in a test and assumed forever after.
-    """
-
-    restored: tuple[int, ...]
-    visible_before: tuple[int, ...]
-    visible_after: tuple[int, ...]
-    foreground_before: int
-    foreground_after: int
-
-    @property
-    def took_foreground(self) -> bool:
-        return self.foreground_before != self.foreground_after
-
-    @property
-    def newly_visible(self) -> tuple[int, ...]:
-        before = set(self.visible_before)
-        return tuple(h for h in self.visible_after if h not in before)
+#: Re-exported, not re-defined. The type moved to the neutral model so the
+#: Linux backend could name what it returns (D#40a's move, for `ProcessFacts`);
+#: this keeps `from .restore import RestoreResult` working for everything
+#: that already imported it from here.
+__all__ = ["RestoreResult", "restore_process"]
 
 
 def _visible_top_level(pid: int) -> tuple[int, ...]:
