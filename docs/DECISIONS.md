@@ -3213,6 +3213,182 @@ needs a decision of its own: it is injectable by construction and its logic
 is neutral, so it wants lifting rather than reimplementing, which touches
 Windows.
 
+### D#23. The type gate runs once per backend, because one run assumes one platform
+
+**Context.** `test_mypy_finds_nothing` failed on Linux and passed on Windows,
+on the same tree. `[tool.mypy]` set no `platform`, so mypy assumed the
+**host**, and typeshed is conditional on it: on Linux `ctypes` correctly has
+no `WinDLL`, no `oledll`, no `WINFUNCTYPE`, no `WinError`. Twenty errors
+across eight files in `backends/windows`, none of them real.
+
+A gate that gives two answers for one tree is not a gate. Worse, it gives the
+*permissive* answer on the platform that has the backend, so the box that
+could act on a finding is the one that never sees it.
+
+**Rejected: `# type: ignore`.** `warn_unused_ignores = true` is set, so every
+ignore added to satisfy Linux becomes an unused-ignore *error* on Windows. It
+cannot be right on both hosts simultaneously -- which is the same shape as
+the bug.
+
+**Rejected: `platform = "win32"` globally.** Correct while `backends/linux`
+was a stub and wrong the moment it was not: mypy would check the Linux
+backend as though it were Windows. That is the original bug pointing the
+other way, and it would have been introduced by the fix for it.
+
+**The decision: one pass per backend, each naming its platform.** The shared
+tree plus one backend, with that backend's `--platform`. The shared tree is
+therefore checked under *every* platform, which is the property that matters
+-- it is the part both backends read, and it has to be clean under either
+assumption. Each backend is checked exactly once, under its own.
+
+| pass | `--platform` | checks |
+|---|---|---|
+| windows | `win32` | shared tree + `backends/windows` -- 69 files |
+| linux | `linux` | shared tree + `backends/linux` -- 56 files |
+
+**`--exclude` alone does not work, and the reason is worth keeping.**
+`--exclude` filters mypy's directory *crawl*; it does not stop mypy following
+an `import`. `backends.load()` imports every backend, so the excluded one is
+pulled into the build regardless -- excluding `backends/windows` on a
+`--platform linux` pass still produced 24 of the same errors. What separates
+them is `follow_imports = "silent"`: modules named on the command line are
+always checked in full, so the shared tree still reports; a
+followed-but-excluded backend is still *analysed*, so its types stay correct
+for its callers, without its errors being attributed to the wrong platform.
+
+That is a relaxation in name only. The gate names the whole of `src`, so
+nothing outside a deliberately excluded backend is ever merely followed.
+
+**A backend with no platform target is a test failure, not a silent gap.**
+`test_every_backend_declares_a_platform` fails both ways: a package under
+`backends/` with no entry in `BACKEND_PLATFORMS` would go unchecked by every
+pass while the gate stayed green, and an entry naming a backend that is gone
+is stale. This is the D74 failure mode again -- a green run that verified
+less than it appears to -- so it is a test rather than a note. Both
+directions were confirmed to fail before being relied on.
+
+**mypy is now bounded at both ends: `>=2.1,<3`.** A floor alone let the
+gate's verdict depend on who installed what and when; 2.x reports things 1.x
+does not. The bound states what has actually been run. `ruff` and `pytest`
+were considered and left with floors: their configuration pins the rule set
+and the gate does not turn on their version the way it turns on mypy's.
+
+**The `mcp` finding was environmental, and the pin was already right.** The
+other 19 errors were `structured_content` / `mime_type` / `read_only_hint`
+against an `mcp` **1.x** that a dev box had picked up from user site,
+shadowing the `[server]` extra's existing `>=2.1,<3`. Nothing in
+`pyproject.toml` needed changing; installing the pinned version cleared all
+19. The *runtime* symptom of that mistake is already guarded by
+`tests/test_mcp_dependency.py`, which is deliberately ungated (D#39's
+anti-pattern). The type gate is not guarded against it, and that is accepted:
+mypy's answer necessarily depends on the installed third-party surface.
+
+**What is still host-sensitive, and cannot be fixed here.**
+`ignore_missing_imports = true` means an *absent* package types as `Any`.
+`pywin32`, `comtypes` and `pywinauto` install only on Windows; `gi` only on
+Linux. So each host checks the other's third-party surface as `Any`. That is
+inherent -- you cannot type-check against a package you cannot install -- and
+it is narrower than the bug fixed here, which was about the *standard
+library*.
+
+**Verified on Linux only.** Both passes are clean on this box: 39 errors to
+0. `env: both` is the label because the Windows host has to confirm the same
+two passes give the same answer there before this is settled.
+
+Evidence: issue #23; D74; `tests/test_quality.py`; `pyproject.toml`.
+
+### D#60. A foreground window of the expected class verifies an `expect`
+
+**The field report.** Driving a browser's file-picker,
+`expect=class=#32770 visible=true` returned the *same* `postcondition_failed`
+whether the picker opened or not. The picker is a new top-level in a helper
+process; a bare-string `expect` resolves against the target's *main* window
+only, and a helper-process top-level is not in that tree in either case, so
+the postcondition carried no signal at all. The only thing that told success
+from failure was the result's own `focus` block: `thread_active_window` was
+`#32770` when it worked and `Chrome_WidgetWin_1` when it did not.
+
+**What was measured.** The dialog does not merely exist; it opens *as the
+foreground window*, and `GetForegroundWindow` reads that without touching
+anything (the same no-activation discipline as the focus block, D64). So the
+signal the report found by hand is available to the postcondition.
+
+**The fix, and the two guards that keep it honest.** When an expectation is
+purely "a window of this class is up" -- a class locator with no text,
+`selected`, `index`, `handle` or `within`, none of which a class alone can
+vouch for -- a foreground window whose class matches now counts as the
+effect landing. Two guards, because a false green is the same defect as the
+false red, pointed the other way:
+
+- **Class must match** the expected locator (`fnmatchcase`, as the resolver
+  matches it). "Any foreground change passes any expectation" would be the
+  false-green mirror.
+- **The window must belong to the target's own process tree**
+  (`_tree_pids`), so an unrelated same-class dialog the operator happens to
+  have focused -- another program's Open dialog -- is not read as this
+  target acting.
+
+A disturbance is still reported, not a verdict (D28): the foreground read
+does not *fail* anything, it only lets a real effect be recognised. And
+resolution is unchanged -- the corroboration is an added path, checked first
+only because it is cheap (three window reads) where resolution enumerates a
+tree.
+
+**Not widened.** An expectation that names specific text or a selection
+still needs the real element; the class of a foreground window cannot answer
+for it, so those short-circuit nothing. And `timeout_s` remains honoured for
+`changed` mode only; the locator path polls to the actuator's default window,
+within which the corroboration is re-checked each iteration -- the "re-check
+after a settle" the report also suggested, already there. *(issue #60)*
+
+### D#51. `enabled` is a bit, not availability, and the contract now says so
+
+**The field report.** `find` returned `enabled: true` for an owner-drawn
+command button (a Delphi/VCL control) that rendered grey and did nothing.
+The backend owner-draws that control and never sets `WS_DISABLED`, so
+`enabled` -- which is `IsWindowEnabled` for a window node -- answered a
+different question than the tester was asking. It is not "the user can use
+this"; it is only "the `WS_DISABLED` bit is clear." Roughly a third of a
+session's assertions read `enabled`, and on an owner-drawn control it is
+silently wrong in the reassuring direction -- the opposite blind spot from
+the modal case the `WindowNode` docstring already records, where a control
+reports `enabled` while unreachable *through* a disabled ancestor.
+
+**Three options, cheapest first, and why the cheapest is barred.** The
+report offered: (1) caveat the field when the class is a known owner-drawn
+one; (2) return the flag's provenance; (3) rename it so it cannot be read
+as "the user can use this."
+
+Option 1 is not available here: we keep **no target knowledge in any repo**,
+so a list of owner-drawn class names has nowhere to live. Option 3 breaks a
+published surface -- `enabled=` is a documented locator filter and a field
+a third of assertions already read, so a rename is a migration, not a fix.
+
+**What was actually done: option 2, at the contract, not per element.** The
+provenance of `enabled` is *constant* -- every window-node value is
+`IsWindowEnabled`; an owner-drawn control paints its own greyed state
+without clearing the bit. A constant fact stamped on every element is the
+noise the `actionable`-only-when-False rule (D66) exists to avoid. So the
+provenance goes where the caller reads it and where it costs nothing per
+element: the `find` and `describe` tool descriptions now say `enabled` is
+the `WS_DISABLED` bit and not proof a control will act, and point at
+`capture` / `expect={changed}` to confirm availability. The `enabled=`
+locator-filter doc and the `WindowNode` / `AccessibleElement` docstrings
+carry the same wording, so the source and the contract agree.
+
+**Why the value was not touched.** `IsWindowEnabled` really did return true;
+the reading was wrong, not the measurement. The fix is to say what the
+measurement is, not to fake a better one -- a per-element "is it owner-drawn"
+verdict would need the `surfaces` probe, which `find` deliberately does not
+run.
+
+**A guard test, because a promise in prose gets broken.** `test_find_and_
+describe_disclaim_enabled_as_availability` asserts both descriptions still
+name `IsWindowEnabled` and `owner-drawn`, so the caveat cannot regress out
+of the interface silently (the D60 lesson). Platform-neutral text and a
+platform-neutral test: verifiable anywhere, motivated by a Windows target.
+*(issue #51)*
+
 ### D#12. Modality is declared here, and nothing is disabled
 
 **Context.** L5 asks what `_NET_WM_STATE` and AT-SPI say about a modal, and
@@ -3496,6 +3672,50 @@ or capture work, and `deepest_child_at` additionally needs the screen
 position D#40d found AT-SPI does not report. They wait on slice 5b.
 
 Evidence: #40 slice 4; D#10; D#11; D#12; D#34b; D#40d; D10; D53; issue #43.
+
+### D#4. The capture/restore flakes traced to a leaked watch on a reused pid
+
+**Context.** Two tests failed intermittently and undiagnosed (#4):
+`test_capture_returns_a_png` and
+`test_restore_is_a_no_op_when_nothing_is_minimized`. Both reduce to one
+symptom -- a fresh, off-screen, never-activated target window found
+*minimized* mid-test, which makes `capture` fail (a minimized window has
+nothing to render) and `restore` non-trivial (it finds something to
+un-minimize). #4 had ruled out test order and reproduction under load,
+and instrumented the two failures to pay for themselves.
+
+**The mechanism.** The only thing in this codebase that minimizes a
+window is a `MinimizedWatch`, and the only way one touches an *unrelated*
+window is a leak: a prior test's watch still running against a pid the OS
+has since reused for the fresh target. Its poll enumerates
+`top_level_windows(self.pid)` -- now the *new* process's windows --
+finds the fresh window on screen, reads that as an escape, and minimizes
+it. The watch's own locked handle is the dead process's and does nothing;
+the fresh window is collateral. This is a plausible, complete explanation
+of both flakes at once, and it is timing-dependent exactly as observed:
+it needs a watch to outlive its test *and* the pid to be reused before
+the watch's next poll.
+
+**Why it should already be closed.** The self-stop guard added with the
+tree-following watches (a watch whose locked window is gone stops rather
+than keep sampling a pid the OS may reuse) removes the mechanism: a
+leaked watch sees its window is gone on its next poll and exits before it
+can act. Reproduced deterministically in
+`tests/test_flaky_watch_leak.py` -- a watch holding a dead window's handle
+with a live target on the (reused) pid stops without minimizing that
+window -- so a regression of the guard fails there, not as a
+one-in-hundreds flake elsewhere.
+
+**What was added, and what stays open.** The `win32_target` fixture now
+names any live watch thread, and fails loudly if a `minimized-watch-<pid>`
+is alive for *its own* pid -- the smoking gun, turned from inference into
+a message. Twelve rounds interleaving the watch-heavy modules with the
+two tests under load produced no failure. That is consistent with the
+guard having closed it, but it does not *prove* the historical flakes
+were this cause -- only that this cause is now reproduced, fixed and
+instrumented. Per #4's own rule, the issue stays open until a real
+occurrence is caught (now diagnosed on sight) or ruled impossible; what
+changed is that the next occurrence, if any, names its cause. *(issue #4)*
 
 ## Open, for whoever picks this up
 

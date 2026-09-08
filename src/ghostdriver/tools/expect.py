@@ -49,7 +49,42 @@ class _ExpectCore(_ToolboxCore):
         selected = expect.get("selected")
         if not where:
             return None, None
-        Locator.parse(where)  # raises ValueError, caught by the caller
+        loc = Locator.parse(where)  # raises ValueError, caught by the caller
+
+        # A dialog like a browser's file-picker is a new top-level in a
+        # helper process, so a main-window postcondition never sees it and
+        # reports the same `postcondition_failed` whether it opened or not
+        # (#60). But it opens *as the foreground window*, and that is
+        # readable without touching anything. So when the expectation is
+        # purely "a window of this class is up" -- no text, selected, index,
+        # handle or scope, which a class alone cannot vouch for -- a
+        # target-owned foreground window of that class counts as the effect
+        # landing. Scoped to the target's own process tree, so an unrelated
+        # same-class dialog the operator has focused does not read as a pass.
+        corroborate_class = (
+            loc.class_name if (
+                loc.class_name is not None and not loc.is_element
+                and wanted is None and selected is None
+                and loc.index is None and loc.handle is None
+                and loc.within is None and loc.visible is not False
+            ) else None
+        )
+
+        def foreground_is_target_owned() -> bool:
+            if corroborate_class is None:
+                return False
+            import fnmatch
+
+            winapi = current().winapi
+
+            def read() -> bool:
+                fg = winapi.foreground_window()
+                if not fg or not fnmatch.fnmatchcase(
+                        winapi.class_name(fg), corroborate_class):
+                    return False
+                return winapi.window_pid(fg) in self._tree_pids(session)
+
+            return session.run(read)
 
         def text_of(found) -> str:
             # An element's text is its name, or its value when it has one;
@@ -59,6 +94,10 @@ class _ExpectCore(_ToolboxCore):
             return read_window_text(found.handle) or ""
 
         def holds() -> bool:
+            # The cheap corroboration first: when it applies it settles the
+            # common "a dialog appeared" case without enumerating the tree.
+            if foreground_is_target_owned():
+                return True
             found = self._resolve(session, where,
                                   expect.get("all_windows", False))
             if not found:
