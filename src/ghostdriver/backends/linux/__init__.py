@@ -18,7 +18,7 @@ them has been built.
 from typing import Any
 
 from .. import CONTRACT, UnsupportedPlatform
-from . import isolate, modality, reading, restore, tree
+from . import isolate, modality, reading, restore, tree, verbs
 from . import winapi as _winapi
 
 #: What is wired, and where it lives. Everything else still refuses. The map
@@ -53,6 +53,10 @@ _WIRED: dict[str, Any] = {
     ),
     # ... and un-hiding, which on this window manager also focuses (D#14)
     **dict.fromkeys(("restore_process",), restore),
+    # slice 4a, acting -- tier 1 only. Tier 3 does not exist here (D#11)
+    # and tier 4 has no isolation to run inside until slice 5b, so several
+    # of these ladders are deliberately empty (D53).
+    "verbs": verbs,
     # slice 3's last name. `winapi` *is* a module -- the contract hands the
     # raw platform API over whole -- which `backends/windows` marks the same
     # way. Deliberately partial: `winapi.__getattr__` refuses an unbuilt
@@ -63,7 +67,7 @@ _WIRED: dict[str, Any] = {
 #: Names whose value is the module itself rather than something inside it.
 #: `backends/windows` spells this `None` in its own map; here the module is
 #: already the value, so this only says not to look inside it.
-_IS_MODULE = frozenset({"winapi"})
+_IS_MODULE = frozenset({"winapi", "verbs"})
 
 
 class _LinuxBackend:
@@ -77,14 +81,15 @@ class _LinuxBackend:
             return wired if name in _IS_MODULE else getattr(wired, name)
         raise UnsupportedPlatform(
             f"{name} is not implemented on Linux yet. The window tree, "
-            "reading, the minimized watch, and modality and state are wired "
-            "(#40 slices 1, 2, 3, 5a); this is not part of them. The backend "
-            "is specified in docs/LINUX.md, and is being built by "
-            "measurement: the nested display, its AT-SPI bus, reading, the "
-            "read deadline, the disclosure policy, the foreground guarantee, "
-            "modality and restore are done and recorded. What is left is "
-            "acting (slice 4) and assessment (slice 6). docs/LINUX.md tracks "
-            "what has been measured and what has not."
+            "reading, the minimized watch, modality and state, and tier 1 "
+            "acting are wired (#40 slices 1, 2, 3, 4a, 5a); this is not part "
+            "of them. The backend is specified in docs/LINUX.md, and is being "
+            "built by measurement. What is left needs two things that do not "
+            "exist yet: synthetic input has nowhere safe to run until the "
+            "nested display is a strategy rather than a test harness (slice "
+            "5b), and assessment needs an embedded document measured (slice "
+            "6, issue #15). docs/LINUX.md tracks what has been measured and "
+            "what has not."
         )
 
 

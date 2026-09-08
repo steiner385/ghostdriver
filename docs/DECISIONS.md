@@ -3572,6 +3572,107 @@ to the modal's xid when the dialog came up. Eight tests, all passing.
 Evidence: #40 slice 3; D#12; D#13; D#14; D#40a; D33; D59; issue #15 for the
 `surface_of` gap.
 
+### D#40e. Slice 4a: one rung, and a write that reaches a held application
+
+**Context.** Slice 4 is acting. D#10 measured the primitives and D#11
+measured what is missing, so this was meant to be assembly. It produced one
+finding that changes a guard from a courtesy into the only thing protecting
+a target.
+
+**Every ladder here is one rung long, or empty, and that is D#11's shape.**
+Tier 3 -- the rung that drives a chosen window without taking the operator's
+focus or pointer -- does not exist on GTK4/X11: `XSendEvent` was ignored in
+every configuration tried, each behind a passing control. The only rung below
+tier 1 is tier 4, real synthetic input, which takes the actual keyboard and
+pointer and is therefore acceptable only where the input being taken is not
+the operator's -- inside the nested X server. `HiddenDesktop` is not built on
+Linux (slice 5b), so **tier 4 has nowhere safe to run and is not offered.**
+
+| verb | rungs | why |
+|---|---|---|
+| `click` | 1 | `Action.DoAction` |
+| `click`, right button or modifier | **0** | an AT-SPI action takes an index and nothing else |
+| `set_text` | 1 | `EditableText.set_text_contents` |
+| `send_keys`, `type_text_element` | **0** | no accessibility pattern for "press these keys" |
+
+**The zeros are a decision, not an omission.** Offering tier 1 for a right
+click would perform a *left* click and report it as a successful right one --
+a wrong action reported as a correct one, which is the failure this ladder
+exists to prevent. An empty ladder becomes `TIER_EXHAUSTED`, a result naming
+what the verb offered and what the actuator allowed (D10), which is a target
+the strategy cannot fit reported as such (D53). It also reads differently
+from a rung that declines: a decline invites a retry, "nothing implements
+this" stops one.
+
+**A tier 1 write reaches a modally-held application. This is the finding.**
+
+The Windows `unblocked` precondition exists because posted messages bypass
+the modal loop -- real input to a held application is swallowed by the
+system, but a posted message goes straight to the window procedure. There
+are no posted messages here; tier 1 is a D-Bus call into the application's
+own process, and whether the toolkit refuses it while held was open.
+
+Measured with a modal up: `blocking_ancestor` names the modal,
+`unblocked` correctly reports False -- and the raw call **returns true and
+the binding emits its `changed` signal with the written value.**
+
+So this platform has the *same* hazard as Windows arriving by a completely
+different route, and `unblocked` is **load-bearing rather than a courtesy**:
+it is the only thing between a driver and a held application. It can only do
+that job because `blocking_ancestor` inverts to look for something modal
+transient-for the frame instead of a disabled ancestor -- there is never a
+disabled one (D#12). The two findings are one mechanism.
+
+**Tier 1 is the preferred write path here, inverting the Windows
+conclusion.** D#10 said so and this confirms it through the contract: the
+binding hears the write, so there is no D21 split. `allow_pattern` is
+therefore accepted and **deliberately ignored** -- on Windows it exists
+because the API write is the hazardous path, and honouring it here would
+leave no way to set text at all, since the typing path it protects does not
+exist. Likewise a non-robot cadence cannot be honoured: an API write produces
+no input events, so there is nothing to pace, and dropping the rung would
+leave nothing. Both are recorded rather than silently ignored.
+
+**The intermediate empty value is real.** `set_text_contents` clears and
+re-inserts, so `changed` fires twice and the first carries an empty value
+nobody wrote -- measured through the contract as `["", "slice4-wrote-this"]`.
+Harmless against a mirror; not harmless against a field that rejects empty or
+runs a lookup per change. It is what the toolkit does and not something the
+backend can hide.
+
+**A write cannot be verified by reading it back, and that blocks more than
+reading.** `read_window_text` answers None for the entry before *and* after a
+successful write, because D#34b withholds by class -- nothing here
+distinguishes a plain entry from a password field. So the effect of an action
+is unconfirmable through the contract, and this suite has to read the
+fixture's own `changed` events, which a real caller does not have.
+**Issue #43 is therefore a blocker for the acting slice, not a tidy-up.**
+
+**Handles are enumeration-scoped, and a driver has to respect it.**
+`enumerate_process` calls `tree._reset()`, so every previously minted handle
+dies. A first draft of the probe re-enumerated to look a value up and then
+reused an older handle; it raised, correctly, with a message saying so. Worth
+recording because the verbs take handles and the tool layer's usage pattern
+therefore matters -- the actuator itself is safe, since `snapshot` is pure X
+and re-enumerates nothing.
+
+**Two corrections to how this was measured, both of which produced wrong
+answers first.** The fixture's `Recalculate` control is the owner-drawn
+`DrawingArea` carrying `AccessibleRole.BUTTON`, so it enumerates as `push
+button` -- probing it while calling it the real button reproduced D#10's
+negative by accident and would have recorded that a real button offers no
+actions. And `WindowNode.text` is the accessible *name*, not the contents;
+for an entry it stays "bound entry" whatever is written, so reading it back
+made a successful write look inert. Neither is a bug in the backend; both are
+ways an honest-looking measurement says the opposite of the truth.
+
+**Not done in this slice.** `NAMED_KEYS`, `EDIT_ACTIONS`, `button_pair`,
+`copy_route`, `focus_route`, the clipboard and `ink_fraction` are all tier 4
+or capture work, and `deepest_child_at` additionally needs the screen
+position D#40d found AT-SPI does not report. They wait on slice 5b.
+
+Evidence: #40 slice 4; D#10; D#11; D#12; D#34b; D#40d; D10; D53; issue #43.
+
 ### D#4. The capture/restore flakes traced to a leaked watch on a reused pid
 
 **Context.** Two tests failed intermittently and undiagnosed (#4):
