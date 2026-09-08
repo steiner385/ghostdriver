@@ -107,6 +107,13 @@ PYTHONPATH=src python3 -m pytest
 (`test_ruff_finds_nothing`, `test_mypy_finds_nothing`); a failing lint or type
 check is a failing test.
 
+**mypy runs once per backend, not once.** One run assumes one platform, and a
+run with none set assumes the *host* — which made the same tree give 39 errors
+on Linux and none on Windows. Each pass names its `--platform` and excludes
+the other backends; the shared tree is checked under every platform, each
+backend under its own (D#23). Adding a backend means adding it to
+`BACKEND_PLATFORMS`, and a test fails if you don't.
+
 A session-long focus guard (`tests/test_zz_focus_guard.py`, last in the run on
 purpose) fails any run in which a test-spawned window takes the foreground. If it trips, something took the desktop from the operator —
 that is the bug the project exists to prevent, so do not silence it.
