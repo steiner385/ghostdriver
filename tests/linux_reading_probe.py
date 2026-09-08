@@ -33,6 +33,12 @@ def main():
             "role": node.class_name,
             "read": backend.read_window_text(node.handle),
             "protected": backend.is_protected(node.handle),
+            # The third state, by name rather than borrowing None (D#43).
+            "disclosure": backend.disclosure(node.handle),
+            # And the opt-in. Asked for every control on purpose: the
+            # interesting assertion is that it changes the answer for a
+            # *withheld* field and changes nothing for a protected one.
+            "read_disclosed": backend.read_window_text(node.handle, disclose=True),
         }
 
     try:

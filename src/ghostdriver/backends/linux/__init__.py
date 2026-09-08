@@ -38,7 +38,8 @@ _WIRED: dict[str, Any] = {
     # slice 2, reading -- under the deadline (D#9) and the disclosure
     # policy (D#34b)
     **dict.fromkeys(
-        ("read_window_text", "is_protected", "capture_window", "CaptureError"),
+        ("read_window_text", "is_protected", "disclosure",
+         "capture_window", "CaptureError"),
         reading,
     ),
     # slice 5a, the minimized watch -- sampling for the neutral policy in

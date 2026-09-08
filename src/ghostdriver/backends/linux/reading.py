@@ -68,13 +68,45 @@ def is_protected(handle: int) -> bool:
     return role == "password text"
 
 
-def read_window_text(handle: int, timeout_ms: int = 200) -> str | None:
+def disclosure(handle: int) -> str:
+    """Why a read of this control may come back empty-handed: the third state.
+
+    `"allowed"`, `"protected"` or `"withheld"`. The last is the one this
+    platform has and Windows does not: an editable entry whose contents are
+    hidden is *identical* to a plain one across every surface AT-SPI
+    exposes, so the driver declines to look at either (D#34b).
+
+    Without this name, `None` from `read_window_text` meant three different
+    things at once and `is_protected` separated only the declared widget --
+    so a perfectly healthy text field read exactly like a hung one, which is
+    the confusion D37 exists to prevent, arriving from the other direction.
+
+    Answering this costs no read of the value: the verdict comes from the
+    role and states alone, so asking is safe on a field whose contents must
+    not be fetched (D#43).
+    """
+    role, states = _role_and_states(_accessible(handle))
+    return protection.classify(role, states).value
+
+
+def read_window_text(handle: int, timeout_ms: int = 200, *,
+                     disclose: bool = False) -> str | None:
     """The control's text, or `None` if it did not answer or is not disclosed.
 
     The value is not fetched for a field that will not be disclosed. Not
     disclosing a value that has already been read is not enough: it exists in
     this process from then on, and reaches a traceback or a log without
     anyone deciding it should (D#34b).
+
+    `disclose=True` is a caller saying it has thought about it and wants the
+    contents of a *withheld* field anyway. It does **not** override
+    `protected`: a control the toolkit declares a password field is never
+    disclosed, at any grain, because that one is not a guess (D#34b).
+
+    The asking is what belongs in the trace, never the answer (D62) -- the
+    tool layer records that disclosure was requested, so an operator reading
+    back a session can see a value was exposed without the value itself
+    being written down.
     """
     accessible = _accessible(handle)
     role, states = _role_and_states(accessible)
@@ -106,8 +138,11 @@ def read_window_text(handle: int, timeout_ms: int = 200) -> str | None:
     verdict, value = protection.read(
         role, states,
         read=lambda: call_with_deadline(fetch, timeout_s=timeout_ms / 1000),
+        disclose=disclose,
     )
-    if verdict is not protection.Disclosure.ALLOWED:
+    if verdict is protection.Disclosure.PROTECTED:
+        return None
+    if verdict is protection.Disclosure.WITHHELD and not disclose:
         return None
     return value
 

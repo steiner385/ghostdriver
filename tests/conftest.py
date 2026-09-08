@@ -23,6 +23,7 @@ def _leaked_watch_for(pid: int) -> str | None:
     name = f"minimized-watch-{pid}"
     return name if any(t.name == name for t in threading.enumerate()) else None
 
+
 on_windows = pytest.mark.skipif(
     sys.platform != "win32", reason="Windows backend test"
 )
