@@ -3456,6 +3456,122 @@ produces no report skips rather than failing -- but a silent skip is exactly
 the hazard `CLAUDE.md` warns about, so this is a real cost and it is growing.
 Worth consolidating onto one shared nested stack before it grows further.
 
+### D#40d. Slice 3: two identifier spaces, and modality lives in the other one
+
+**Context.** Slice 3 is modality and state -- `top_level_state`,
+`blocking_ancestor`, `snapshot`, `surface_of`, `restore_process`. D#12 had
+already found that the Windows mechanism does not port. What it had not
+found, because it read AT-SPI and X side by side rather than through the
+contract, is that the two answers are not in the same *currency*.
+
+**Windows has one identifier space; this has two.** An `hwnd` is what the
+accessibility layer talks about and what the window manager talks about, so
+`top_level_state` reports `handle` and `owner` in one currency without anyone
+deciding to. Here the tree mints handles for AT-SPI accessibles, and
+`_NET_WM_STATE_MODAL` and `WM_TRANSIENT_FOR` are properties on an *xid*.
+`find_modal_blocks` does `by_handle[window.owner]` -- so a backend that
+reported `owner` as an xid alongside a minted `handle` would look every owner
+up in the wrong space and find none of them, and report a completely held
+application as fine. The failure is silent and looks exactly like health,
+which is the same shape as the bug D#12 exists to prevent.
+
+**So `top_level_state` answers in xids, and that is the decision.** Modality
+is a window-manager fact; the window manager's identifier is the xid; a
+top-level *is* an X window. Every field comes from X -- caption from
+`_NET_WM_NAME`, visibility from `_NET_WM_STATE_HIDDEN` (D#13), owner from
+`WM_TRANSIENT_FOR`, modality from `_NET_WM_STATE_MODAL`. Going to AT-SPI for
+the caption, the way the Windows one calls `read_window_text`, would cost a
+bus round trip per window to obtain the same string and would reintroduce the
+correlation problem for nothing.
+
+**The policy grew a second signature rather than the backend faking the
+first.** The neutral `find_modal_blocks` found a block by asking whether the
+owner had gone disabled, and its docstring claimed that was universal. The
+alternative considered and rejected was to have the Linux backend report
+`enabled=False` on a held owner -- synthesising the Win32 signature. That
+keeps the neutral layer untouched and makes `enabled` mean "held" on one
+platform, which is a lie in a field other code reads. Instead `TopLevel`
+carries `modal`, and the policy accepts either signature. Neither is
+preferred: they are two dialects of one fact, no platform is required to
+speak both, and a platform speaking both de-duplicates by owner anyway.
+`modal` is documented as "False means *not declared*, never *not modal*",
+because on Windows it is always False.
+
+**`blocking_ancestor` inverts, and returns the modal.** The Windows one walks
+up looking for a window that reports disabled. Here nothing is ever disabled,
+so that walk returns "no" while the application is held. The question becomes
+"is anything modal transient for me", and what comes back is the dialog
+rather than the window being held -- which is also the more useful of the
+two, being the thing an operator has to go and deal with. Callers only test
+it for None, so the change of subject costs nothing.
+
+**The crossing between the spaces was measured, not modelled.** Four routes
+tried on the fixture with a modal up:
+
+| route | answer |
+|---|---|
+| `Accessible.get_attributes()` | `{'toolkit': 'GTK'}` -- **no window id** |
+| `get_extents(SCREEN)`, position | **0, 0** for both frames, one of which X had placed at (259, 275) |
+| `get_extents(SCREEN)`, size | 520x507 and 240x110 -- **exact**, both |
+| accessible name vs `_NET_WM_NAME` | **exact**, both |
+
+So GTK4/X11 does not answer screen *position* through the accessibility
+layer at all. Position cannot be used; size can. The key is name and size
+together, and ambiguity is refused rather than guessed at (D33).
+
+**That the position is unusable is the finding with the longest reach.** It
+is not a modality problem -- it is a problem for anything that hit-tests a
+screen coordinate against the accessible tree, which is `deepest_child_at`
+in slice 4. Recorded here because slice 4 will otherwise measure it again.
+
+**When the frame cannot be identified, the question is re-asked of the
+process.** Two frames of one process with the same title and the same size
+are genuinely indistinguishable from outside, and picking one would answer
+"what is holding this control" with a coin flip. The fallback -- is anything
+in this process modal at all -- can refuse an action on a second, unheld
+window of the same process. That is the safe direction: a wrong refusal costs
+a caller an attempt, a wrong permission actuates into a held application.
+
+**`RestoreResult` moved to the neutral model**, which is D#40a's move for
+`ProcessFacts`, for the same reason: it lived in a module that binds Win32 at
+import, so no other backend could name the type it was contracted to return.
+`backends/windows/restore.py` re-exports it, so nothing that imported it from
+there breaks.
+
+**Restoring takes the foreground here, necessarily.** D#14 measured that a
+bare map does nothing at all and only `_NET_ACTIVE_WINDOW` restores -- and it
+focuses in the same motion. So `took_foreground` is expected True on Linux
+whenever anything was restored, where on Windows it is normally False. The
+field now records the difference between the platforms rather than hiding it.
+The X call is named `activate` rather than `restore` on purpose: naming it
+for the un-hiding half would hide the focus change inside it.
+
+**`winapi` is wired, and deliberately partial.** Thirteen distinct names are
+reached through `current().winapi` from the tool layer, and almost all belong
+to slices 4 and 6. Wiring them now would mean building against measurements
+not taken. This answers the two `restore` needs and refuses the rest *by
+name*, with an explanation, rather than an `AttributeError` from three
+modules down (D10). The name is a Win32 one and wrong here; renaming it
+touches a contract name Windows shares, so it is left for its own change.
+
+**Two gaps shipped knowingly, both asserted as tests so they are visible.**
+`surface_of` answers "native" for everything, because `WEB_HOST_CLASSES`
+holds Win32 window classes and no AT-SPI role can match one -- what an
+embedded document reports is L8 (#15), unmeasured, and guessing at
+`document web` would be modelling. And `UnexplainedBlock` is *unreachable*
+here rather than merely empty, since it requires a disabled window and
+nothing is ever disabled: a caller treating "no unexplained blocks" as
+evidence of health would be reading a constant.
+
+**Verified against a live target on the nested display**, through
+`backends.current()` rather than through the probes -- a wiring mistake shows
+up there and cannot show up in the measurement suite, which never calls the
+contract. `blocking_ancestor` on a real `WindowNode.handle` moved from None
+to the modal's xid when the dialog came up. Eight tests, all passing.
+
+Evidence: #40 slice 3; D#12; D#13; D#14; D#40a; D33; D59; issue #15 for the
+`surface_of` gap.
+
 ### D#4. The capture/restore flakes traced to a leaked watch on a reused pid
 
 **Context.** Two tests failed intermittently and undiagnosed (#4):

@@ -18,7 +18,8 @@ them has been built.
 from typing import Any
 
 from .. import CONTRACT, UnsupportedPlatform
-from . import isolate, reading, tree
+from . import isolate, modality, reading, restore, tree
+from . import winapi as _winapi
 
 #: What is wired, and where it lives. Everything else still refuses. The map
 #: is explicit rather than "try the import and see", so a name that is not
@@ -43,7 +44,26 @@ _WIRED: dict[str, Any] = {
     # slice 5a, the minimized watch -- sampling for the neutral policy in
     # ghostdriver.isolation, which decides (D#13, D#14)
     **dict.fromkeys(("MinimizedWatch", "WatchError"), isolate),
+    # slice 3, modality and state. Read from the window manager rather than
+    # AT-SPI: nothing goes disabled here, so the accessibility tree carries
+    # no modality at all (D#12).
+    **dict.fromkeys(
+        ("top_level_state", "blocking_ancestor", "snapshot", "surface_of"),
+        modality,
+    ),
+    # ... and un-hiding, which on this window manager also focuses (D#14)
+    **dict.fromkeys(("restore_process",), restore),
+    # slice 3's last name. `winapi` *is* a module -- the contract hands the
+    # raw platform API over whole -- which `backends/windows` marks the same
+    # way. Deliberately partial: `winapi.__getattr__` refuses an unbuilt
+    # name with an explanation rather than an AttributeError.
+    "winapi": _winapi,
 }
+
+#: Names whose value is the module itself rather than something inside it.
+#: `backends/windows` spells this `None` in its own map; here the module is
+#: already the value, so this only says not to look inside it.
+_IS_MODULE = frozenset({"winapi"})
 
 
 class _LinuxBackend:
@@ -54,16 +74,17 @@ class _LinuxBackend:
             raise AttributeError(f"the backend contract has no {name!r}")
         wired = _WIRED.get(name)
         if wired is not None:
-            return getattr(wired, name)
+            return wired if name in _IS_MODULE else getattr(wired, name)
         raise UnsupportedPlatform(
-            f"{name} is not implemented on Linux yet. The window tree and "
-            "reading and the minimized watch are wired (#40 slices 1, 2, 5a); "
-            "this is not part of them. The backend is specified "
-            "in docs/LINUX.md, and is being built by measurement: the nested "
-            "display, its AT-SPI bus, reading, the read deadline, the "
-            "disclosure policy and the foreground guarantee are done and "
-            "recorded. What is missing is the contract functions themselves. "
-            "docs/LINUX.md tracks what has been measured and what has not."
+            f"{name} is not implemented on Linux yet. The window tree, "
+            "reading, the minimized watch, and modality and state are wired "
+            "(#40 slices 1, 2, 3, 5a); this is not part of them. The backend "
+            "is specified in docs/LINUX.md, and is being built by "
+            "measurement: the nested display, its AT-SPI bus, reading, the "
+            "read deadline, the disclosure policy, the foreground guarantee, "
+            "modality and restore are done and recorded. What is left is "
+            "acting (slice 4) and assessment (slice 6). docs/LINUX.md tracks "
+            "what has been measured and what has not."
         )
 
 
