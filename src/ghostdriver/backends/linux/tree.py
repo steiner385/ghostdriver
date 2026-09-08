@@ -46,7 +46,14 @@ from typing import Any
 
 from ...model.process import ProcessFacts
 from ...model.window import WindowNode
+from .. import AccessibilityUnavailable
 from .deadline import call_with_deadline
+
+#: How long to wait for the accessibility bus to say it exists. Short on
+#: purpose: this runs before every enumeration, and a bus that is there
+#: answers immediately. A bus that is not there is what the wait is for, and
+#: waiting longer does not make it appear.
+BUS_TIMEOUT_MS = 2000
 
 #: Minted handles, and what they point at. Rebuilt by every enumeration, so a
 #: handle from a previous one resolves to nothing rather than to whatever has
@@ -76,12 +83,60 @@ def _accessible(handle: int) -> Any:
     return node
 
 
+def _require_accessibility_bus() -> None:
+    """Fail with an exception before AT-SPI can fail with an abort.
+
+    `Atspi.init()` reports a bus it cannot reach through GLib's `g_error()`,
+    and `g_error()` is **fatal by contract** -- it aborts the process with
+    SIGTRAP. There is no Python exception to catch and no result to return:
+    the server simply dies, taking every open session with it (#58).
+
+    So the bus is checked first, through `Gio`, which raises a catchable
+    `GLib.Error` for exactly the same conditions. `org.a11y.Bus.GetAddress`
+    is the question AT-SPI itself asks, so a success here means the call
+    that follows has a bus to talk to.
+
+    The deadline matters as much as the check. A D-Bus activation can block
+    while it waits for a service that is never going to start, and a driver
+    that hangs is barely better than one that aborts (D#9), so this is
+    bounded and reports the timeout as the unavailability it is.
+    """
+    import gi
+
+    gi.require_version("Gio", "2.0")
+    from gi.repository import Gio, GLib
+
+    remedy = (
+        "start one with `at-spi-bus-launcher --launch-immediately`, and make "
+        "sure the process has a DISPLAY and a D-Bus session bus. On a "
+        "headless box both have to be arranged deliberately."
+    )
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    except GLib.Error as exc:
+        raise AccessibilityUnavailable(
+            f"no D-Bus session bus, so there is no accessibility bus to "
+            f"reach: {exc.message}. {remedy}"
+        ) from exc
+    try:
+        bus.call_sync(
+            "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus", "GetAddress",
+            None, GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE,
+            BUS_TIMEOUT_MS, None,
+        )
+    except GLib.Error as exc:
+        raise AccessibilityUnavailable(
+            f"the accessibility bus did not answer: {exc.message}. {remedy}"
+        ) from exc
+
+
 def _applications() -> list[Any]:
     import gi
 
     gi.require_version("Atspi", "2.0")
     from gi.repository import Atspi
 
+    _require_accessibility_bus()
     Atspi.init()
     desktop = Atspi.get_desktop(0)
     out = []

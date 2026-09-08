@@ -15,17 +15,14 @@ import asyncio
 import pytest
 
 from ghostdriver.session import SessionManager
-from tests.conftest import on_windows
+from tests.conftest import mcp_or_skip, on_windows
 
 pytestmark = pytest.mark.slow
 
-# minversion, not just the name: 1.x is importable but renamed FastMCP to
-# MCPServer at the 2.0 boundary, so a 1.x install answers the import and then
-# fails every test with ModuleNotFoundError on an inner path. Skip instead.
-mcp = pytest.importorskip(
-    "mcp", minversion="2.1",
-    reason="the protocol layer is an optional extra: pip install -e .[server]"
-)
+# Gated on the distribution version, not the module's `__version__`: mcp
+# 2.1.1 does not set one, and `importorskip(minversion=...)` read that as
+# "no version" and skipped this entire suite on a correct install (#53).
+mcp = mcp_or_skip()
 
 READ_TOOLS = {
     "list_targets", "attach", "release", "grant_targets",
@@ -160,9 +157,34 @@ def test_optional_arguments_are_genuinely_optional(server):
 # --- dispatch ------------------------------------------------------------
 
 def test_a_tool_reached_through_dispatch_returns_its_result(server):
+    """The wiring: dispatch hands back the tool's own structured result.
+
+    Asserted as *a result*, not as a successful one. The subject here is the
+    adapter, and a machine with no accessibility service is entitled to
+    answer "not actionable" -- coupling a wiring test to the environment
+    having a desktop is the mistake #39 is about, and it would fail on any
+    headless box while the adapter worked perfectly.
+
+    That this arrives as a result at all is the sharper half. Before #58 the
+    same call **aborted the interpreter**: AT-SPI reports an unreachable bus
+    through GLib's `g_error()`, which is fatal by contract, so there was no
+    exception to catch and nothing came back. A failing assertion here is
+    now a real outcome rather than a core dump.
+    """
     payload = call(server, "list_targets")
-    assert payload.get("ok") is True
-    assert "targets" in payload
+
+    assert isinstance(payload, dict) and "ok" in payload, payload
+    if payload["ok"]:
+        assert "targets" in payload
+    else:
+        # The one refusal a correctly-wired server may give here: a desktop
+        # service it needs is absent. Either of the two counts -- which one
+        # is noticed first is an implementation detail, and one machine can
+        # be missing the accessibility bus while another is missing the X
+        # display (#58).
+        assert payload["error"]["kind"] == "not_actionable", payload
+        message = payload["error"]["message"].lower()
+        assert "accessibility" in message or "display" in message, payload
 
 
 def test_an_error_comes_back_as_a_result_not_an_exception(server):

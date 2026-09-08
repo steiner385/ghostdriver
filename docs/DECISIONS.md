@@ -3866,6 +3866,123 @@ instrumented. Per #4's own rule, the issue stays open until a real
 occurrence is caught (now diagnosed on sight) or ruled impossible; what
 changed is that the next occurrence, if any, names its cause. *(issue #4)*
 
+### D#53. Gate on the distribution's version, not the module's attribute
+
+**Context.** The whole protocol-layer suite was skipping with a reason that
+looked entirely reasonable:
+
+```
+SKIPPED tests/test_mcp_server.py:25: module 'mcp' has __version__ None,
+                                    required is: '2.1'
+```
+
+mcp 2.1.1 was installed and correct. `pytest.importorskip(minversion=...)`
+reads the **module's** `__version__` attribute, which mcp does not set, so a
+good install was read as version `None`, judged below the minimum, and
+skipped.
+
+**A silent skip that explains itself is worse than one that does not.** This
+project is built around "a green run has verified less than it looks", and
+this was that trap in its most convincing form: nothing looked wrong, the
+reason string named a real convention, and 19 tests plus the entire stdio
+transport quietly stopped existing.
+
+**The fix is to ask a source that always exists.** The version a package
+manager installed lives in distribution metadata; `__version__` is a
+convention a distribution may or may not follow. `conftest.mcp_or_skip()`
+reads `importlib.metadata.version("mcp")` instead. A missing distribution
+still skips, and a genuinely too-old one skips saying what it found -- both
+are real answers. What no longer happens is a good install being mistaken
+for either.
+
+**One helper, not two copies.** `test_mcp_server.py` and `test_mcp_stdio.py`
+each carried the same broken gate, which is the same shape as the six
+modules that each held their own `ctypes.WinDLL` binding before
+`conftest.user32()` consolidated them.
+
+Evidence: issue #53; CLAUDE.md ("a green run has verified less than half the
+suite"); D#39.
+
+### D#58. A missing accessibility bus killed the process, and nothing caught it
+
+**Context.** Fixing D#53's gate made the protocol suite run for the first
+time on this machine. It **core-dumped**.
+
+```
+dbind-ERROR **: AT-SPI: Couldn't connect to accessibility bus.
+Trace/breakpoint trap (core dumped)          # SIGTRAP, exit 133
+```
+
+**`Atspi.init()` reports an unreachable bus through GLib's `g_error()`, and
+`g_error()` is fatal by contract.** It aborts the process. There is no Python
+exception to catch, no result to return, and no traceback -- one
+`list_targets` on a headless box took the server down and every open session
+with it.
+
+This is D10 -- errors are results, not exceptions -- broken in the most
+extreme way the runtime permits. And the trigger is ordinary: a container, a
+systemd service, an SSH session with no `DISPLAY`, a desktop where nobody
+enabled accessibility.
+
+**The fix is to ask before reaching.** `Gio` answers the same question --
+`org.a11y.Bus.GetAddress` -- and raises a **catchable** `GLib.Error` where
+AT-SPI aborts. `_require_accessibility_bus()` runs before `Atspi.init()`,
+which is a single choke point for the whole backend. The check is bounded
+(D#9): a D-Bus activation can block waiting for a service that will never
+start, and a driver that hangs is barely better than one that aborts.
+
+Autolaunch is refused explicitly in the test environment. Without that, GLib
+may try to *start* a session bus with `dbus-launch`, and on a box that has it
+the child would find a bus after all -- a test that proves nothing while
+appearing to pass.
+
+**There are two external services, and each machine hid the other's gap.**
+The first fix guarded the accessibility bus and passed everywhere it was
+tried. Run on a second box -- one that *has* a bus and no `DISPLAY` -- and it
+failed again, this time with a raw `Xlib.error.DisplayNameError` reaching the
+caller as an unexpected error. This backend depends on the accessibility bus
+*and* the X display, a machine can be missing either independently, and
+testing on one host would have shipped a half-fix that looked complete.
+
+Both preflights raise the same exception, because to a caller it is the same
+fact: the desktop this backend reads is not there. And the tests assert that
+the refusal names *a* missing service and *a* remedy, rather than which one
+-- pinning the order would make them pass on one box and fail on the next for
+no real reason.
+
+**`AccessibilityUnavailable` is deliberately not a CONTRACT name.** It says
+the platform is supported and a service it depends on is absent, which is
+different from `UnsupportedPlatform` ("this backend does not implement
+that"). Nothing on Windows can raise it, and a name every backend must
+implement is the wrong shape for a condition only one of them has.
+
+**Caught once, in the tool wrapper.** Every tool that reaches the tree can
+raise it, so the seam that already sees every result turns it into
+`NOT_ACTIONABLE` with the remedy in the message. Per-tool handling would
+have been twenty chances to forget one.
+
+**Two tests that had been asserting the environment, not their subject.**
+`test_a_tool_reached_through_dispatch_returns_its_result` and the stdio
+equivalent both asserted `ok is True` -- coupling a *wiring* test to the
+machine having a desktop, which is D#39's mistake in a new place. They now
+assert that a well-formed result crossed the seam, and accept a refusal as
+one. A refusal surviving the transport is arguably the better proof: it is a
+nested structure the server built, serialised and handed back.
+
+**And a second bug the same gate was hiding.** `StdioServerParameters`
+passes **no environment through by default**, so the spawned server could not
+import `ghostdriver` from a source checkout and died before speaking a word
+of protocol. The client saw only "Connection closed", which names the symptom
+and hides the cause.
+
+**The pattern across #53, #58 and #39 is one pattern.** A test that does not
+run, a gate that misreads, a guard that skips: none of them fail. The suite
+stays green and the coverage quietly leaves. Three separate bugs -- a fatal
+abort, a dead transport, and a neutral policy verified on one platform --
+were all held open by something that was *not failing*.
+
+Evidence: issue #58; issue #53; D10; D#9; D#39; `tests/test_linux_no_bus.py`.
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on

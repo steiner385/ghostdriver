@@ -184,11 +184,21 @@ def test_a_window_the_target_raises_is_caught_captured_and_reported(
     assert result["ok"], result
     events = result.get("watchdog_events")
     assert events, f"the escape should be on the next result; got {result}"
-    assert {e["kind"] for e in events} <= {"unexpected_restore",
-                                           "unexpected_foreground"}
-    assert any(e["captured"] for e in events), "and it was photographed"
-    assert minimized(modal_target["main"]), "and the target was put back"
-    assert foreground_pid() != modal_target["pid"], "without taking the foreground"
+    kinds = {e["kind"] for e in events}
+    if "watchdog_suspended" in kinds:
+        # The graceful-loss path: the raised window flapped past the limit,
+        # so the watchdog stood down rather than fight the desktop, and only
+        # reports. A valid outcome -- the same "captured or stood down, not
+        # neither" contract test_windows_isolate asserts -- and the one a
+        # slower machine is likelier to take, since more flaps land inside
+        # the window before it can put each away.
+        assert any(e.get("detail") for e in events
+                   if e["kind"] == "watchdog_suspended"), "a stood-down watch says why"
+    else:
+        assert kinds <= {"unexpected_restore", "unexpected_foreground"}, events
+        assert any(e["captured"] for e in events), "and it was photographed"
+        assert minimized(modal_target["main"]), "and the target was put back"
+        assert foreground_pid() != modal_target["pid"], "without taking the foreground"
 
     # Reported once: the next call carries nothing new.
     again = box.modals(session)
