@@ -136,7 +136,11 @@ def test_the_source_tree_holds_no_profile_workflow_or_report():
     offenders = []
     for path in REPO.rglob("*"):
         parts = {p.lower() for p in path.relative_to(REPO).parts}
-        if parts & {".git", ".venv", "venv", "__pycache__", ".pytest_cache"}:
+        # `.github` is repository metadata -- CI workflows, issue templates --
+        # not the product's target knowledge. Its `workflows` directory is
+        # GitHub Actions, categorically not the saved-automation kind this
+        # guard keeps out of the tree, so the whole subtree is out of scope.
+        if parts & {".git", ".github", ".venv", "venv", "__pycache__", ".pytest_cache"}:
             continue
         name = path.name.lower()
         if path.is_file() and "profile" in name and name.endswith(".json") \
@@ -251,7 +255,6 @@ def test_neutral_policy_tests_are_not_gated_to_one_platform():
         "are gated to one platform: " + ", ".join(
             f"{n} ({why})" for n, why in sorted(offenders.items()))
     )
-
 
 #: Modules that exist on one platform only. `ctypes.WinDLL` raises
 #: AttributeError off Windows; `gi` and `pyatspi` are simply absent off a

@@ -325,7 +325,10 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     @server.tool(annotations=READS, description=(
         "Summarized window tree, bounded to fit a context window. Repeated "
         "siblings collapse to counts, and what was dropped is reported "
-        "rather than silently omitted. Returns suggested locators."
+        "rather than silently omitted. Returns suggested locators. Each "
+        "node's `enabled` is its WS_DISABLED bit (IsWindowEnabled), not "
+        "proof of availability: an owner-drawn control paints its own greyed "
+        "state without clearing that bit and still reports enabled=true."
     ))
     def describe(
         session_id: SessionId,
@@ -353,7 +356,12 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "within=(class=ToolbarWindow32) for an unlabelled button. A context "
         "menu (class #32768, all_windows=true) lists its items from the "
         "menu itself: type=MenuItem name=\"Copy row values\", or index=N "
-        "for an owner-drawn item that publishes no caption."
+        "for an owner-drawn item that publishes no caption. "
+        "`enabled` is the WS_DISABLED bit (IsWindowEnabled), the control's "
+        "own flag -- not proof it will act. An owner-drawn control paints "
+        "its own greyed, do-nothing state without clearing that bit, so it "
+        "reports enabled=true while unavailable; confirm with capture or "
+        "expect={changed} rather than trusting enabled."
     ))
     def find(session_id: SessionId, locator: LocatorArg,
              all_windows: AllWindows = False) -> dict[str, Any]:

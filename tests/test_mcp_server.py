@@ -333,3 +333,17 @@ def test_capture_warns_against_using_pixels_as_proof(server):
     assert "do not use it to confirm" in description
     assert "expect" in description
 
+
+def test_find_and_describe_disclaim_enabled_as_availability(server):
+    """`enabled` is IsWindowEnabled -- the WS_DISABLED bit -- not proof a
+    control will act. An owner-drawn control greys itself without clearing
+    the bit and still reports enabled=true, and roughly a third of a
+    session's assertions read this field, so the description that shapes
+    that reading has to say what the flag actually measures (D#51)."""
+    tools = listed(server)
+
+    for name in ("find", "describe"):
+        description = " ".join(tools[name].description.split())
+        assert "IsWindowEnabled" in description, name
+        assert "owner-drawn" in description, name
+
