@@ -58,13 +58,15 @@ is invisible to everyone else until it is released.
 
 ### Why the rule is not "just run the tests and see"
 
-A wrong-platform run **looks like success**. Measured on Linux at the time of
-writing:
+A wrong-platform run **looks like success**. Measured on Linux, re-measured
+for #39:
 
-- `pytest` does **not collect at all** — four modules call `ctypes.WinDLL` at
-  import time and abort the run (issue #21).
-- With those four excluded: 892 collected, 472 passed, **402 skipped (45%)**,
-  4 failed, 14 errored.
+- 1021 collected, 589 passed, **430 skipped (42%)**. Collection itself now
+  works: `conftest.user32()` defers the `ctypes.WinDLL` binding to call time,
+  so a module that needs Win32 skips instead of aborting the run (issue #21).
+- **370 of 956 test functions are in 41 modules gated `on_windows` at module
+  level.** Most of that is correct — the subject really is Win32 — but not
+  all of it was, and #39 audited the difference. See `D#39`.
 
 `tests/conftest.py` defines the gate that produces those skips:
 
@@ -107,6 +109,13 @@ PYTHONPATH=src python3 -m pytest
 (`test_ruff_finds_nothing`, `test_mypy_finds_nothing`); a failing lint or type
 check is a failing test.
 
+**mypy runs once per backend, not once.** One run assumes one platform, and a
+run with none set assumes the *host* — which made the same tree give 39 errors
+on Linux and none on Windows. Each pass names its `--platform` and excludes
+the other backends; the shared tree is checked under every platform, each
+backend under its own (D#23). Adding a backend means adding it to
+`BACKEND_PLATFORMS`, and a test fails if you don't.
+
 A session-long focus guard (`tests/test_zz_focus_guard.py`, last in the run on
 purpose) fails any run in which a test-spawned window takes the foreground. If it trips, something took the desktop from the operator —
 that is the bug the project exists to prevent, so do not silence it.
@@ -133,4 +142,9 @@ that is the bug the project exists to prevent, so do not silence it.
   tell is a gate naming the same condition as the assertion, with opposite
   polarity. Put the test where the failure is *possible* — or make it
   platform-neutral by construction, by making the subject fail on purpose.
-  Audit and remaining debt: issue #39.
+  The same failure at scale is a whole module gated because the *fixture* it
+  reached for was platform-specific, not the promise it checks: prefer the
+  seam that needs no backend (`SessionManager.attach`, not the `attach`
+  tool). `test_structure.py::test_neutral_policy_tests_are_not_gated_to_one_platform`
+  guards a named list of neutral-policy modules. Audit and what is left:
+  `D#39`, issue #39.

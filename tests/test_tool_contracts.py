@@ -18,6 +18,7 @@ Three promises, each over every tool:
 """
 
 import inspect
+import os
 
 import pytest
 
@@ -25,7 +26,6 @@ from ghostdriver.model.result import ErrorKind
 from ghostdriver.policy import TIER_TOOLS, ConsentSource, Tier, tools_for
 from ghostdriver.session import SessionManager
 from ghostdriver.tools import Toolbox
-from tests.conftest import on_windows
 
 #: A value for every required parameter any session tool has. Extending
 #: this table is the whole cost of adding a required parameter to a tool.
@@ -68,11 +68,30 @@ def box():
     return Toolbox(SessionManager())
 
 
-def _attached(box, pid, tier):
+def _attached(box, tier: Tier) -> str:
+    """A session at `tier`, opened without going near a backend.
+
+    **Through `SessionManager.attach`, not the `attach` tool**, and the
+    difference is the whole point of these tests running anywhere.
+
+    The tool enumerates the target's windows to describe what was attached
+    to, which needs a live accessibility surface -- on Linux, an AT-SPI bus
+    the test process does not have, where it blocks rather than failing.
+    That is why these tests carried `@on_windows`: not because the policy
+    they check is Windows-specific, but because the *setup* was.
+
+    The manager's `attach` touches no backend at all. It checks consent and
+    hands back a `Session`, which is exactly and only what a gate test
+    needs -- every assertion below is refused inside `authorize`, before a
+    locator is looked at or a control touched.
+
+    The pid is this process's own. Nothing ever acts on it, and using a real
+    one keeps the consent path honest rather than mocking it (#39).
+    """
+    pid = os.getpid()
     box.sessions.record_grant(pid, allowed=True, source=ConsentSource.ELICITED)
-    result = box.attach(pid, tier=tier)
-    assert result["ok"], result
-    return result["session_id"]
+    session = box.sessions.attach(pid, command_line=["pytest"], tier=tier)
+    return session.session_id
 
 
 # --- the session gate ----------------------------------------------------
@@ -101,10 +120,9 @@ def test_release_is_the_one_exception_and_is_idempotent(box):
     assert result["ok"] is True
 
 
-@on_windows
 @pytest.mark.parametrize("name", sorted(n for n in SESSION_TOOLS if n != "release"))
-def test_every_session_tool_refuses_a_released_session(box, win32_target, name):
-    session = _attached(box, win32_target, "full")
+def test_every_session_tool_refuses_a_released_session(box, name):
+    session = _attached(box, Tier.FULL)
     box.release(session)
 
     fn = SESSION_TOOLS[name]
@@ -116,13 +134,12 @@ def test_every_session_tool_refuses_a_released_session(box, win32_target, name):
 
 # --- the tier gate -------------------------------------------------------
 
-@on_windows
 @pytest.mark.parametrize("name", ABOVE_READ_ONLY)
 def test_every_tool_above_read_only_is_refused_by_a_read_only_session(
-        box, win32_target, name):
+        box, name):
     """The tier is the promise the session was opened under. Checked before
     the locator is even looked at, so a placeholder locator is enough."""
-    session = _attached(box, win32_target, "read_only")
+    session = _attached(box, Tier.READ_ONLY)
 
     fn = SESSION_TOOLS[name]
     result = fn(box, session, **_minimal_args(fn))
@@ -131,11 +148,10 @@ def test_every_tool_above_read_only_is_refused_by_a_read_only_session(
     assert result["error"]["kind"] == ErrorKind.DENIED_BY_POLICY.value
 
 
-@on_windows
 @pytest.mark.parametrize("name", FULL_ONLY)
 def test_every_full_tier_tool_is_refused_by_an_interactive_session(
-        box, win32_target, name):
-    session = _attached(box, win32_target, "interactive")
+        box, name):
+    session = _attached(box, Tier.INTERACTIVE)
 
     fn = SESSION_TOOLS[name]
     result = fn(box, session, **_minimal_args(fn))
