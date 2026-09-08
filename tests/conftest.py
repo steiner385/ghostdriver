@@ -2,10 +2,27 @@ import ctypes
 import functools
 import subprocess
 import sys
+import threading
 import time
 
 import psutil
 import pytest
+
+
+def _live_watchers() -> list[str]:
+    """Names of any live watch threads. A MinimizedWatch or InterferenceWatch
+    names its thread `minimized-watch-<pid>` / `interference-watch-<pid>`; a
+    thread that outlives its test is the mechanism issue #4 tracks."""
+    return sorted(t.name for t in threading.enumerate()
+                  if t.name.startswith(("minimized-watch-", "interference-watch-")))
+
+
+def _leaked_watch_for(pid: int) -> str | None:
+    """A live minimized-watch thread targeting `pid`, if one exists: a watch
+    from a prior test still running against a pid the OS has reused (issue #4)."""
+    name = f"minimized-watch-{pid}"
+    return name if any(t.name == name for t in threading.enumerate()) else None
+
 
 on_windows = pytest.mark.skipif(
     sys.platform != "win32", reason="Windows backend test"
@@ -681,13 +698,30 @@ def win32_target():
         # setup, says "minimized before the test began" -- and names every
         # top-level window of the process with its state, which is the
         # evidence the next diagnosis starts from.
+        #
+        # The leading hypothesis (issue #4) is a leaked MinimizedWatch: a
+        # prior test's watch, still running against a pid the OS has since
+        # reused for this fresh target, minimizes it out from under the test.
+        # D73 made a watch stop once its own window is gone, which should
+        # close that door -- so a `minimized-watch-<pid>` thread alive for
+        # *this* pid is the smoking gun, named here rather than left to
+        # inference.
         from ghostdriver.backends.windows import winapi
+        leaked = _leaked_watch_for(pid)
+        if leaked is not None:
+            raise RuntimeError(
+                f"a watch thread is alive against this fresh target's pid {pid}: "
+                f"{leaked!r}. A prior test leaked it and the OS reused the pid; "
+                "this is the mechanism issue #4 tracks. It should not survive "
+                "D73 (a watch stops when its window is gone) -- if it did, that "
+                "regressed.")
         states = [(f"0x{h:08X}", winapi.class_name(h), winapi.is_minimized(h))
                   for h in top_level_windows(pid)]
         if any(iconic for _, _, iconic in states):
             raise RuntimeError(
                 "a window of the fresh target is already minimized, before "
-                f"the test began: {states}")
+                f"the test began: {states}. Live watch threads: {_live_watchers()} "
+                "(a leaked MinimizedWatch on a reused pid is the #4 hypothesis).")
         yield pid
     finally:
         # Terminating Popen's process is not enough when it is only a stub:
