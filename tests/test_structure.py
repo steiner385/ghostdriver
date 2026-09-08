@@ -256,7 +256,6 @@ def test_neutral_policy_tests_are_not_gated_to_one_platform():
             f"{n} ({why})" for n, why in sorted(offenders.items()))
     )
 
-
 #: Modules that exist on one platform only. `ctypes.WinDLL` raises
 #: AttributeError off Windows; `gi` and `pyatspi` are simply absent off a
 #: Linux desktop. Both directions are named so the guard is symmetric -- the

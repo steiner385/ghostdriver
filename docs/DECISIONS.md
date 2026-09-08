@@ -3822,7 +3822,6 @@ and is why #48 proposed a shared stack. Not smuggled in here.
 
 Evidence: issue #39; CLAUDE.md ("never gate a guard on the condition it
 exists to detect"); D59; D#9.
-
 ### D#4. The capture/restore flakes traced to a leaked watch on a reused pid
 
 **Context.** Two tests failed intermittently and undiagnosed (#4):
