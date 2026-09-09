@@ -4629,3 +4629,41 @@ capture pair that measures it. Chosen by the project owner over keeping the
 `wait_idle`/`wait_for` in the note, and the refusals of a non-positive or
 non-numeric dwell. `read_only` tier: a fixed wait changes nothing. `env:
 any`.
+
+### D#79. The session argument is `session_ref`, because `session_id` collides with the protocol
+
+**Context.** A session driving ghostdriver reported that every tool taking a
+`session_id` failed at once with `session_id Field required [type=missing]`,
+even when it was passed -- while `list_targets`, `attach` and `grant_targets`
+(no `session_id`) worked. In a failing `find`, `locator` and `all_windows`
+arrived and only `session_id` was gone: stripped in transit, not forgotten.
+
+**Diagnosis, from the code and the server's own dispatch.** The server was
+correct on every count. The tool schema published `session_id` in both
+`properties` and `required`; `call_tool("modals", {"session_id": "x"})`
+reached the handler while `call_tool("modals", {})` reproduced the exact
+error; and the SDK does not strip tool arguments by name -- proven by the
+first of those two calls. What the SDK *does* have is a connection-level
+property named exactly `session_id` on its request Context
+(`ctx.connection.session_id`, `None` on stdio). So a client that manages the
+protocol's own `session_id` conflates it with a tool argument of the same
+name and drops it before sending. The bug was never in this repo; the tool
+argument's *name* collided with an MCP protocol field.
+
+**Decision.** Rename the exposed session parameter across every session tool
+from `session_id` to `session_ref` -- a name that cannot collide. MCP clients
+are schema-driven, so a compliant client reads the new name and sends it; no
+client that honors the schema breaks. The change is confined to the tool
+wrappers in `mcp_server.py`: the `Toolbox` methods keep `session_id`
+internally, and `attach`'s result still returns `session_id` (an output, and
+outputs are not stripped), so the value a caller reads from `attach` is
+passed straight back as `session_ref`. The `SessionId` field description
+states the mapping.
+
+**Evidence.** `test_no_tool_exposes_a_parameter_named_session_id` fails if any
+tool ever publishes a `session_id` argument again; the existing schema and
+round-trip tests were moved to `session_ref`; and the batch step guard now
+refuses either name in a step's args. `env: any`: the rename and its guard
+are platform-neutral, proven through the server's dispatch and over real
+stdio. Root cause is client-side, but the fix that removes the collision
+lives here, so it lives here.

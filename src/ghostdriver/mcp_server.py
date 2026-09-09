@@ -97,7 +97,12 @@ and only for a target the operator approved. Four things about it:
    anything that submits.\
 """
 
-SessionId = Annotated[str, Field(description="From `attach`.")]
+SessionId = Annotated[str, Field(description=(
+    "The session handle from `attach` (its `session_id`). Named "
+    "`session_ref` here, not `session_id`, because a tool argument named "
+    "`session_id` collides with MCP's own protocol-level `session_id` and "
+    "some clients strip it in transit (#79)."
+))]
 LocatorArg = Annotated[
     str,
     Field(description=(
@@ -319,8 +324,8 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "Close a session and forget it. Safe to call twice; a session that "
         "was never opened is not an error."
     ))
-    def release(session_id: SessionId) -> dict[str, Any]:
-        return box.release(session_id)
+    def release(session_ref: SessionId) -> dict[str, Any]:
+        return box.release(session_ref)
 
     @server.tool(annotations=READS, description=(
         "Summarized window tree, bounded to fit a context window. Repeated "
@@ -331,7 +336,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "state without clearing that bit and still reports enabled=true."
     ))
     def describe(
-        session_id: SessionId,
+        session_ref: SessionId,
         depth: Annotated[int, Field(description="Levels to descend.")] = 5,
         max_nodes: Annotated[int, Field(description=(
             "Total node budget for the whole call, shared across windows."
@@ -342,7 +347,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "of this target class is hidden, so expect far more output."
         ))] = False,
     ) -> dict[str, Any]:
-        return box.describe(session_id, depth=depth, max_nodes=max_nodes,
+        return box.describe(session_ref, depth=depth, max_nodes=max_nodes,
                             all_windows=all_windows,
                             include_hidden=include_hidden)
 
@@ -367,18 +372,18 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "so a rect with no `obscured` is a safe target and one with it is not "
         "(restore or foreground first)."
     ))
-    def find(session_id: SessionId, locator: LocatorArg,
+    def find(session_ref: SessionId, locator: LocatorArg,
              all_windows: AllWindows = False) -> dict[str, Any]:
-        return box.find(session_id, locator, all_windows=all_windows)
+        return box.find(session_ref, locator, all_windows=all_windows)
 
     @server.tool(annotations=READS, description=(
         "Text of matching controls. A null value means the control never "
         "answered — unknown, not empty. An empty string means it answered "
         "and has no text."
     ))
-    def read(session_id: SessionId, locator: LocatorArg,
+    def read(session_ref: SessionId, locator: LocatorArg,
              all_windows: AllWindows = False) -> dict[str, Any]:
-        return box.read(session_id, locator, all_windows=all_windows)
+        return box.read(session_ref, locator, all_windows=all_windows)
 
     @server.tool(annotations=READS, description=(
         "The text on the clipboard: the result of a target's own Copy "
@@ -387,8 +392,8 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "clipboard is the person's too: read it straight after the copy "
         "you triggered."
     ))
-    def read_clipboard(session_id: SessionId) -> dict[str, Any]:
-        return box.read_clipboard(session_id)
+    def read_clipboard(session_ref: SessionId) -> dict[str, Any]:
+        return box.read_clipboard(session_ref)
 
     @server.tool(annotations=READS, description=(
         "A picture of the target window, or of one element or region, "
@@ -406,7 +411,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "its text -- `read` or `modals` returns the whole buffer."
     ))
     def capture(
-        session_id: SessionId,
+        session_ref: SessionId,
         locator: Annotated[str | None, Field(description=(
             "Capture just this element. Must match exactly one."
         ))] = None,
@@ -423,7 +428,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "of a DPI-aware screenshot)."
         ))] = "logical",
     ) -> CallToolResult:
-        result = box.capture(session_id, locator=locator, region=region, save_as=save_as,
+        result = box.capture(session_ref, locator=locator, region=region, save_as=save_as,
                              frame=frame)
         if not result.get("ok"):
             return CallToolResult(
@@ -459,7 +464,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "uselessly."
     ))
     def wait_for(
-        session_id: SessionId,
+        session_ref: SessionId,
         locator: LocatorArg,
         condition: Annotated[str, Field(description="Default present.")] = "present",
         timeout_s: Annotated[float, Field(description=(
@@ -468,7 +473,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         ))] = 10.0,
         all_windows: AllWindows = False,
     ) -> dict[str, Any]:
-        return box.wait_for(session_id, locator, condition=condition,
+        return box.wait_for(session_ref, locator, condition=condition,
                             timeout_s=timeout_s, all_windows=all_windows)
 
     @server.tool(annotations=READS, description=(
@@ -476,8 +481,8 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "verdicts, class census. Read-only and slow-ish; the result is "
         "evidence for a human as much as for you."
     ))
-    def probe(session_id: SessionId) -> dict[str, Any]:
-        return box.probe(session_id)
+    def probe(session_ref: SessionId) -> dict[str, Any]:
+        return box.probe(session_ref)
 
     @server.tool(annotations=READS, description=(
         "Classify each region by which mechanism can drive it: native "
@@ -487,14 +492,14 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "approach."
     ))
     def surfaces(
-        session_id: SessionId,
+        session_ref: SessionId,
         all_windows: AllWindows = False,
         include_hidden: bool = False,
         changed_from: Annotated[str | None, Field(description=(
             "A shape digest from an earlier call."
         ))] = None,
     ) -> dict[str, Any]:
-        return box.surfaces(session_id, all_windows=all_windows,
+        return box.surfaces(session_ref, all_windows=all_windows,
                             include_hidden=include_hidden,
                             changed_from=changed_from)
 
@@ -503,8 +508,8 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "held window refuses all input by design — that is not a hang, and "
         "retrying will not help."
     ))
-    def modals(session_id: SessionId) -> dict[str, Any]:
-        return box.modals(session_id)
+    def modals(session_ref: SessionId) -> dict[str, Any]:
+        return box.modals(session_ref)
 
     @server.tool(annotations=READS, description=(
         "The child windows inside a native container -- a panel of "
@@ -514,9 +519,9 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "listed means the parts are painted, not windowed: capture and "
         "click at an offset, or hand it to a person."
     ))
-    def hit_targets(session_id: SessionId, locator: LocatorArg,
+    def hit_targets(session_ref: SessionId, locator: LocatorArg,
                     all_windows: AllWindows = False) -> dict[str, Any]:
-        return box.hit_targets(session_id, locator, all_windows=all_windows)
+        return box.hit_targets(session_ref, locator, all_windows=all_windows)
 
     @server.tool(annotations=READS, description=(
         "Wait until the target's busy indicator clears, as its profile names "
@@ -525,10 +530,10 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "taken now can be incomplete; call this first, then read. Refused, "
         "with instructions, when the profile names no busy_indicator."
     ))
-    def wait_idle(session_id: SessionId,
+    def wait_idle(session_ref: SessionId,
                   timeout_s: Annotated[float, Field(description="Seconds; default 30.")] = 30.0,
                   ) -> dict[str, Any]:
-        return box.wait_idle(session_id, timeout_s=timeout_s)
+        return box.wait_idle(session_ref, timeout_s=timeout_s)
 
     @server.tool(annotations=READS, description=(
         "Dwell for a fixed number of seconds, then return. A deliberate "
@@ -538,11 +543,11 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "instead of waiting on a locator built never to match. Clamped to "
         "120s; the result points at the better tool."
     ))
-    def pace(session_id: SessionId,
+    def pace(session_ref: SessionId,
              seconds: Annotated[float, Field(description=(
                  "How long to dwell, in seconds. Positive, clamped to 120."
              ))]) -> dict[str, Any]:
-        return box.pace(session_id, seconds)
+        return box.pace(session_ref, seconds)
 
     @server.tool(annotations=ACTUATES, description=(
         "Run a list of steps against this session in one call, so a "
@@ -551,7 +556,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "tool (click, set_value, type_text, send_keys, find, read, "
         "read_clipboard, capture, describe, modals, surfaces, hit_targets, "
         "wait_for, wait_idle, grid_seek) and `args` its arguments WITHOUT "
-        "session_id, which the batch supplies. Give each acting step its own "
+        "the session, which the batch supplies. Give each acting step its own "
         "`expect` -- a batch verifies exactly what a standalone call does, so "
         "a step without one claims only that it was delivered. Stops on the "
         "first step that does not verify (stop_on_failure, default true), "
@@ -562,10 +567,10 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "grant_*, launch_isolated) and the two that interrupt a person "
         "(foreground, await_human) are refused inside it and run on their own."
     ))
-    def batch(session_id: SessionId,
+    def batch(session_ref: SessionId,
               steps: Annotated[list[dict], Field(description=(
                   "The steps to run in order, each {tool, args}. args omits "
-                  "session_id. Example: [{\"tool\": \"click\", \"args\": "
+                  "the session. Example: [{\"tool\": \"click\", \"args\": "
                   "{\"locator\": \"type=TabItem name=Parts\", \"expect\": "
                   "{\"locator\": \"type=TabItem name=Parts\", \"selected\": "
                   "true}}}, {\"tool\": \"set_value\", \"args\": {...}}]"
@@ -574,7 +579,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
                   "Stop at the first step that does not verify (default). "
                   "false runs every step regardless, for independent reads."
               ))] = True) -> dict[str, Any]:
-        return box.batch(session_id, steps, stop_on_failure=stop_on_failure)
+        return box.batch(session_ref, steps, stop_on_failure=stop_on_failure)
 
     @server.tool(annotations=CHANGES_SCREEN, description=(
         "Bring a window of the target to the front -- the deliberate pair to "
@@ -585,11 +590,11 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "automatic; interactive tier. Says whether it took the foreground -- "
         "a background SetForegroundWindow can be refused."
     ))
-    def foreground(session_id: SessionId,
+    def foreground(session_ref: SessionId,
                    locator: Annotated[str | None, Field(description=(
                        "A specific window to raise; omit for the main window."
                    ))] = None) -> dict[str, Any]:
-        return box.foreground(session_id, locator=locator)
+        return box.foreground(session_ref, locator=locator)
 
     @server.tool(annotations=CHANGES_SCREEN, description=(
         "Un-minimize the target so it can be read. Changes no application "
@@ -600,8 +605,8 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "taskbar instead. Refused on a session that keeps its target "
         "minimized."
     ))
-    def restore(session_id: SessionId) -> dict[str, Any]:
-        return box.restore(session_id)
+    def restore(session_ref: SessionId) -> dict[str, Any]:
+        return box.restore(session_ref)
 
     ExpectArg = Annotated[dict | str | None, Field(description=(
         "How to tell that this worked: {locator, text}, a bare locator string "
@@ -642,7 +647,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "that changed around the click, such as a dialog it raised."
     ))
     def click(
-        session_id: SessionId,
+        session_ref: SessionId,
         locator: LocatorArg,
         all_windows: AllWindows = False,
         expect: ExpectArg = None,
@@ -679,7 +684,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "1 for a click, 2 for a double-click (how most grids open a row)."
         ))] = 1,
     ) -> dict[str, Any]:
-        return box.click(session_id, locator, all_windows=all_windows,
+        return box.click(session_ref, locator, all_windows=all_windows,
                          expect=expect, button=button, modifiers=modifiers,
                          at=at, count=count, frame=frame, require_active=require_active)
 
@@ -695,7 +700,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "committed value appears to check that too."
     ))
     def set_value(
-        session_id: SessionId,
+        session_ref: SessionId,
         locator: LocatorArg,
         text: Annotated[str, Field(description="The value to put in.")],
         all_windows: AllWindows = False,
@@ -706,7 +711,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         expect: ExpectArg = None,
         cadence: CadenceArg = None,
     ) -> dict[str, Any]:
-        return box.set_value(session_id, locator, text,
+        return box.set_value(session_ref, locator, text,
                              all_windows=all_windows, expect_text=expect_text,
                              expect=expect, cadence=cadence)
 
@@ -717,14 +722,14 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "filters as it goes."
     ))
     def type_text(
-        session_id: SessionId,
+        session_ref: SessionId,
         locator: LocatorArg,
         text: Annotated[str, Field(description="The characters to type.")],
         all_windows: AllWindows = False,
         cadence: CadenceArg = None,
         expect: ExpectArg = None,
     ) -> dict[str, Any]:
-        return box.type_text(session_id, locator, text,
+        return box.type_text(session_ref, locator, text,
                              all_windows=all_windows, cadence=cadence,
                              expect=expect)
 
@@ -739,7 +744,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "a dialog whose buttons ignore clicks."
     ))
     def send_keys(
-        session_id: SessionId,
+        session_ref: SessionId,
         locator: LocatorArg,
         keys: Annotated[list[str], Field(description=(
             "In order, e.g. ['tab', 'enter']."
@@ -748,7 +753,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         cadence: CadenceArg = None,
         expect: ExpectArg = None,
     ) -> dict[str, Any]:
-        return box.send_keys(session_id, locator, keys,
+        return box.send_keys(session_ref, locator, keys,
                              all_windows=all_windows, cadence=cadence,
                              expect=expect)
 
@@ -762,7 +767,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "one it is returned for the operator to place."
     ))
     def record_input_sensitivity(
-        session_id: SessionId,
+        session_ref: SessionId,
         locator: Annotated[str | None, Field(description=(
             "Narrow the evidence to one element. Omit to use the strongest "
             "differential this session can show."
@@ -772,7 +777,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "application did when the fast attempt failed, for instance."
         ))] = "",
     ) -> dict[str, Any]:
-        return box.record_input_sensitivity(session_id, locator=locator,
+        return box.record_input_sensitivity(session_ref, locator=locator,
                                             note=note)
 
     @server.tool(annotations=READS, description=(
@@ -789,7 +794,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "do not yet know what will. Never carries a value."
     ))
     async def await_human(
-        session_id: SessionId,
+        session_ref: SessionId,
         ask: Annotated[str, Field(description=(
             "What the person needs to do, in plain words. Relayed to them "
             "exactly as written, so write it to be read by them and not by "
@@ -825,7 +830,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
                 # instead, and `until` still decides whether it happened --
                 # which is why the condition is the part that matters.
                 confirmed = False
-        return box.await_human(session_id, ask, until=until,
+        return box.await_human(session_ref, ask, until=until,
                                until_change=until_change,
                                timeout_s=timeout_s, all_windows=all_windows,
                                confirmed=confirmed)
@@ -842,7 +847,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "nothing else in it."
     ))
     def probe_phase2(
-        session_id: SessionId,
+        session_ref: SessionId,
         only: Annotated[list[str] | None, Field(description=(
             "Run just these locators. Each must already appear in the "
             "profile's safe_controls."
@@ -853,7 +858,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "second."
         ))] = 1500,
     ) -> dict[str, Any]:
-        return box.probe_phase2(session_id, only=only, settle_ms=settle_ms)
+        return box.probe_phase2(session_ref, only=only, settle_ms=settle_ms)
 
     @server.tool(annotations=ACTUATES, description=(
         "Find how exact text comes out of an owner-drawn region such as a "
@@ -867,7 +872,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "grid_strategy; never records cell data."
     ))
     def grid_seek(
-        session_id: SessionId,
+        session_ref: SessionId,
         locator: LocatorArg,
         value: Annotated[str | None, Field(description=(
             "Stop at the first row containing this text; omit to read every "
@@ -879,7 +884,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         max_pages: Annotated[int, Field(description="Stop after this many pages.")] = 50,
         all_windows: AllWindows = False,
     ) -> dict[str, Any]:
-        return box.grid_seek(session_id, locator, value=value, advance=advance,
+        return box.grid_seek(session_ref, locator, value=value, advance=advance,
                              max_pages=max_pages, all_windows=all_windows)
 
     @server.tool(annotations=CHANGES_SCREEN, description=(
@@ -893,7 +898,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "active -- a view that never changes says so."
     ))
     def probe_grid(
-        session_id: SessionId,
+        session_ref: SessionId,
         locator: LocatorArg,
         allow_clipboard: Annotated[bool, Field(description=(
             "Whether the clipboard route may be tried after the free one "
@@ -901,7 +906,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         ))] = True,
         all_windows: AllWindows = False,
     ) -> dict[str, Any]:
-        return box.probe_grid(session_id, locator,
+        return box.probe_grid(session_ref, locator,
                               allow_clipboard=allow_clipboard,
                               all_windows=all_windows)
 

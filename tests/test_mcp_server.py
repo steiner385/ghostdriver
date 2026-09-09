@@ -150,7 +150,26 @@ def test_required_arguments_are_marked_required(server):
     assert "pid" in tools["attach"].input_schema["required"]
     for name in ("find", "read", "wait_for"):
         required = tools[name].input_schema["required"]
-        assert {"session_id", "locator"} <= set(required), name
+        assert {"session_ref", "locator"} <= set(required), name
+
+
+def test_no_tool_exposes_a_parameter_named_session_id(server):
+    """The session argument is `session_ref`, never `session_id` (#79).
+
+    A tool argument named `session_id` collides with MCP's own protocol-level
+    `session_id` (a field on the request Context), and a client that manages
+    the protocol field can strip the same-named tool argument in transit --
+    every session tool then fails with `session_id Field required` even
+    though the caller passed it. The fix is a name that cannot collide, and
+    this guard keeps it from regressing: if a session tool ever publishes a
+    `session_id` property again, this fails.
+    """
+    for name, tool in listed(server).items():
+        props = tool.input_schema.get("properties", {})
+        assert "session_id" not in props, (
+            f"{name} exposes a `session_id` argument; use `session_ref` -- "
+            "`session_id` collides with MCP's protocol field and is stripped "
+            "by some clients (#79)")
 
 
 def test_optional_arguments_are_genuinely_optional(server):
@@ -196,7 +215,7 @@ def test_a_tool_reached_through_dispatch_returns_its_result(server):
 def test_an_error_comes_back_as_a_result_not_an_exception(server):
     """An agent has to be able to read a refusal and change course. A
     protocol-level exception gives it nothing to act on."""
-    payload = call(server, "describe", session_id="no-such-session")
+    payload = call(server, "describe", session_ref="no-such-session")
 
     assert payload.get("ok") is False
     assert payload["error"]["kind"] == "not_found"
@@ -218,22 +237,22 @@ def test_a_full_session_works_end_to_end_through_the_protocol(
     assert attached["ok"], attached
     session = attached["session_id"]
 
-    described = call(server, "describe", session_id=session)
+    described = call(server, "describe", session_ref=session)
     assert described["ok"]
     assert "GhostdriverTestWindow" in described["windows"][0]["tree"]
 
-    found = call(server, "find", session_id=session,
+    found = call(server, "find", session_ref=session,
                  locator='class=Button text="Expand All"')
     assert found["match_count"] == 1
 
-    values = call(server, "read", session_id=session,
+    values = call(server, "read", session_ref=session,
                   locator="class=Edit")
     assert values["ok"] and values["unanswered"] == 0
 
-    released = call(server, "release", session_id=session)
+    released = call(server, "release", session_ref=session)
     assert released["ok"]
 
-    after = call(server, "describe", session_id=session)
+    after = call(server, "describe", session_ref=session)
     assert after["ok"] is False, "the session is gone"
 
 
@@ -279,7 +298,7 @@ def granted(pid):
 
 def captured(pid):
     server, session = granted(pid)
-    return asyncio.run(server.call_tool("capture", {"session_id": session}))
+    return asyncio.run(server.call_tool("capture", {"session_ref": session}))
 
 
 @on_windows
@@ -324,7 +343,7 @@ def test_the_dimensions_still_arrive_as_data(win32_target):
 def test_a_failed_capture_still_explains_itself(server):
     """No image to send, and the reason must not be lost in the change."""
     result = asyncio.run(server.call_tool(
-        "capture", {"session_id": "no-such-session"}))
+        "capture", {"session_ref": "no-such-session"}))
 
     assert [b.type for b in result.content] == ["text"]
     assert result.structured_content["ok"] is False

@@ -98,9 +98,9 @@ class BatchTools(_ToolboxCore):
             if not isinstance(args, dict):
                 return _error(ErrorKind.NOT_ACTIONABLE,
                               f"step {index}: args must be an object, not {type(args).__name__}")
-            if "session_id" in args:
+            if "session_id" in args or "session_ref" in args:
                 return _error(ErrorKind.NOT_ACTIONABLE,
-                              f"step {index}: omit session_id in a step; the batch "
+                              f"step {index}: omit the session in a step; the batch "
                               "runs every step against its own session")
             if tool not in BATCHABLE:
                 return _error(

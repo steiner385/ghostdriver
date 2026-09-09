@@ -136,7 +136,12 @@ def test_a_step_may_not_carry_its_own_session_id(box, app):
     result = box.batch(sid, [{"tool": "click",
                               "args": {"session_id": "somewhere-else", "locator": EXPAND}}])
 
-    assert not result["ok"] and "omit session_id" in result["error"]["message"]
+    assert not result["ok"] and "omit the session" in result["error"]["message"]
+
+    # and the wire name (session_ref) is refused in a step too (#79).
+    ref = box.batch(sid, [{"tool": "click",
+                           "args": {"session_ref": "elsewhere", "locator": EXPAND}}])
+    assert not ref["ok"] and "omit the session" in ref["error"]["message"]
 
 
 def test_a_malformed_step_is_refused_by_shape(box, app):
