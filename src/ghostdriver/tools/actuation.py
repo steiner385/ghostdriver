@@ -7,6 +7,7 @@ from .acting import _ActingCore
 from .core import (
     _error,
 )
+from .expect import verify_window
 
 ELEMENT_NO_VALUE = (
     "this element publishes no value to replace; to type at its caret use "
@@ -106,14 +107,11 @@ class ActuationTools(_ActingCore):
         # control) can take longer than a control appearing -- a palette
         # docks a few seconds after the click (D77) -- so it gets a longer
         # verify window, the caller's timeout_s or six seconds.
-        verify_timeout_s = None
-        if isinstance(expect, dict) and expect.get("changed"):
-            verify_timeout_s = float(expect.get("timeout_s", 6.0))
         result = self._perform(prepared.session,
             attempts,
             expect_before=verbs.unblocked(prepared.node.handle),
             expect_after=after,
-            verify_timeout_s=verify_timeout_s,
+            verify_timeout_s=verify_window(expect),
         )
         self._remember(session_id, "click", locator, prepared, result)
         focus = self._focus_report(prepared)
@@ -222,6 +220,7 @@ class ActuationTools(_ActingCore):
         result = self._perform(prepared.session, attempts,
             expect_before=verbs.unblocked(handle),
             expect_after=after,
+            verify_timeout_s=verify_window(expect),
         )
 
         self._remember(session_id, "set_value", locator, prepared, result)
@@ -308,6 +307,7 @@ class ActuationTools(_ActingCore):
         result = self._perform(prepared.session, attempts,
             expect_before=verbs.unblocked(prepared.node.handle),
             expect_after=after,
+            verify_timeout_s=verify_window(expect),
         )
         self._remember(session_id, "type_text", locator, prepared, result)
         return self._reported(
@@ -381,6 +381,7 @@ class ActuationTools(_ActingCore):
                             cadence=prepared.cadence)),
             expect_before=verbs.unblocked(prepared.node.handle),
             expect_after=after,
+            verify_timeout_s=verify_window(expect),
         )
         self._remember(session_id, "send_keys", locator, prepared, result)
         return self._reported(

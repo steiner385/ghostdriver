@@ -49,6 +49,31 @@ def parse_expect(expect: dict | str | None) -> dict | None:
     return expect
 
 
+def verify_window(expect: dict | str | None) -> float | None:
+    """How long a postcondition is polled after this action, from the
+    expect's `timeout_s`. None lets the actuator use its default (2s, D48).
+
+    The bug this closes (#75): `timeout_s` was honored only for a
+    `{changed}` expect, so a locator expect that named a dialog or menu
+    slower than 2s to appear was declared failed while its own
+    disturbances showed it had opened. Now any expect that carries
+    `timeout_s` is given that window, and `{changed}` keeps its 6s default
+    because a surface can dock seconds after the click (D77). A malformed
+    expect returns None here; `_expectation` is what reports the error.
+    """
+    try:
+        parsed = parse_expect(expect)
+    except ValueError:
+        return None
+    if parsed is None:
+        return None
+    if "timeout_s" in parsed:
+        return float(parsed["timeout_s"])
+    if parsed.get("changed"):
+        return 6.0
+    return None
+
+
 class _ExpectCore(_ToolboxCore):
     """Turns a caller's `expect` into a re-checked condition."""
 

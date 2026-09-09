@@ -314,3 +314,28 @@ def test_the_deadline_is_per_tier():
 
     assert ran == [1, 3]
     assert sum(act.clock.slept) >= 2 * (act.settle_seconds + act.verify_timeout_s) - 1e-9
+
+
+def test_a_caller_can_widen_the_verify_window():
+    """#75: a locator expect naming a dialog slower than the 2s default to
+    appear was declared failed while its own disturbances showed it open.
+    A caller's timeout_s now widens the window the postcondition is given."""
+    late = actuator(verify_timeout_s=8.0)
+    ready_at = 5.0
+
+    result = late.perform(
+        [Attempt(Tier.WINDOW_MESSAGE, always(True))],
+        expect_after=Condition(lambda: late.clock.now() >= ready_at,
+                               "the slow dialog exists"),
+    )
+
+    assert result.ok and result.postcondition_verified is True
+
+    # And the default would have missed it: the same effect, the 2s window.
+    default = actuator()
+    missed = default.perform(
+        [Attempt(Tier.WINDOW_MESSAGE, always(True))],
+        expect_after=Condition(lambda: default.clock.now() >= ready_at,
+                               "the slow dialog exists"),
+    )
+    assert not missed.ok, "the 2s default really would have failed it"
