@@ -22,6 +22,7 @@ pytestmark = on_windows
 
 BM_CLICK = 0x00F5
 WM_GETDLGCODE = 0x0087
+WM_MOUSEMOVE = 0x0200
 WM_LBUTTONDOWN, WM_LBUTTONUP = 0x0201, 0x0202
 WM_CHAR, WM_SETTEXT = 0x0102, 0x000C
 MK_LBUTTON = 0x0001
@@ -133,13 +134,16 @@ def test_2_bm_click_does_nothing_and_the_input_pair_actuates(app, user32):
     time.sleep(0.15)
     assert read_window_text(app["status"]) == before, "BM_CLICK was ignored"
 
+    # The pointer arrives, then the button goes down: the fixture's buttons
+    # gate their click on the move, as the primary target's do (D#69).
+    user32.PostMessageW(wintypes.HWND(button.handle), WM_MOUSEMOVE, 0, 0)
     user32.PostMessageW(wintypes.HWND(button.handle), WM_LBUTTONDOWN,
                         MK_LBUTTON, 0)
     user32.PostMessageW(wintypes.HWND(button.handle), WM_LBUTTONUP, 0, 0)
     time.sleep(0.25)
     after = read_window_text(app["status"])
 
-    assert after != before, "the input-shaped pair actuated"
+    assert after != before, "the input-shaped move and pair actuated"
     assert "Expand All" in after, "and the application knows which control"
 
 

@@ -557,10 +557,13 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "How to tell that this worked: {locator, text}, a bare locator string "
         "for \"this is now present\", or {changed: true} when no control can be "
         "named and the effect is the surface itself moving -- a palette docking "
-        "a few seconds later (timeout_s, default 6). Checked after the "
-        "action, and re-resolved at that point -- so it can name something "
-        "that does not exist until the action succeeds. Without it the "
-        "result reports only that the input was delivered."
+        "a few seconds later (timeout_s, default 6). Keys: locator, text, "
+        "selected, changed, timeout_s, all_windows; anything else, or an "
+        "object with neither locator nor changed, is refused rather than "
+        "ignored. Checked after the action, and re-resolved at that point -- "
+        "so it can name something that does not exist until the action "
+        "succeeds. Without it the result reports only that the input was "
+        "delivered."
     ))]
     CadenceArg = Annotated[str | None, Field(description=(
         "How fast to type: 'robot' (queue speed) or 'fast_human' (~80ms a "
@@ -603,8 +606,10 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "A point {x, y} in pixels inside the element, from its top-left "
             "corner, instead of its centre. For a region that paints its own "
             "rows and exposes none of them (a data grid): `capture` it, see "
-            "where the row or link is, and click there. Still posted; still "
-            "activates nothing."
+            "where the row or link is, and click there. Read off a "
+            "DPI-aware screenshot instead? Pass frame=physical and the point "
+            "as measured; nothing needs converting by hand. Still posted; "
+            "still activates nothing."
         ))] = None,
         frame: Annotated[str, Field(description=(
             "The frame `at` is in: logical (default; this tool's own "

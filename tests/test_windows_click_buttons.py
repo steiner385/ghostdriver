@@ -119,11 +119,40 @@ def test_a_posted_pair_of_one_button_does_not_complete_another(app):
     _, up_msg, _, up_flags = win_input.button_pair("left")
     x, y = win_input.client_centre(button.handle)
     point = win_input._lparam_for_point(x, y)
+    win_input.user32.PostMessageW(button.handle, win_input.WM_MOUSEMOVE, 0, point)
     win_input.user32.PostMessageW(button.handle, down_msg, down_flags, point)
     win_input.user32.PostMessageW(button.handle, up_msg, up_flags, point)
     time.sleep(0.3)
 
     assert read_window_text(status.handle) == "clicks=0 last="
+
+
+def test_a_pair_with_no_move_in_front_of_it_is_not_a_click(app):
+    """A person's pointer arrives before their button goes down, and a
+    toolkit sets its hot state from that arrival; the glow buttons on the
+    primary target gate their click on it. The fixture gates the same way,
+    so this is the difference between the bare pair the tool used to post
+    and what it posts now (D#69)."""
+    from ghostdriver.backends.windows import input as win_input
+    from ghostdriver.backends.windows.enumerate import enumerate_process
+    from ghostdriver.backends.windows.text import read_window_text
+    from ghostdriver.model.window import select_main_tree
+
+    tree = select_main_tree(enumerate_process(app["pid"]))
+    button = next(n for n in tree.walk() if n.text == "Expand All")
+    status = next(n for n in tree.walk() if (n.text or "").startswith("clicks="))
+    down_msg, up_msg, down_flags, up_flags = win_input.button_pair("left")
+    x, y = win_input.client_centre(button.handle)
+    point = win_input._lparam_for_point(x, y)
+
+    win_input.user32.PostMessageW(button.handle, down_msg, down_flags, point)
+    win_input.user32.PostMessageW(button.handle, up_msg, up_flags, point)
+    time.sleep(0.3)
+    assert read_window_text(status.handle) == "clicks=0 last=", "bare pair: no click"
+
+    assert win_input.click(button.handle)
+    time.sleep(0.3)
+    assert read_window_text(status.handle) == "clicks=1 last=Expand All",         "the move the tool posts first is what makes it a click"
 
 
 # --- a point inside the element, and a double-click --------------------------------

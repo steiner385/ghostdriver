@@ -151,12 +151,7 @@ class HotReloader:
             if name not in self.held_for:
                 self.held_for.append(name)
         if reloadable and self.held_for:
-            event["held"] = (
-                "implementation not reloaded: a stable module changed since this "
-                f"server started ({', '.join(self.held_for)}), and a new generation "
-                "written against it would not fit the running one. Reconnect the "
-                "server to pick everything up together"
-            )
+            event["held"] = self.held_note()
         elif reloadable:
             try:
                 self._rebuild()
@@ -177,16 +172,41 @@ class HotReloader:
         print(f"ghostdriver dev reload: {event}", file=sys.stderr, flush=True)
         return event
 
-    def _rebuild(self) -> None:
+    def held_note(self) -> str:
+        """Why the implementation is not being reloaded, for a result."""
+        return (
+            "implementation not reloaded: a stable module changed since this "
+            f"server started ({', '.join(self.held_for)}), and a new generation "
+            "written against it would not fit the running one. Reconnect the "
+            "server to pick everything up together"
+        )
+
+    def _loaded(self) -> dict[str, Any]:
+        """The reloadable modules of this package that are in sys.modules now."""
         prefix = self.package + "."
-        purged = {name: mod for name, mod in list(sys.modules.items())
-                  if (name == self.package or name.startswith(prefix))
-                  and name not in self.stable}
+        return {name: mod for name, mod in list(sys.modules.items())
+                if (name == self.package or name.startswith(prefix))
+                and name not in self.stable}
+
+    def _rebuild(self) -> None:
+        purged = self._loaded()
         for name in purged:
             del sys.modules[name]
         try:
             fresh = self.build()
+            # Everything the old generation had loaded is imported again
+            # here, not left to the first call that needs it. The backend
+            # is imported at call time, so a rebuild that stopped at
+            # `build()` accepted a generation whose backend had never been
+            # imported; once the reloader was then held, every call re-read
+            # the new backend file against the held contract and raised --
+            # for five hours, with no session possible (D#70). A generation
+            # is whole or it is not taken.
+            for name in sorted(purged):
+                importlib.import_module(name)
         except Exception:
+            for name in self._loaded():  # whatever the failed generation got in
+                del sys.modules[name]
             sys.modules.update(purged)  # the working generation, back in place
             raise
         self._retired.append(purged)
@@ -253,6 +273,15 @@ class LiveToolbox:
             # operator's attach result (D73).
             surfaced = [e for e in events
                         if e.get("needs_reconnect") or e.get("error") or e.get("held")]
+            # A tool that raised while the implementation is held is most
+            # likely running a module the hold could not keep from reading
+            # the new file. The held event was surfaced once, on some
+            # earlier result; the call that fails for it needs the note
+            # again, or it reads as a bare traceback name (D#70).
+            if (reloader.held_for and isinstance(result, dict)
+                    and (result.get("error") or {}).get("kind") == "exception"
+                    and not any(e.get("held") for e in surfaced)):
+                surfaced.append({"held": reloader.held_note()})
             if surfaced and isinstance(result, dict):
                 result["dev_reload"] = surfaced if len(surfaced) > 1 else surfaced[0]
             return result

@@ -552,3 +552,43 @@ def test_recording_is_refused_when_only_the_robot_attempt_ran(box, app,
     assert not recorded["ok"]
     assert "cadence=fast_human" in recorded["error"]["message"]
     assert "input_sensitivity" not in json.loads(path.read_text())
+
+
+# --- an expect the tool cannot read is refused, not ignored (D#71) -----------------
+
+def test_an_expect_with_no_usable_key_is_refused_by_name(box, app):
+    """{"text": ...} without a locator used to verify nothing and report
+    `delivery_only`, exactly as if the caller had never asked."""
+    session = interactive(box, app["pid"])
+
+    result = box.click(session, 'class=GhostFixtureCommandButton text="Expand All"',
+                       expect={"text": "clicks=1 last=Expand All"})
+
+    assert not result["ok"]
+    assert "expect is unusable" in result["error"]["message"]
+    assert "locator" in result["error"]["message"]
+    assert "verified" not in result, "nothing was sent"
+
+
+def test_an_expect_with_an_unknown_key_is_refused_by_name(box, app):
+    session = interactive(box, app["pid"])
+
+    result = box.click(session, 'class=GhostFixtureCommandButton text="Expand All"',
+                       expect={"locator": "class=Static", "txet": "x"})
+
+    assert not result["ok"]
+    assert "txet" in result["error"]["message"]
+    assert "all_windows" in result["error"]["message"], "the keys it does take"
+
+
+def test_an_expect_sent_as_json_text_is_read_as_the_object_it_was(box, app):
+    """A client that serialised the object before sending it asked for a
+    verification; it gets one."""
+    session = interactive(box, app["pid"])
+
+    result = box.click(
+        session, 'class=GhostFixtureCommandButton text="Expand All"',
+        expect='{"locator": "class=Static text=\\"/clicks=1 last=Expand All$/\\""}')
+
+    assert result["ok"], result
+    assert result["verified"] == "effect"
