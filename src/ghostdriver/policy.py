@@ -47,6 +47,13 @@ TIER_TOOLS: dict[Tier, frozenset[str]] = {
         "list_targets", "attach", "release", "grant_targets",
         "describe", "find", "read", "capture", "wait_for",
         "probe", "surfaces", "modals", "restore", "hit_targets", "wait_idle",
+        # A fixed dwell changes nothing, so a read-only session may pace
+        # between its reads (D#76).
+        "pace",
+        # Only a dispatcher: every step is authorized at its own tier, so a
+        # read-only session's batch runs its reads and refuses an act step
+        # exactly as the standalone call would. It grants nothing (D#75).
+        "batch",
         # Asks a person to do something and watches for them to have done
         # it. It changes nothing itself, and a read-only session has as much
         # need of it as any other -- "please sign in so I can see the

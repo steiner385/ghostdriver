@@ -594,7 +594,7 @@ def test_an_expect_sent_as_json_text_is_read_as_the_object_it_was(box, app):
     assert result["verified"] == "effect"
 
 
-# --- timeout_s widens the verify window for any expect, not just changed (#75) ----
+# --- timeout_s widens the verify window for any expect, not just changed (#73) ----
 
 def test_verify_window_reads_timeout_s_from_any_expect():
     from ghostdriver.tools.expect import verify_window

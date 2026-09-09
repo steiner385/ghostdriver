@@ -34,6 +34,8 @@ PLACEHOLDER = {
     "text": "x",
     "keys": "a",
     "ask": "please",
+    "steps": [{"tool": "describe", "args": {}}],
+    "seconds": 0.01,
 }
 
 

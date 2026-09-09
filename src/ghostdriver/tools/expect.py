@@ -53,7 +53,7 @@ def verify_window(expect: dict | str | None) -> float | None:
     """How long a postcondition is polled after this action, from the
     expect's `timeout_s`. None lets the actuator use its default (2s, D48).
 
-    The bug this closes (#75): `timeout_s` was honored only for a
+    The bug this closes (#73): `timeout_s` was honored only for a
     `{changed}` expect, so a locator expect that named a dialog or menu
     slower than 2s to appear was declared failed while its own
     disturbances showed it had opened. Now any expect that carries

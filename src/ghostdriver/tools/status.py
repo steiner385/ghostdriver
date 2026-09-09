@@ -287,6 +287,7 @@ class StatusTools(_ToolboxCore):
                                          "be stuck, or the indicator may stay on -- capture "
                                          "to see"}}
         return {"ok": True, "idle": True, "waited_ms": waited_ms, "polls": polls}
+
     def restore(self, session_id: str) -> dict:
         """Un-minimize the target, reporting whether that took the foreground.
 
