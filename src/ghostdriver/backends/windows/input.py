@@ -48,6 +48,13 @@ which no amount of care at this tier can change. Both are left until there
 is a target that demonstrably inspects them, because neither can be
 validated against anything else.
 
+**A click is a move, then the pair.** Every click a person makes arrives
+after a `WM_MOUSEMOVE` at the same point, and a toolkit's hot and
+mouse-in-control state is set from that message before the button ever
+goes down. The pair used to be posted bare; a control that gates its click
+on that state ignored it (D#69). The move is posted, like everything else
+here: it carries the point in the message and moves nothing on screen.
+
 Nothing here moves the cursor or touches the foreground.
 """
 
@@ -62,6 +69,7 @@ from . import winapi
 
 user32 = winapi.user32
 
+WM_MOUSEMOVE = 0x0200
 WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
 WM_RBUTTONDOWN = 0x0204
@@ -226,7 +234,13 @@ def client_size(hwnd: int) -> tuple[int, int]:
 
 def post_click(hwnd: int, x: int, y: int, *, button: str = "left", modifiers=(),
                count: int = 1) -> bool:
-    """The button pair at client point (x, y), `count` times.
+    """A mouse-move to client point (x, y), then the button pair there,
+    `count` times.
+
+    The move first, because that is what a pointer does before a button
+    goes down, and a toolkit sets its hot state from it (D#69). It carries
+    the modifier flags and no button, which is the state of the mouse the
+    instant before the press.
 
     A second click is the double-click message the window would receive
     from a person: down, up, then the button's DBLCLK and another up. The
@@ -237,7 +251,8 @@ def post_click(hwnd: int, x: int, y: int, *, button: str = "left", modifiers=(),
     down_msg, up_msg, down_flags, up_flags = button_pair(button, modifiers)
     point = _lparam_for_point(x, y)
     target = wintypes.HWND(hwnd)
-    ok = bool(user32.PostMessageW(target, down_msg, down_flags, point))
+    ok = bool(user32.PostMessageW(target, WM_MOUSEMOVE, up_flags, point))
+    ok &= bool(user32.PostMessageW(target, down_msg, down_flags, point))
     ok &= bool(user32.PostMessageW(target, up_msg, up_flags, point))
     if count >= 2:
         ok &= bool(user32.PostMessageW(target, down_msg + DBLCLK_OFFSET, down_flags, point))

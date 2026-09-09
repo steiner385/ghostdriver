@@ -141,3 +141,86 @@ def test_a_stable_change_holds_the_implementation_until_a_reconnect(scratch):
 
     assert event and "held" in event and "reloaded" not in event
     assert reloader.current.answer() == 1 and reloader.generation == 0
+
+
+# --- a generation is whole or it is not taken (D#70) ------------------------------
+
+@pytest.fixture
+def lazy(tmp_path, monkeypatch):
+    """A package whose implementation imports its backend at call time,
+    the way the tools import `backends.current()` inside each call."""
+    pkg = tmp_path / "lazypkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "impl.py").write_text(textwrap.dedent("""
+        def answer():
+            from . import backend
+            return backend.VALUE
+        """), encoding="utf-8")
+    (pkg / "backend.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (pkg / "state.py").write_text("class Store:\n    pass\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    for name in [n for n in sys.modules if n == "lazypkg" or n.startswith("lazypkg.")]:
+        del sys.modules[name]
+    yield pkg
+    for name in [n for n in sys.modules if n == "lazypkg" or n.startswith("lazypkg.")]:
+        del sys.modules[name]
+
+
+def lazy_reloader(pkg):
+    def build():
+        impl = importlib.import_module("lazypkg.impl")
+        return SimpleNamespace(answer=impl.answer)
+
+    return HotReloader("lazypkg", pkg, build=build,
+                       stable=frozenset({"lazypkg", "lazypkg.state"}))
+
+
+def test_a_rebuild_imports_what_the_old_generation_had_loaded(lazy):
+    """Measured 2026-09-08: a rebuild took a generation whose backend had
+    never been imported, and every later call imported the new backend
+    file against the held contract and raised. Five hours, no session.
+    Now a module the old generation had loaded must import for the new
+    one to be taken."""
+    reloader = lazy_reloader(lazy)
+    assert reloader.current.answer() == 1  # the backend is loaded lazily, now
+
+    bump(lazy / "backend.py", "assert False, {'disclosure'}\nVALUE = 2\n")
+    event = reloader.check(force=True)
+
+    assert event and "AssertionError" in event["error"], event
+    assert event["kept"] == "generation 0"
+    assert reloader.current.answer() == 1, "the old backend, still in sys.modules"
+
+
+def test_a_rebuild_that_can_import_its_backend_is_taken(lazy):
+    reloader = lazy_reloader(lazy)
+    assert reloader.current.answer() == 1
+
+    bump(lazy / "backend.py", "VALUE = 2\n")
+    event = reloader.check(force=True)
+
+    assert event and event["generation"] == 1, event
+    assert reloader.current.answer() == 2
+
+
+def test_a_call_that_raises_while_held_says_the_implementation_is_held():
+    """The held event surfaces once; the call that then fails because of
+    the hold needs the note again, or it reads as a bare traceback name."""
+    from ghostdriver.consent import ConsentStore
+    from ghostdriver.session import SessionManager
+
+    live = LiveToolbox(SessionManager(store=ConsentStore(None)), dev=True)
+    reloader = live._reloader
+    assert reloader is not None
+    reloader.held_for.append("ghostdriver.session")
+    reloader.current = SimpleNamespace(
+        boom=lambda: {"ok": False, "error": {"kind": "exception",
+                                             "message": "AssertionError: {'disclosure'}"}},
+        fine=lambda: {"ok": True})
+
+    failed, worked = live.boom(), live.fine()
+
+    assert "held" in failed["dev_reload"]
+    assert "Reconnect" in failed["dev_reload"]["held"]
+    assert "dev_reload" not in worked, "a call that worked has nothing to add"

@@ -4413,3 +4413,121 @@ through the full stack, expectation verified, cursor and foreground
 undisturbed, profile written with everything curated left intact. Iteration
 4's first half is met on one control class; the watchdog half is not yet
 built.
+
+### D#69. A posted click carries the move a person's click carries first
+
+**Context.** The 2026-09-08 field notes, working the primary target's
+windowed toolbar and the painted controls around it. A row of glow
+buttons wanted "a mouse-move first"; a posted pair with no move in front
+of it read as delivered and did nothing. D48 had already recorded that
+"mouse-move was ruled out" was retracted as unsound -- the diagnostic that
+ruled it out ran while a connection-lost dialog held the application, so
+its null taught nothing. The question was left open, and this closes it.
+
+**Decision.** `post_click` posts a `WM_MOUSEMOVE` at the point before the
+button pair. Every click a person makes arrives after the pointer does,
+and a toolkit sets its hot / mouse-in-control state from that arrival
+before the button goes down; a control that gates its click on that state
+ignores a bare pair. The move carries the same modifier flags and no
+button -- the state of the mouse the instant before the press -- and, like
+everything else in that module, it is posted, so it moves nothing on
+screen and stays background-safe.
+
+**Evidence.** Proven on the fixture. Its buttons now set a `hot` flag on
+`WM_MOUSEMOVE` and clear it on the up, and act on the click only when the
+flag was set -- exactly the gate the glow buttons appear to apply. A bare
+down/up pair leaves the counter at zero; the tool's `click`, which posts
+the move first, moves it to one (`test_a_pair_with_no_move_in_front_of_it_is_not_a_click`).
+The fixture's own input-shape test and the button-message tests were
+updated to post the move, since a bare pair no longer actuates a gated
+button.
+
+**Not yet confirmed on the primary target.** The motivating glow buttons
+are on the plan editor, and a re-measurement there needs a plan open in
+the sandbox client -- which is the operator's screen to arrange, not the
+driver's. The mechanism is proven against a control that gates the same
+way; the primary-target re-verification is a measurement for a session
+that has a plan open, with `expect` naming the effect. `GetAsyncKeyState`
+and the `WM_KEYDOWN`/`WM_CHAR`/`WM_KEYUP` gaps (input.py's standing "two
+parts of the gap remain") are untouched: this is the mouse's move, which
+is a message a control reads, not a global-state query it cannot.
+
+### D#70. A hot-reloaded generation is whole, or it is not taken
+
+**Context.** On 2026-09-08 a running server (operator trace
+`ghostdriver-20260908-72116.jsonl`) answered its first call, then failed
+every call for five hours with `AssertionError: {'disclosure'}` from the
+backend contract guard. No session could be opened. The `disclosure`
+contract entry had landed in the tree while the server ran, and the hot
+reloader (D68) had taken a generation that did not fit it.
+
+**The mechanism, which D68 did not cover.** `_rebuild` purged the
+reloadable modules and called `build()`, which imports `ghostdriver.tools`
+and constructs the toolbox -- but the *backend* is imported lazily, at
+call time (`from ..backends import current`), not by `build()`. So a
+rebuild was accepted whose backend had never been imported. When a stable
+module also changed, the reloader then held the implementation at that
+generation (the D68 hold), and the lazily imported backend read the *new*
+file against the *held* contract. The import raised, was never cached, and
+raised again on every call. D68's promise -- "an edit that does not import
+leaves the previous generation in place" -- held, but the generation it
+kept was incomplete, so the promise bought nothing.
+
+**Decision.** A rebuild imports every module it purged before accepting
+the new generation. An import that fails anywhere fails the whole rebuild,
+the modules the failed generation managed to load are purged again, and
+the working generation is restored intact -- reported as `error` + `kept`,
+exactly as a syntax error already was. A generation is whole or it is not
+taken. And a tool result that is an exception *while the implementation is
+held* now re-attaches the held note, because the held event was surfaced
+once on an earlier result and the call that actually fails for it would
+otherwise read as a bare traceback name.
+
+**Evidence.** `test_a_rebuild_imports_what_the_old_generation_had_loaded`
+builds a package whose implementation imports its backend lazily, breaks
+the backend, and asserts the rebuild is refused with the old backend still
+answering -- the 10:10 failure, reproduced and now caught.
+`test_a_rebuild_that_can_import_its_backend_is_taken` holds the happy path,
+and `test_a_call_that_raises_while_held_says_the_implementation_is_held`
+covers the note. This is a `env: any` fix: the reloader is platform-neutral
+and proven on a scratch package, never by editing the repo under a running
+test (D68).
+
+**A note on the session cost.** Consent survives a restart in the operator
+directory, so recovering from a lost session is one `attach` (D65, D66).
+The five-hour outage was not the session loss; it was that the server
+stayed up and broken, answering nothing, with a message that named the
+symptom (`AssertionError`) and hid the cause. The fix is that it no longer
+stays up broken: the reload is refused and the previous generation keeps
+serving.
+
+### D#71. An `expect` the tool cannot read is refused, not quietly dropped
+
+**Context.** `expect` is the difference between a result that claims the
+input was delivered and one that claims it worked (D67, D77). The field
+notes recorded that the schema "tripped me once and I stopped trying" --
+and the tool's own behavior rewarded stopping: `_expectation` returned "no
+expectation" for any dict without a `locator` or `changed` key, so
+`expect={"text": "Saved"}` verified nothing and the result read
+`delivery_only`, identical to never having asked. A caller who mistyped the
+one key that carries the verification was told, in effect, that they had
+not asked for one.
+
+**Decision.** `parse_expect` is the single gate every actuation runs its
+`expect` through, and it refuses rather than guesses (D33). A dict is
+checked before anything is sent: an unknown key is an error naming the keys
+that exist (`locator`, `text`, `selected`, `changed`, `timeout_s`,
+`all_windows`), and a dict with neither `locator` nor `changed` is an error
+naming what a usable expectation needs. A bare string stays a locator (the
+D67 affordance), and a string that is actually a serialized object -- a
+client that JSON-encoded the dict before sending -- is parsed back into the
+object it was, rather than being read as a locator that cannot resolve.
+
+**Evidence.** `test_an_expect_with_no_usable_key_is_refused_by_name` and
+`test_an_expect_with_an_unknown_key_is_refused_by_name` assert the refusals
+and that nothing was sent; `test_an_expect_sent_as_json_text_is_read_as_the_object_it_was`
+covers the serialized-dict case. The refusal travels the same path a
+mistyped locator already did (`expect is unusable: ...`), so a caller sees
+one consistent shape for "your expectation is malformed" whether the fault
+is the key or the locator inside it. `env: any`: pure policy, proven on the
+fixture.

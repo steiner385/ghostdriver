@@ -4,6 +4,50 @@ from ..model.element import AccessibleElement
 from ..model.locator import Locator
 from .core import _ToolboxCore
 
+#: Every key an `expect` may carry. Anything else is refused by name: an
+#: expectation the tool cannot read must not quietly become no expectation,
+#: because the result then reads `delivery_only` exactly as if the caller
+#: had never asked (D#71).
+EXPECT_KEYS = frozenset({"locator", "text", "selected", "changed", "timeout_s",
+                         "all_windows"})
+
+
+def parse_expect(expect: dict | str | None) -> dict | None:
+    """The `expect` a caller sent, as the dict the tools read -- None for no
+    expectation, or ValueError saying what is wrong with it.
+
+    A bare string is a locator ("this is now present", D67). A string that
+    looks like JSON is a dict a client serialised before sending, and is
+    read as the dict it was. A dict is checked here, before anything is
+    sent: unknown keys are refused by name, and a dict with neither
+    `locator` nor `changed` is refused rather than ignored (D#71).
+    """
+    if expect is None or expect == "" or expect == {}:
+        return None
+    if isinstance(expect, str):
+        stripped = expect.strip()
+        if stripped.startswith("{"):
+            import json
+            try:
+                expect = json.loads(stripped)
+            except ValueError as exc:
+                raise ValueError(f"looks like JSON but does not parse ({exc})") from None
+        else:
+            expect = {"locator": expect}
+    if not isinstance(expect, dict):
+        raise ValueError(
+            f"must be a locator string or an object, not {type(expect).__name__}")
+    unknown = sorted(k for k in expect if k not in EXPECT_KEYS)
+    if unknown:
+        raise ValueError(
+            f"unknown key(s) {unknown}; an expect takes {sorted(EXPECT_KEYS)}")
+    if not expect.get("changed") and not expect.get("locator"):
+        raise ValueError(
+            "needs `locator` (a control that will be present, with optional "
+            "`text` or `selected`) or `changed: true` (the surface itself "
+            f"moves); got {sorted(expect)}")
+    return expect
+
 
 class _ExpectCore(_ToolboxCore):
     """Turns a caller's `expect` into a re-checked condition."""
@@ -16,14 +60,9 @@ class _ExpectCore(_ToolboxCore):
         before anything is sent, so a bad one is an error, not an unmet
         condition -- the two look identical outside and mean opposites.
         """
-        if not expect:
+        expect = parse_expect(expect)  # raises ValueError, caught by the caller
+        if expect is None:
             return None, None
-        if isinstance(expect, str):
-            # `expect` names how to tell the action worked. The common case
-            # is "this locator is now present", and a bare string is the
-            # natural way to say it -- the name invites a sentence, so at
-            # least let a locator string through (D67).
-            expect = {"locator": expect}
 
         from ..actuate import Condition
         from ..backends import current
@@ -44,11 +83,9 @@ class _ExpectCore(_ToolboxCore):
 
             return Condition(moved, "the target's surface changed"), "the target's surface changed"
 
-        where = expect.get("locator")
+        where = expect["locator"]
         wanted = expect.get("text")
         selected = expect.get("selected")
-        if not where:
-            return None, None
         loc = Locator.parse(where)  # raises ValueError, caught by the caller
 
         # A dialog like a browser's file-picker is a new top-level in a

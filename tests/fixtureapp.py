@@ -62,6 +62,7 @@ WM_ERASEBKGND = 0x0014
 WM_GETDLGCODE = 0x0087
 WM_KEYDOWN = 0x0100
 WM_CHAR = 0x0102
+WM_MOUSEMOVE = 0x0200
 WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
 WM_RBUTTONDOWN = 0x0204
@@ -343,12 +344,19 @@ def _button_proc(hwnd, msg, wparam, lparam):
         # one checks, because a fixture that did not would quietly bless a
         # driver that skips the check too.
         return 0
+    if msg == WM_MOUSEMOVE:
+        # The hot state a glow button keeps: set by the pointer arriving,
+        # and what its click is gated on. A pair that arrives with no move
+        # in front of it is not a click a person could have made (D#69).
+        _STATE[("hot", hwnd)] = True
+        return 0
     if msg in BUTTON_DOWN:
         _STATE[("pressed", hwnd)] = BUTTON_DOWN[msg]
         user32.InvalidateRect(wintypes.HWND(hwnd), None, True)
         return 0
     if msg in BUTTON_UP:
-        if _STATE.get(("pressed", hwnd)) == BUTTON_UP[msg]:
+        hot = _STATE.pop(("hot", hwnd), False)
+        if _STATE.get(("pressed", hwnd)) == BUTTON_UP[msg] and hot:
             _STATE[("pressed", hwnd)] = False
             user32.InvalidateRect(wintypes.HWND(hwnd), None, True)
             # The modifiers the *message* carried, which is what a VCL
