@@ -26,11 +26,13 @@ import time
 from ..backends import AccessibilityUnavailable
 from ..model.result import ErrorKind
 from .actuation import ActuationTools
+from .batch import BatchTools
 from .core import MAX_ELEMENTS, SENSITIVE_HINT, _element, _error
 from .discovery import DiscoveryTools
 from .human import HumanTools
 from .learning import LearningTools
 from .lifecycle import LifecycleTools
+from .pace import PaceTools
 from .screen import ScreenTools
 from .seek import SeekTools
 from .status import StatusTools
@@ -39,7 +41,7 @@ __all__ = ["MAX_ELEMENTS", "SENSITIVE_HINT", "Toolbox", "_element", "_error"]
 
 
 class Toolbox(LifecycleTools, DiscoveryTools, StatusTools, ActuationTools,
-              HumanTools, LearningTools, SeekTools, ScreenTools):
+              HumanTools, LearningTools, SeekTools, ScreenTools, BatchTools, PaceTools):
     """Every tool, over one session manager.
 
     One class, so a caller holds one object; one module per family, so a

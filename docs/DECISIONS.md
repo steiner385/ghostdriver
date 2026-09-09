@@ -4562,3 +4562,70 @@ to fail under the 2s default, so the test proves both the fix and that it
 was needed. `test_verify_window_reads_timeout_s_from_any_expect` covers the
 helper's table. `env: any`: the actuator is platform-neutral and runs on an
 injected clock (D48), so the deadline logic is exercised without waiting.
+
+### D#75. A batch tool: one call, many steps, each with its own verdict
+
+**Context.** The 2026-09 field loop ran ~16 tool calls per operation, and
+~12 of them were perfectly predictable -- click a tab, set a field, press
+Ok, click a row, embed, save. Each cost a round trip. Computer use has
+`computer_batch` for exactly this; ghostdriver had nothing, so the
+deterministic stretch of every loop paid the latency of a network hop per
+step.
+
+**Decision.** `batch(session_id, steps, stop_on_failure=true)` runs a list
+of `{tool, args}` steps in order against one session. Each step carries its
+own `expect`, so its verdict is real rather than "sent"; the first step
+that does not verify stops the batch (a loop's steps depend on each other),
+and the result reports how far it got with every step's verdict.
+`stop_on_failure=false` runs them all, for a batch of independent reads.
+
+**It is only a dispatcher, and that is the whole safety argument.** A step
+calls the same `Toolbox` method a standalone call calls, through the same
+`authorize`, denylist and tier checks -- the batch adds no path around any
+of them and grants nothing a step could not already do. So the batchable
+set is an allowlist of the session-scoped read-and-act tools, and never the
+lifecycle or consent tools (`attach`, `release`, `grant_*`,
+`launch_isolated`) or the two that interrupt a person (`foreground`,
+`await_human`): a batch drives an already-approved target, it does not
+change what is approved or wait on a human. Placed at the `read_only` tier
+for the same reason -- a read-only session's batch runs its reads and its
+act steps are refused per step, exactly as the standalone calls would be.
+
+**Evidence.** `tests/test_batch.py`: the happy path with per-step verdicts,
+a step without an expect claiming only delivery, stop-on-failure and its
+inverse, the allowlist refusing each lifecycle/consent tool before anything
+runs, a step forbidden from carrying its own session_id, malformed steps
+refused by shape, a bad-argument step failing as a step rather than
+crashing the batch, and a read-only session's act step refused inside a
+batch. `env: any`: the dispatcher is platform-neutral; the fixture supplies
+the target the steps act on.
+
+### D#76. A pace primitive, named as the stopgap it is
+
+**Context.** `wait_idle` refuses without a profile `busy_indicator` (D69),
+and rightly -- it has nothing to wait on. But a hybrid loop against a target
+with no indicator declared yet still needs to let the screen catch up, and
+what it reached for was `wait_for` against a locator built never to match,
+run as an N-second timer. That is a wasted call and, worse, a lie about
+what is being waited for.
+
+**Decision.** Add `pace(session_id, seconds)`: a bounded dwell, clamped to
+120s, that returns and in its own result names the better tool -- a declared
+`busy_indicator` with `wait_idle`, or `wait_for` on a control that will
+appear. Both wait on the target; `pace` waits on the clock, and says so.
+
+**Recorded as a deliberate exception.** This server's stance is against
+arbitrary sleeps (D45), and `wait_idle`'s refusal is part of that stance.
+`pace` is a considered exception, not a drift past the rule: it exists for
+the gap *before* an indicator is declared, it points every caller at the
+measurement that would replace it, and it is capped so it cannot become a
+place to park a run. The profile `busy_indicator` remains the right answer
+where a target has an indicator -- VendorApp's status strip is one, pending the
+capture pair that measures it. Chosen by the project owner over keeping the
+`wait_for`-as-timer workaround, with the tradeoff recorded here on purpose.
+
+**Evidence.** `tests/test_batch.py` covers the dwell timing, the clamp (with
+`PACE_MAX_S` shortened so the test does not wait the cap), the pointer to
+`wait_idle`/`wait_for` in the note, and the refusals of a non-positive or
+non-numeric dwell. `read_only` tier: a fixed wait changes nothing. `env:
+any`.

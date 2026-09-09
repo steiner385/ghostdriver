@@ -36,7 +36,11 @@ READ_TOOLS = {
     "describe", "find", "read", "capture", "wait_for",
     "probe", "surfaces", "modals", "restore", "foreground", "await_human",
     "hit_targets", "read_clipboard", "wait_idle",
+    "pace",
 }
+
+#: Runs other session tools in one call (D#75).
+BATCH_TOOLS = {"batch"}
 
 #: Reachable only from a session opened at the interactive tier. Registered
 #: unconditionally -- the tier check happens per call, against the session,
@@ -56,7 +60,7 @@ LEARNING_TOOLS = {"probe_phase2", "probe_grid", "grid_seek"}
 LAUNCH_TOOLS = {"launch_isolated", "grant_launch"}
 
 EXPECTED_TOOLS = (READ_TOOLS | ACTUATION_TOOLS | CURATION_TOOLS
-                  | LEARNING_TOOLS | LAUNCH_TOOLS)
+                  | LEARNING_TOOLS | LAUNCH_TOOLS | BATCH_TOOLS)
 
 
 def _server_parameters() -> StdioServerParameters:

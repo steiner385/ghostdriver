@@ -317,7 +317,7 @@ def test_the_deadline_is_per_tier():
 
 
 def test_a_caller_can_widen_the_verify_window():
-    """#75: a locator expect naming a dialog slower than the 2s default to
+    """#73: a locator expect naming a dialog slower than the 2s default to
     appear was declared failed while its own disturbances showed it open.
     A caller's timeout_s now widens the window the postcondition is given."""
     late = actuator(verify_timeout_s=8.0)

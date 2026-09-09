@@ -530,6 +530,52 @@ def build_server(sessions: SessionManager | None = None) -> Any:
                   ) -> dict[str, Any]:
         return box.wait_idle(session_id, timeout_s=timeout_s)
 
+    @server.tool(annotations=READS, description=(
+        "Dwell for a fixed number of seconds, then return. A deliberate "
+        "stopgap: where the target declares a busy_indicator, wait_idle "
+        "waits on the screen and is better; where a control's arrival can be "
+        "named, wait_for is. Use pace only for the gap before either exists, "
+        "instead of waiting on a locator built never to match. Clamped to "
+        "120s; the result points at the better tool."
+    ))
+    def pace(session_id: SessionId,
+             seconds: Annotated[float, Field(description=(
+                 "How long to dwell, in seconds. Positive, clamped to 120."
+             ))]) -> dict[str, Any]:
+        return box.pace(session_id, seconds)
+
+    @server.tool(annotations=ACTUATES, description=(
+        "Run a list of steps against this session in one call, so a "
+        "deterministic stretch of a loop is not one round trip per step. "
+        "Each step is {tool, args}: `tool` is a session-scoped read-or-act "
+        "tool (click, set_value, type_text, send_keys, find, read, "
+        "read_clipboard, capture, describe, modals, surfaces, hit_targets, "
+        "wait_for, wait_idle, grid_seek) and `args` its arguments WITHOUT "
+        "session_id, which the batch supplies. Give each acting step its own "
+        "`expect` -- a batch verifies exactly what a standalone call does, so "
+        "a step without one claims only that it was delivered. Stops on the "
+        "first step that does not verify (stop_on_failure, default true), "
+        "since a loop's steps depend on each other; the result says how far "
+        "it got and carries every step's verdict. It is only a dispatcher -- "
+        "each step passes the same approval, denylist and tier checks as its "
+        "standalone call -- so lifecycle and consent tools (attach, release, "
+        "grant_*, launch_isolated) and the two that interrupt a person "
+        "(foreground, await_human) are refused inside it and run on their own."
+    ))
+    def batch(session_id: SessionId,
+              steps: Annotated[list[dict], Field(description=(
+                  "The steps to run in order, each {tool, args}. args omits "
+                  "session_id. Example: [{\"tool\": \"click\", \"args\": "
+                  "{\"locator\": \"type=TabItem name=Parts\", \"expect\": "
+                  "{\"locator\": \"type=TabItem name=Parts\", \"selected\": "
+                  "true}}}, {\"tool\": \"set_value\", \"args\": {...}}]"
+              ))],
+              stop_on_failure: Annotated[bool, Field(description=(
+                  "Stop at the first step that does not verify (default). "
+                  "false runs every step regardless, for independent reads."
+              ))] = True) -> dict[str, Any]:
+        return box.batch(session_id, steps, stop_on_failure=stop_on_failure)
+
     @server.tool(annotations=CHANGES_SCREEN, description=(
         "Bring a window of the target to the front -- the deliberate pair to "
         "isolation=minimized. Everything else works from the background, so "
