@@ -4531,3 +4531,34 @@ mistyped locator already did (`expect is unusable: ...`), so a caller sees
 one consistent shape for "your expectation is malformed" whether the fault
 is the key or the locator inside it. `env: any`: pure policy, proven on the
 fixture.
+
+### D#73. `timeout_s` widens the verify window for any expect, not only `changed`
+
+**Context.** The 2026-09 field loop, ~16 tool calls per operation. One
+result kept coming back wrong: a `click` whose `expect` named a dialog or
+the Embed popup, reported failed while the *same result's* `disturbances`
+showed the window had opened. It cost a retry call every time.
+
+**The bug.** The actuator polls a postcondition to a deadline, not a single
+sample -- `VERIFY_TIMEOUT_SECONDS = 2.0` plus the settle, ~2.4s (D48). The
+`click` tool extended that deadline only when the expect was `{changed}`
+(to `timeout_s`, default 6, for a palette that docks seconds later, D77). A
+**locator** expect that carried `timeout_s` had it silently dropped, and
+`set_value` / `type_text` / `send_keys` passed no window at all. So a caller
+who saw a dialog appear slower than 2s and raised `timeout_s` to say so was
+ignored, and D48's false-failure -- the very thing the deadline exists to
+prevent -- returned through a parameter that looked like it should prevent
+it.
+
+**Decision.** A shared `verify_window(expect)` reads `timeout_s` from any
+expect and all four actuation tools pass it to the actuator. A `{changed}`
+expect keeps its 6s default; a bare locator keeps the actuator's 2s default
+unless `timeout_s` is given. The postcondition is unchanged -- this only
+governs how long it is *given* to become true.
+
+**Evidence.** `test_a_caller_can_widen_the_verify_window` drives an effect
+that arrives at 5s: verified under `timeout_s=8`, and the same effect shown
+to fail under the 2s default, so the test proves both the fix and that it
+was needed. `test_verify_window_reads_timeout_s_from_any_expect` covers the
+helper's table. `env: any`: the actuator is platform-neutral and runs on an
+injected clock (D48), so the deadline logic is exercised without waiting.
