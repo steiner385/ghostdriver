@@ -361,7 +361,11 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "own flag -- not proof it will act. An owner-drawn control paints "
         "its own greyed, do-nothing state without clearing that bit, so it "
         "reports enabled=true while unavailable; confirm with capture or "
-        "expect={changed} rather than trusting enabled."
+        "expect={changed} rather than trusting enabled. A match carries "
+        "`obscured` only when its window is not clickable where its rect says "
+        "-- minimized, or its centre covered by another program's window -- "
+        "so a rect with no `obscured` is a safe target and one with it is not "
+        "(restore or foreground first)."
     ))
     def find(session_id: SessionId, locator: LocatorArg,
              all_windows: AllWindows = False) -> dict[str, Any]:

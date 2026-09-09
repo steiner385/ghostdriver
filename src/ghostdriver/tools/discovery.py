@@ -14,11 +14,11 @@ from .core import (
     _element,
     _error,
     _physical,
-    _ToolboxCore,
     _top_level_holding,
     _top_level_overlapping,
 )
 from .guidance import BLOCKED_HINT, HUNG_HINT
+from .visibility import _VisibilityCore
 
 #: Above this fraction of non-background pixels a control has painted
 #: something, whatever it says when asked for its text.
@@ -32,7 +32,7 @@ INK_THRESHOLD = disclosure_report.INK_THRESHOLD
 MAX_WAIT_S = 300.0
 
 
-class DiscoveryTools(_ToolboxCore):
+class DiscoveryTools(_VisibilityCore):
     """Seeing the target: its tree, single elements, text, pixels, and waiting on it."""
 
     def describe(
@@ -122,13 +122,23 @@ class DiscoveryTools(_ToolboxCore):
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, str(exc), locator=locator)
 
+        vis_cache: dict = {}
+        elements = []
+        for node in matches[:MAX_ELEMENTS]:
+            described = _element(node)
+            # Only when obscured, and only then: a visible window says nothing,
+            # the way `actionable` is emitted only when False (#61).
+            obscured = self._obscured(session, node, vis_cache)
+            if obscured is not None:
+                described["obscured"] = obscured
+            elements.append(described)
         result = {
             "ok": True,
             "locator": locator,
             "match_count": len(matches),
             "frame": "screen",
             **self._frame_note(),
-            "elements": [_element(n) for n in matches[:MAX_ELEMENTS]],
+            "elements": elements,
             "searched": "every top-level window" if all_windows
                         else "the main window only",
         }

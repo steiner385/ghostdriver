@@ -3983,6 +3983,47 @@ were all held open by something that was *not failing*.
 
 Evidence: issue #58; issue #53; D10; D#9; D#39; `tests/test_linux_no_bus.py`.
 
+### D#61. A rect is not proof a window can be clicked, so find says when it cannot
+
+**The field report.** `find` on a Chrome window returned a normal on-screen
+rect while the page itself reported `document.visibilityState: hidden` -- the
+window was occluded, then later minimized -- and the result carried no sign of
+it. Two clicks were posted blind to a window that was not visible where its
+rect said.
+
+**The gap.** A rect is where a window *would* paint, not whether a person can
+see it now. Occluded, minimized-but-restoring and fully visible all report a
+plausible rect, and a posted click to a covered window can land on the glass
+in front. The caller had no way to tell it was guessing.
+
+**Two honest signals, both cheap, both reads.** `find` now attaches
+`obscured` to a match when its window is either:
+
+- **minimized** (`IsIconic` via the style bit) -- definitive: the rect is not
+  where it paints; or
+- **covered at its centre** -- `WindowFromPoint` on the window's centre
+  returns a window that is neither it, a child of it, nor part of the
+  target's own process tree. That last clause matters: a dialog the
+  application itself raised sits in front legitimately and is not an
+  occlusion to warn about.
+
+**What it deliberately is not.** The covered check is a *centre-point* test,
+not a full-coverage scan -- the issue asked for cheap and structural, not
+per-pixel, and the note on the flag says exactly that so a caller does not
+over-read it. A window covered everywhere but its centre reads visible; that
+is the honest limit of one point, stated rather than hidden.
+
+**A report, not a verdict (D28); no desktop taken (D55).** `obscured` never
+fails a call or refuses an action -- it is information for the caller, who may
+`restore` or `foreground` first. Nothing is raised or activated to measure
+it; `WindowFromPoint` and the style bit only read. And it is emitted *only*
+when obscured, the way `actionable` is emitted only when False (D66): a rect
+with no `obscured` is the safe case and says nothing.
+
+**Split for the limit (D60).** The helper pushed `tools/core.py` past 400
+lines, so it lives in `tools/visibility.py` as a mixin `DiscoveryTools` takes,
+not shaved into core. *(issue #61)*
+
 ## Open, for whoever picks this up
 
 > These two, and everything else outstanding, are now tracked as issues on

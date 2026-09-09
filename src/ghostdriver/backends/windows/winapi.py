@@ -89,6 +89,12 @@ user32.GetSystemMetrics.restype = ctypes.c_int
 user32.GetForegroundWindow.argtypes = []
 user32.GetForegroundWindow.restype = wintypes.HWND
 
+# WindowFromPoint takes a POINT by value and returns the top-level or child
+# window under that screen point -- the z-order question, which GetWindowRect
+# cannot answer. Used to tell an occluded window from a visible one.
+user32.WindowFromPoint.argtypes = [wintypes.POINT]
+user32.WindowFromPoint.restype = wintypes.HWND
+
 user32.GetWindowThreadProcessId.argtypes = [
     wintypes.HWND, ctypes.POINTER(wintypes.DWORD)
 ]
@@ -214,6 +220,15 @@ def window_rect(hwnd: int) -> tuple[int, int, int, int]:
     if not user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rect)):
         return (0, 0, 0, 0)
     return (rect.left, rect.top, rect.right, rect.bottom)
+
+
+def window_from_point(x: int, y: int) -> int:
+    """The window sitting at screen point (x, y) in the current z-order, or 0.
+
+    This is what a real click at that pixel would hit -- so if it is not the
+    window a caller means to drive (nor a descendant of it), that window is
+    covered there. A read of the desktop's z-order; it moves nothing."""
+    return user32.WindowFromPoint(wintypes.POINT(x, y)) or 0
 
 
 def send_message_timeout(
