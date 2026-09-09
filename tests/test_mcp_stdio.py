@@ -102,12 +102,12 @@ async def _drive_uia(pid: int):
         attached = await session.call_tool("attach", {"pid": pid})
         session_id = attached.structured_content["session_id"]
         surfaces = await session.call_tool(
-            "surfaces", {"session_id": session_id}
+            "surfaces", {"session_ref": session_id}
         )
         # A second call after the UIA walk: if the stream had been
         # corrupted, this is what would fail.
         still_alive = await session.call_tool(
-            "modals", {"session_id": session_id}
+            "modals", {"session_ref": session_id}
         )
         return surfaces.structured_content, still_alive.structured_content
 
