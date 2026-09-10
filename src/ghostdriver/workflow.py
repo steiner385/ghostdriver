@@ -26,6 +26,7 @@ fixture, separately.
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -336,6 +337,183 @@ def check(step: Step, result: Any) -> list[str]:
         elif fragment not in str(value):
             failures.append(f"{path} is {value!r}, which does not contain {fragment!r}")
     return failures
+
+
+# --- the macro runner: params and branches (#85) ---------------------------
+
+#: ${name} -- a parameter reference in a step's args or a guard's locator.
+_PARAM_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _substitute(value: Any, bindings: dict[str, Any], unresolved: list[str]) -> Any:
+    """Replace ${name} in `value` from `bindings`, recursing into dicts/lists.
+
+    A value that is *exactly* ``${name}`` keeps the binding's type -- an int
+    stays an int, a dict stays a dict -- so ``at: {x: ${x}}`` binds a number.
+    Embedded in a larger string it interpolates as text. A name with no
+    binding is collected in `unresolved` and left untouched, so the caller can
+    refuse rather than guess (D33).
+    """
+    if isinstance(value, str):
+        whole = _PARAM_RE.fullmatch(value)
+        if whole:
+            name = whole.group(1)
+            if name in bindings:
+                return bindings[name]
+            unresolved.append(name)
+            return value
+
+        def repl(match: re.Match[str]) -> str:
+            name = match.group(1)
+            if name in bindings:
+                return str(bindings[name])
+            unresolved.append(name)
+            return match.group(0)
+
+        return _PARAM_RE.sub(repl, value)
+    if isinstance(value, dict):
+        return {k: _substitute(v, bindings, unresolved) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_substitute(v, bindings, unresolved) for v in value]
+    return value
+
+
+def bind(value: Any, bindings: dict[str, Any]) -> tuple[Any, list[str]]:
+    """`value` with its ${name}s bound, and the names that had no binding."""
+    unresolved: list[str] = []
+    return _substitute(value, bindings, unresolved), sorted(set(unresolved))
+
+
+def missing_required(params: tuple[Param, ...], bindings: dict[str, Any]) -> list[str]:
+    """Required params with no binding. An unbound required param is refused,
+    not guessed (D33)."""
+    return [p.name for p in params if p.required and p.name not in bindings]
+
+
+def _guard_holds(box: Any, session_id: str, guard: Guard,
+                 bindings: dict[str, Any]) -> tuple[bool | None, str | None]:
+    """Whether a branch condition holds, read from the target. `(holds, error)`
+    -- error is set when the condition could not be evaluated (an unbound
+    locator param, a failed read, or a state the target does not expose yet),
+    and the caller refuses rather than branch on a guess.
+
+    Presence/absence is `find`'s match count; `text`, `selected` and `pressed`
+    refine a present match. `pressed` depends on a readable toggle state
+    (#77); until a control exposes it, a `pressed` guard is unevaluable and
+    says so rather than silently reading false.
+    """
+    locator, unbound = bind(guard.locator, bindings)
+    if unbound:
+        return None, f"the condition's locator has unbound param(s) {unbound}"
+    found = box.find(session_id, locator, all_windows=guard.all_windows)
+    if not found.get("ok"):
+        return None, ("could not evaluate the condition: "
+                      + str((found.get("error") or {}).get("message", found)))
+    elements = found.get("elements") or []
+    if guard.absent:
+        return len(elements) == 0, None
+    if not elements:
+        return False, None
+
+    holds = True
+    for key, wanted, label in (("text", guard.text, "text"),
+                               ("selected", guard.selected, "selected state"),
+                               ("pressed", guard.pressed, "pressed state")):
+        if wanted is None:
+            continue
+        readable = [e for e in elements if key in e]
+        if not readable:
+            hint = " yet (#77)" if key == "pressed" else ""
+            return None, f"cannot read the {label} of the matched control{hint}"
+        holds = holds and any(e.get(key) == wanted for e in readable)
+    return holds, None
+
+
+@dataclass
+class MacroStep:
+    """One leaf's outcome in a macro run. `path` locates it in the tree
+    ("0", "1.then.0"), so a failure in a branch is placed exactly."""
+    path: str
+    tool: str
+    ok: bool
+    failures: list[str]
+    verified: bool = False
+    delivery_only: bool = False
+
+    def to_dict(self) -> dict:
+        return {"path": self.path, "tool": self.tool, "ok": self.ok,
+                "failures": self.failures, "verified": self.verified,
+                "delivery_only": self.delivery_only}
+
+
+def run_macro_body(
+    box: Any,
+    session_id: str,
+    nodes: tuple[Node, ...],
+    bindings: dict[str, Any],
+    *,
+    context: str = "macro",
+    stop_on_failure: bool = True,
+) -> dict:
+    """Walk a macro body against one session: substitute params, evaluate
+    `when` branches, and dispatch each leaf through the shared allowlist (#83).
+
+    Returns `{ok, completed, steps, refused, stopped_at}`. A withheld tool, an
+    unbound param, or an unevaluable condition **refuses the whole run**
+    (`refused` set) -- those are macro-authoring or binding errors, and the
+    honest response is to stop, not to run half a macro on a guess (D33). A
+    leaf whose assertions fail is an ordinary step failure that stops the run
+    when `stop_on_failure`. This is the evaluation core; `macro_replay` (#87)
+    wraps it with attach, the interference watch, and the report.
+    """
+    from .tools.stepper import call_tool, step_refusal
+
+    records: list[MacroStep] = []
+    state: dict[str, Any] = {"stopped": False, "refused": None}
+
+    def walk(nodes: tuple[Node, ...], path: str) -> None:
+        for i, node in enumerate(nodes):
+            if state["stopped"] or state["refused"]:
+                return
+            at = f"{path}{i}"
+            if isinstance(node, Branch):
+                holds, err = _guard_holds(box, session_id, node.when, bindings)
+                if err is not None:
+                    state["refused"] = f"{at}.when: {err}"
+                    return
+                arm, label = (node.then, "then") if holds else (node.otherwise, "else")
+                walk(arm, f"{at}.{label}.")
+                continue
+
+            bound_args, unbound = bind(node.args, bindings)
+            if unbound:
+                state["refused"] = (
+                    f"{at}: unbound param(s) {unbound}; bind them at replay or fix "
+                    "the macro -- refused, not guessed")
+                return
+            refusal = step_refusal(at, node.tool, bound_args, context=context)
+            if refusal is not None:
+                state["refused"] = refusal
+                return
+            result = call_tool(box, session_id, node.tool, bound_args)
+            failures = check(node, result)
+            records.append(MacroStep(at, node.tool, not failures, failures,
+                                     node.verified, node.delivery_only))
+            if failures and stop_on_failure:
+                state["stopped"] = True
+                return
+
+    walk(nodes, "")
+    stopped_at = None
+    if state["stopped"]:
+        stopped_at = next((r.path for r in records if not r.ok), None)
+    return {
+        "ok": state["refused"] is None and all(r.ok for r in records),
+        "completed": len(records),
+        "steps": [r.to_dict() for r in records],
+        "refused": state["refused"],
+        "stopped_at": stopped_at,
+    }
 
 
 # --- the run ---------------------------------------------------------------------
