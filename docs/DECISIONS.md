@@ -4738,3 +4738,44 @@ provenance.
 it fails clean with a pointer to #85 rather than crash, so a branch reaching
 it is a plain error, not a traceback. `env: any`: the model and its refusals
 are proven with `Workflow.from_dict` in `tests/test_workflow.py`, no fixture.
+
+### D#85. Macro control flow: params bound or refused, a branch read not guessed
+
+**Context.** #84 gave the format params and a `when` branch; this makes them
+run. The behaviors are small but the principle they must not break is the
+whole project's: a macro adds sequencing and choice, never a way around a
+tool's own checks, and it refuses ambiguity rather than picks (D33, D35).
+
+**Decision.** `run_macro_body` walks the node tree against one session:
+
+- **Params are bound or the run is refused.** `${name}` is substituted into a
+  step's args (and a guard's locator), preserving type -- a value that is
+  exactly `${x}` keeps its binding's type, so `at: {x: ${x}}` binds a number.
+  A required param with no binding, or an unresolved `${name}`, refuses the
+  whole run naming what is missing. A macro never guesses a value.
+- **A branch is read from the target, never guessed.** A `when` condition is
+  evaluated by `find`: presence, or `absent`, with `text`/`selected`/`pressed`
+  refining a present match. A condition that cannot be evaluated -- an unbound
+  locator param, a failed read, or a `pressed` state the control does not
+  expose yet (#77) -- refuses the run rather than silently branch false. That
+  last case is the honest one: a funnel whose pressed state is unreadable must
+  say so, not take the else arm by accident.
+- **The safety model carries through.** Each leaf goes through the shared gate
+  factored out of `batch` (`stepper.step_refusal` + `call_tool`, D#83): the
+  same allowlist, the same refusal of a step carrying its own session, the
+  same tier enforced per step by the tool method itself. A withheld tool
+  refuses the whole macro. A leaf's dotted-path assertions are the workflow
+  `check()` it already had; a failing assertion stops the run (or not, under
+  `stop_on_failure`).
+
+A refusal (`refused` set) is a macro-authoring or binding error and aborts;
+a leaf assertion failure is an ordinary stop. The two are kept distinct in
+the result so a caller can tell "this macro is wrong" from "the screen was
+not what it expected". Tree paths ("1.then.0") place a failure exactly.
+
+**Held to evaluation-only.** `run_macro_body` is pure with respect to the
+desktop -- toolbox handed in -- and proven with a fake in
+`tests/test_macro_runner.py` (`env: any`). Attach, the interference watch and
+the report are `macro_replay`'s (#87), which wraps this core. The `batch`
+extraction is behavior-preserving, proven by `test_batch.py` and
+`test_stepper.py` staying green.

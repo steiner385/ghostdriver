@@ -52,6 +52,38 @@ def step_summary(index: int, tool: str, result: dict) -> dict:
     return out
 
 
+def step_refusal(where: str, tool: str, args, *, context: str = "batch") -> str | None:
+    """Why a step may not run at all, or None if it may -- the shared gate for
+    a batch and a macro. `where` labels the step in the message ("step 3",
+    "1.then.0"). A withheld tool or a step carrying its own session is refused;
+    the caller aborts the whole run on a non-None return, since a run that
+    would reach a withheld tool is malformed, not half-runnable.
+    """
+    if not isinstance(args, dict):
+        return f"{where}: args must be an object, not {type(args).__name__}"
+    if "session_id" in args or "session_ref" in args:
+        return (f"{where}: omit the session in a step; the {context} runs every "
+                "step against its own session")
+    if tool not in RUNNABLE_TOOLS:
+        return (f"{where}: {tool!r} cannot run in a {context}. Tools that can run "
+                f"in a {context} are {sorted(RUNNABLE_TOOLS)}. Lifecycle and "
+                "consent tools (attach, release, grant_*, launch_isolated) and the "
+                "two that interrupt a person (foreground, await_human) run on "
+                "their own.")
+    return None
+
+
+def call_tool(toolbox, session_id: str, tool: str, args: dict) -> dict:
+    """Dispatch one already-validated tool call. A `TypeError` from bad
+    arguments becomes a step-failure result rather than a crash, so it obeys
+    stop-on-failure like any other outcome."""
+    method = getattr(toolbox, tool)
+    try:
+        return method(session_id, **args)
+    except TypeError as exc:
+        return _error(ErrorKind.NOT_ACTIONABLE, f"{tool}: bad arguments -- {exc}")
+
+
 def run_steps(toolbox, session_id: str, steps, *, stop_on_failure: bool = True,
               context: str = "batch") -> dict:
     """Run `steps` in order against one session on `toolbox`.
@@ -82,31 +114,11 @@ def run_steps(toolbox, session_id: str, steps, *, stop_on_failure: bool = True,
                           f"got {step!r}")
         tool = step["tool"]
         args = step.get("args") or {}
-        if not isinstance(args, dict):
-            return _error(ErrorKind.NOT_ACTIONABLE,
-                          f"step {index}: args must be an object, not {type(args).__name__}")
-        if "session_id" in args or "session_ref" in args:
-            return _error(ErrorKind.NOT_ACTIONABLE,
-                          f"step {index}: omit the session in a step; the {context} "
-                          "runs every step against its own session")
-        if tool not in RUNNABLE_TOOLS:
-            return _error(
-                ErrorKind.NOT_ACTIONABLE,
-                f"step {index}: {tool!r} cannot run in a {context}. Tools that "
-                f"can run in a {context} are {sorted(RUNNABLE_TOOLS)}. Lifecycle "
-                "and consent tools (attach, release, grant_*, launch_isolated) "
-                "and the two that interrupt a person (foreground, await_human) "
-                "run on their own.")
+        refusal = step_refusal(f"step {index}", tool, args, context=context)
+        if refusal is not None:
+            return _error(ErrorKind.NOT_ACTIONABLE, refusal)
 
-        method = getattr(toolbox, tool)
-        try:
-            result = method(session_id, **args)
-        except TypeError as exc:
-            # Bad arguments for that tool: a step failure, not a run crash,
-            # so it obeys stop_on_failure like any other.
-            result = _error(ErrorKind.NOT_ACTIONABLE,
-                            f"{tool}: bad arguments -- {exc}")
-
+        result = call_tool(toolbox, session_id, tool, args)
         ran.append(step_summary(index, tool, result))
         if not result.get("ok"):
             all_ok = False
