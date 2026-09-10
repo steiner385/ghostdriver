@@ -73,6 +73,10 @@ TIER_TOOLS: dict[Tier, frozenset[str]] = {
         # like batch: each step re-checks its own tier, and the macro's
         # declared tier is checked against the session's up front (#87).
         "macro_replay",
+        # Recording buffers this session's actuations into a macro (#88). The
+        # capture is bookkeeping; the actuations it records enforce their own
+        # tier as they happen, so recording itself is read-only.
+        "record_start", "record_save", "record_discard",
     }),
     Tier.INTERACTIVE: frozenset({
         "click", "type_text", "set_value", "send_keys",

@@ -137,6 +137,10 @@ class _ToolboxCore:
     #: Where tool calls are recorded (trace.py); resolved from the
     #: environment on first use, and a no-op when nothing is configured.
     _trace: Any = None
+    #: Live macro recordings, by session id (#88). A session that is
+    #: recording buffers its verified actuations here; empty is the common
+    #: case, so the wrapper's per-call check is one dict lookup.
+    _recordings: dict = field(default_factory=dict)
 
     def _busy(self, session) -> bool | None:
         """Whether the target shows its profile's busy indicator now. None

@@ -39,7 +39,7 @@ BATCH_TOOLS = {"batch"}
 
 #: Macro lifecycle bookkeeping over the operator directory (#86). Session-free.
 MACRO_TOOLS = {"macro_save", "macro_list", "macro_show", "macro_delete",
-               "macro_replay"}
+               "macro_replay", "record_start", "record_save", "record_discard"}
 
 #: Reachable only from a session opened at the interactive tier. Registered
 #: unconditionally -- the tier check happens per call, against the session,
