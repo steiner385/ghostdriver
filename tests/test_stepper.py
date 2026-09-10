@@ -1,0 +1,127 @@
+"""The shared execution core (D#83), proven with a fake toolbox.
+
+The core is pure with respect to the desktop -- it calls methods on a
+toolbox handed in -- so it needs no fixture and runs on any platform. The
+end-to-end proof that `batch` still behaves is `tests/test_batch.py` against
+the real fixture; here the core's own logic is exercised directly.
+"""
+
+from ghostdriver.tools.stepper import RUNNABLE_TOOLS, run_steps
+
+
+class FakeBox:
+    """A toolbox whose tools are just enough to drive the core.
+
+    Real signatures (no ``**kwargs``), so an unexpected argument raises
+    ``TypeError`` exactly as a real tool would -- that is the path the core
+    turns into a step failure rather than a crash.
+    """
+
+    def __init__(self):
+        self.calls: list[tuple] = []
+
+    def describe(self, session_id):
+        self.calls.append(("describe", session_id))
+        return {"ok": True, "verified": "effect"}
+
+    def find(self, session_id, locator, all_windows=False):
+        self.calls.append(("find", session_id, locator))
+        if locator == "MISS":
+            return {"ok": False, "match_count": 0,
+                    "error": {"kind": "not_found", "message": "no match"}}
+        return {"ok": True, "match_count": 1}
+
+
+def test_a_run_dispatches_every_step_and_reports_each_verdict():
+    box = FakeBox()
+
+    out = run_steps(box, "sid", [
+        {"tool": "describe", "args": {}},
+        {"tool": "find", "args": {"locator": "class=X"}},
+    ])
+
+    assert out["ok"] and out["completed"] == 2 and out["stopped_at"] is None
+    assert [s["tool"] for s in out["steps"]] == ["describe", "find"]
+    assert box.calls == [("describe", "sid"), ("find", "sid", "class=X")]
+
+
+def test_a_failing_step_stops_the_run_by_default():
+    box = FakeBox()
+
+    out = run_steps(box, "sid", [
+        {"tool": "find", "args": {"locator": "MISS"}},
+        {"tool": "describe", "args": {}},
+    ])
+
+    assert not out["ok"] and out["stopped_at"] == 0 and out["completed"] == 1
+    assert len(out["steps"]) == 1, "the second step never ran"
+    assert box.calls == [("find", "sid", "MISS")], "describe was not dispatched"
+
+
+def test_stop_on_failure_false_runs_every_step():
+    box = FakeBox()
+
+    out = run_steps(box, "sid", [
+        {"tool": "find", "args": {"locator": "MISS"}},
+        {"tool": "describe", "args": {}},
+    ], stop_on_failure=False)
+
+    assert not out["ok"] and out["completed"] == 2 and out["stopped_at"] is None
+
+
+def test_a_tool_outside_the_allowlist_is_refused_before_anything_runs():
+    box = FakeBox()
+
+    out = run_steps(box, "sid", [
+        {"tool": "describe", "args": {}},
+        {"tool": "attach", "args": {}},
+    ])
+
+    assert not out["ok"] and "cannot run in a batch" in out["error"]["message"]
+    assert "attach" in out["error"]["message"]
+    assert "steps" not in out
+
+
+def test_the_context_word_names_the_caller():
+    box = FakeBox()
+
+    out = run_steps(box, "sid", [{"tool": "attach", "args": {}}], context="macro")
+
+    assert "cannot run in a macro" in out["error"]["message"]
+
+
+def test_a_step_may_not_carry_its_own_session():
+    box = FakeBox()
+
+    for key in ("session_id", "session_ref"):
+        out = run_steps(box, "sid", [{"tool": "describe", "args": {key: "elsewhere"}}])
+        assert not out["ok"] and "omit the session" in out["error"]["message"]
+    assert box.calls == [], "nothing was dispatched"
+
+
+def test_bad_arguments_to_a_step_are_that_step_s_failure():
+    box = FakeBox()
+
+    out = run_steps(box, "sid", [{"tool": "describe", "args": {"no_such_arg": 1}}])
+
+    assert not out["ok"] and out["stopped_at"] == 0
+    assert "bad arguments" in out["steps"][0]["error"]["message"]
+
+
+def test_malformed_steps_are_refused_by_shape():
+    box = FakeBox()
+
+    assert not run_steps(box, "sid", [{"args": {}}])["ok"]        # no tool
+    assert not run_steps(box, "sid", "describe")["ok"]              # not a list
+    assert not run_steps(box, "sid", [])["ok"]                      # empty
+    bad = run_steps(box, "sid", [{"tool": "describe", "args": "x"}])
+    assert not bad["ok"] and "args must be an object" in bad["error"]["message"]
+
+
+def test_the_allowlist_is_the_documented_set():
+    """A guard: the set of runnable tools is deliberate, so a change to it is
+    a change someone has to make on purpose."""
+    assert "click" in RUNNABLE_TOOLS and "find" in RUNNABLE_TOOLS
+    for withheld in ("attach", "release", "grant_targets", "launch_isolated",
+                     "foreground", "await_human", "batch", "pace"):
+        assert withheld not in RUNNABLE_TOOLS, withheld
