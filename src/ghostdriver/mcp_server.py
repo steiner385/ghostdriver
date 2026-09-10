@@ -645,6 +645,33 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     ) -> dict[str, Any]:
         return box.macro_delete(name)
 
+    @server.tool(annotations=ACTUATES, description=(
+        "Replay a saved macro against an already-attached session. The "
+        "operator approved the target and chose its tier by attaching; this "
+        "runs the macro's body against that session, each step through the "
+        "same checks a standalone call gets, under an interference watch (a "
+        "foreground the target takes during the run fails it). `params` binds "
+        "the macro's ${name} values; a missing required one is refused, not "
+        "guessed. `dry_run` resolves the params and returns the plan WITHOUT "
+        "acting -- what a mutating macro's first run should look at (a branch "
+        "shows both arms, since its condition is read at run time). A macro "
+        "recorded against a different profile is warned about, not refused. "
+        "Replays from the start and reports where it stopped; a report is "
+        "written to the operator directory."
+    ))
+    def macro_replay(
+        session_ref: SessionId,
+        name: Annotated[str, Field(description="The macro to replay.")],
+        params: Annotated[dict | None, Field(description=(
+            "Values bound to the macro's declared params, name -> value; "
+            "referenced as ${name} in a step's args."
+        ))] = None,
+        dry_run: Annotated[bool, Field(description=(
+            "Resolve params and return the plan without acting. Default false."
+        ))] = False,
+    ) -> dict[str, Any]:
+        return box.macro_replay(session_ref, name, params=params, dry_run=dry_run)
+
     @server.tool(annotations=CHANGES_SCREEN, description=(
         "Bring a window of the target to the front -- the deliberate pair to "
         "isolation=minimized. Everything else works from the background, so "

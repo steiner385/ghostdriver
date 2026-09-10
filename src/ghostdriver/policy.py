@@ -69,6 +69,10 @@ TIER_TOOLS: dict[Tier, frozenset[str]] = {
         # macro touches no target (#86). Replaying one is macro_replay (#87),
         # which enforces the macro's own tier per step.
         "macro_save", "macro_list", "macro_show", "macro_delete",
+        # Replays a macro against an already-attached session. Read-only tier
+        # like batch: each step re-checks its own tier, and the macro's
+        # declared tier is checked against the session's up front (#87).
+        "macro_replay",
     }),
     Tier.INTERACTIVE: frozenset({
         "click", "type_text", "set_value", "send_keys",

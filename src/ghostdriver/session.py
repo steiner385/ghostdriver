@@ -48,6 +48,9 @@ class Profile:
 
     path: Path | None = None
     matched_profile: str = "unknown"
+    #: The profile document's own id, when it declares one -- what a macro's
+    #: provenance.recorded_against names, so replay can warn on a mismatch (#87).
+    profile_id: str = ""
     denylist: tuple[str, ...] = ()
     #: Denied *places*: {"within": locator, "region": {left, top, right,
     #: bottom}, "note"?}, the rectangle in the client coordinates of the
@@ -111,6 +114,7 @@ class Profile:
         return cls(
             path=location,
             matched_profile=document.get("matched_profile", "unknown"),
+            profile_id=str(document.get("profile_id", "")),
             denylist=tuple(names),
             deny_regions=tuple(regions),
             sensitivity=sensitivity,

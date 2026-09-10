@@ -11,9 +11,17 @@ already has (the `batch` it just ran, say), read back, listed, and archived.
 import json
 import time
 
-from ..model.result import ErrorKind
+from ..model.result import ErrorKind, GhostdriverError
 from ..operator import ENV_VAR, OperatorDir, OperatorDirError
-from ..workflow import Branch, Workflow, WorkflowError
+from ..policy import Tier
+from ..workflow import (
+    Branch,
+    Workflow,
+    WorkflowError,
+    bind,
+    missing_required,
+    run_macro_body,
+)
 from .core import _error, _ToolboxCore
 
 
@@ -37,6 +45,32 @@ def _no_directory() -> dict:
         ErrorKind.NOT_ACTIONABLE,
         f"macros live in the operator directory ({ENV_VAR}); none is configured, "
         "so there is nowhere to keep one")
+
+
+#: Tier order, so replay can check a session is at least the tier a macro
+#: declares before it runs a step the session's own tier would refuse anyway
+#: -- a fail-fast with a clear reason (#87).
+_TIER_RANK = {Tier.READ_ONLY: 0, Tier.INTERACTIVE: 1, Tier.FULL: 2}
+
+
+def _plan_node(node, bindings: dict) -> dict:
+    """One node in a dry-run plan: a leaf with its params bound, or a branch
+    whose arm is chosen at run time. A plan is honest that a branch cannot be
+    resolved without acting -- the condition is read from the screen the
+    previous step leaves (docs/MACROS.md, open questions)."""
+    if isinstance(node, Branch):
+        return {
+            "when": node.when.locator,
+            "resolved": "at run time (the condition is read from the target)",
+            "then": [_plan_node(n, bindings) for n in node.then],
+            "else": [_plan_node(n, bindings) for n in node.otherwise],
+        }
+    bound_args, unbound = bind(node.args, bindings)
+    entry = {"tool": node.tool, "args": bound_args,
+             "verified": node.verified, "delivery_only": node.delivery_only}
+    if unbound:
+        entry["unbound"] = unbound
+    return entry
 
 
 class MacroTools(_ToolboxCore):
@@ -139,3 +173,125 @@ class MacroTools(_ToolboxCore):
         dest = folder.archive_workflow(name, time.strftime("%Y%m%d-%H%M%S"))
         return {"ok": True, "name": name, "archived_to": str(dest),
                 "note": "archived, not destroyed; recover it from the archive if needed"}
+
+    def macro_replay(self, session_id: str, name: str, *,
+                     params: dict | None = None, dry_run: bool = False) -> dict:
+        """Replay a macro against an already-attached session.
+
+        The operator has approved the target and chosen its tier by attaching;
+        replay runs the macro's body against that session through the shared
+        core (D#85), under the interference watch a workflow run uses -- a
+        foreground taken by the target during the run fails it whatever the
+        steps said. Params are bound here (a missing required one is refused,
+        not guessed, D33); `dry_run` resolves them and returns the plan without
+        acting, which a mutating macro's first run should look at. A macro
+        recorded against a different profile is warned about, not refused,
+        unless one of its locators cannot resolve. Replays from the start and
+        reports where it stopped; resume is deferred.
+        """
+        try:
+            session = self.sessions.authorize(session_id, "macro_replay")
+        except GhostdriverError as exc:
+            return _error(exc.kind, exc.message)
+        try:
+            folder = OperatorDir.resolve()
+        except OperatorDirError:
+            return _no_directory()
+        try:
+            path = folder.workflow_path(name)
+        except OperatorDirError as exc:
+            return _error(ErrorKind.NOT_FOUND, str(exc))
+        try:
+            wf = Workflow.load(path)
+        except WorkflowError as exc:
+            return _error(ErrorKind.NOT_ACTIONABLE, f"the macro will not load: {exc}")
+
+        bindings = dict(params or {})
+        missing = missing_required(wf.params, bindings)
+
+        warnings = []
+        recorded = wf.provenance.recorded_against
+        here = session.profile.profile_id
+        if recorded and here and recorded != here:
+            warnings.append(
+                f"this macro was recorded against profile {recorded!r}, but the "
+                f"session's profile is {here!r}; a locator from one target class "
+                "may mean nothing on another -- replaying anyway, watch the steps")
+
+        # A dry run inspects; it neither acts nor is gated. It shows the plan
+        # with params bound (an unbound one marked, not refused), so a mutating
+        # macro's first run -- or a read-only session -- can see what it would
+        # do before it does it.
+        if dry_run:
+            return {
+                "ok": True, "dry_run": True, "name": wf.name, "tier": wf.tier,
+                "warnings": warnings, "missing_required": missing,
+                "plan": [_plan_node(n, bindings) for n in wf.steps],
+                "note": "nothing was actuated; a branch resolves at run time, so "
+                        "the plan shows both arms",
+            }
+
+        # A real run binds or refuses (D33), and needs a session at least the
+        # macro's declared tier -- its steps enforce their own tier too, but
+        # this fails fast with the reason rather than midway through.
+        if missing:
+            return _error(
+                ErrorKind.NOT_ACTIONABLE,
+                f"the macro needs param(s) {missing} bound at replay; pass "
+                f"params={{{missing[0]!r}: ...}}. A macro never guesses a value.")
+        try:
+            needed = Tier(wf.tier)
+        except ValueError:
+            needed = Tier.READ_ONLY
+        if _TIER_RANK.get(session.tier, 0) < _TIER_RANK.get(needed, 0):
+            return _error(
+                ErrorKind.DENIED_BY_POLICY,
+                f"this macro is written for the {needed.value!r} tier, but the "
+                f"session is {session.tier.value!r}; re-attach at {needed.value!r} "
+                "to replay it")
+
+        from ..backends import current
+        watch = current().InterferenceWatch(
+            session.pid, family=lambda: [session.pid, *_descendants(session.pid)])
+        watch.start()
+        try:
+            outcome = run_macro_body(self, session_id, wf.steps, bindings,
+                                     context="macro")
+        finally:
+            watch.stop()
+        interference = watch.events()
+        took_foreground = any(e.get("kind") == "foreground_taken" for e in interference)
+
+        result = dict(outcome)
+        result["name"] = wf.name
+        if warnings:
+            result["warnings"] = warnings
+        if interference:
+            result["interference"] = interference
+        if took_foreground:
+            result["ok"] = False
+            result["foreground_taken"] = True
+
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        report = {
+            "macro": wf.name, "session": session_id, "pid": session.pid,
+            "ok": result["ok"], "bindings": bindings, "warnings": warnings,
+            "steps": outcome["steps"], "refused": outcome.get("refused"),
+            "stopped_at": outcome.get("stopped_at"), "interference": interference,
+        }
+        try:
+            result["report_saved_to"] = str(
+                folder.write_report(f"macro-{wf.name}", stamp, report))
+        except OSError:
+            result["report_saved_to"] = None
+        return result
+
+
+def _descendants(pid: int) -> list:
+    """The processes the target spawned, through the backend -- so the
+    interference watch covers a dialog a helper process owns (D71)."""
+    from ..backends import current
+    try:
+        return list(current().descendants(pid))
+    except Exception:
+        return []
