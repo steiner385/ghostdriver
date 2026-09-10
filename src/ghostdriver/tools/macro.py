@@ -16,6 +16,8 @@ from ..operator import ENV_VAR, OperatorDir, OperatorDirError
 from ..policy import Tier
 from ..workflow import (
     Branch,
+    ForEach,
+    RepeatUntil,
     Workflow,
     WorkflowError,
     bind,
@@ -36,6 +38,12 @@ def _describe_node(node) -> dict:
             "else": [_describe_node(n) for n in node.otherwise],
             "note": node.note,
         }
+    if isinstance(node, RepeatUntil):
+        return {"repeat_until": node.until.locator, "max": node.max,
+                "do": [_describe_node(n) for n in node.do], "note": node.note}
+    if isinstance(node, ForEach):
+        return {"for_each": node.var, "in": node.items,
+                "do": [_describe_node(n) for n in node.do], "note": node.note}
     return {"tool": node.tool, "verified": node.verified,
             "delivery_only": node.delivery_only, "note": node.note}
 
@@ -65,6 +73,18 @@ def _plan_node(node, bindings: dict) -> dict:
             "then": [_plan_node(n, bindings) for n in node.then],
             "else": [_plan_node(n, bindings) for n in node.otherwise],
         }
+    if isinstance(node, RepeatUntil):
+        return {"repeat_until": node.until.locator, "max": node.max,
+                "resolved": "runs the body until the condition holds, at run time",
+                "do": [_plan_node(n, bindings) for n in node.do]}
+    if isinstance(node, ForEach):
+        resolved, unbound = (bind(node.items, bindings)
+                             if isinstance(node.items, str) else (node.items, []))
+        entry = {"for_each": node.var, "in": resolved,
+                 "do": [_plan_node(n, bindings) for n in node.do]}
+        if unbound:
+            entry["unbound"] = unbound
+        return entry
     bound_args, unbound = bind(node.args, bindings)
     entry = {"tool": node.tool, "args": bound_args,
              "verified": node.verified, "delivery_only": node.delivery_only}

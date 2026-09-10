@@ -4905,3 +4905,42 @@ records a real click against the fixture, confirms the read beside it was not
 recorded, and reads the macro back. This closes macro v1: record, replay,
 modify (edit the file), delete -- of parameterized linear-and-branch macros
 (#83-#88). Loops and reactive handlers are v2/v3 (docs/MACROS.md).
+
+### D#97. Macro loops: bounded, checked, and honest about not finishing
+
+**Context.** Macro v2 (#81). A linear-plus-branch macro cannot express the two
+shapes the real work is full of: page a grid until a value appears, and do the
+same thing to every row. Loops add them, and the risk they add is the one the
+project is most careful about -- a run that never ends.
+
+**Decision.** Two loop nodes, evaluated by `run_macro_body` through the same
+core every step already goes through, so a loop's body is not a way around a
+tool's checks.
+
+- **`repeat_until`** runs its `do` *while the condition does not hold*, checked
+  **before** each iteration -- so an already-satisfied condition runs the body
+  zero times, which is what "page until the value is visible" wants. `max` is
+  **required and capped** (`MAX_ITERATIONS`): a macro cannot spin, the same
+  instinct as `pace`'s cap (D#76). Reaching `max` without the condition holding
+  is a **failure**, not a silent stop -- the loop did not achieve what it
+  named, and says so.
+- **`for_each`** runs its `do` once per item in a list, binding the loop
+  variable (referenced as `${var}` in the arm), the list either inline or a
+  `${param}` that resolves at run time. An `in` that resolves to something
+  other than a list, or a list past the ceiling, is refused (D33) rather than
+  guessed or run away with.
+
+Loops nest under the existing depth bound, and a condition that cannot be read
+refuses the loop exactly as a branch's does (D#85) -- honesty over a guess. The
+linear `run_workflow` fails clean on a loop it cannot execute, as it does on a
+branch.
+
+**Not recorded.** `macro_record` still captures only linear actuations (D#88);
+a loop is authored, not recorded, in v2. Reactive `on_disturbance` handlers
+remain v3.
+
+**Evidence.** Parsing and its refusals in `tests/test_workflow.py`; evaluation
+-- the zero-iteration case, stopping when the condition holds, the max-reached
+failure, per-item binding, a non-list `in`, an unreadable condition, and a body
+failure stopping the loop -- in `tests/test_macro_runner.py`, all with a fake
+toolbox (`env: any`).

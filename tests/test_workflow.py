@@ -13,9 +13,11 @@ import pytest
 from ghostdriver.operator import ENV_VAR, OperatorDir, OperatorDirError
 from ghostdriver.workflow import (
     Branch,
+    ForEach,
     Guard,
     Param,
     Provenance,
+    RepeatUntil,
     RunReport,
     Step,
     Workflow,
@@ -448,5 +450,46 @@ def test_the_linear_runner_fails_clean_on_a_branch_until_the_macro_runner():
     report = run_workflow(box, wf, pid=1234, watch=FakeWatch())
 
     assert report.verdict == "failed"
-    assert any("macro runner (#85)" in f for f in report.steps[0].failures)
+    assert any("macro runner" in f for f in report.steps[0].failures)
     assert report.release.get("ok"), "it still released the session"
+
+
+# --- loops: the format (#97) ----------------------------------------------
+
+def test_a_repeat_until_loop_parses():
+    wf = Workflow.from_dict({"steps": [
+        {"repeat_until": {"locator": "class=Done"}, "max": 20,
+         "do": [{"tool": "click", "args": {"locator": "next"}}], "note": "page"}]})
+
+    loop = wf.steps[0]
+    assert isinstance(loop, RepeatUntil)
+    assert loop.until == Guard(locator="class=Done") and loop.max == 20
+    assert [s.tool for s in loop.do] == ["click"] and loop.note == "page"
+
+
+def test_a_for_each_loop_parses_a_list_and_a_param():
+    inline = Workflow.from_dict({"steps": [
+        {"for_each": "row", "in": ["A", "B"],
+         "do": [{"tool": "click", "args": {"locator": "${row}"}}]}]})
+    assert isinstance(inline.steps[0], ForEach)
+    assert inline.steps[0].var == "row" and inline.steps[0].items == ["A", "B"]
+
+    param = Workflow.from_dict({"steps": [
+        {"for_each": "x", "in": "${rows}", "do": [{"tool": "click", "args": {"locator": "x"}}]}]})
+    assert param.steps[0].items == "${rows}"
+
+
+@pytest.mark.parametrize("bad", [
+    {"steps": [{"repeat_until": {"locator": "x"}, "do": [{"tool": "click"}]}]},   # no max
+    {"steps": [{"repeat_until": {"locator": "x"}, "max": 0, "do": [{"tool": "click"}]}]},  # max < 1
+    {"steps": [{"repeat_until": {"locator": "x"}, "max": 99999, "do": [{"tool": "click"}]}]},  # over ceiling
+    {"steps": [{"repeat_until": {"locator": "x"}, "max": 5}]},                    # no do
+    {"steps": [{"for_each": "row", "do": [{"tool": "click"}]}]},                  # no in
+    {"steps": [{"for_each": "row", "in": 3, "do": [{"tool": "click"}]}]},         # in not a list/str
+    {"steps": [{"for_each": "not an id", "in": [], "do": [{"tool": "click"}]}]},  # bad var (and empty do)
+    {"steps": [{"for_each": "row", "in": ["a"], "do": [{"tool": "click"}], "oops": 1}]},  # unknown key
+    {"steps": [{"tool": "click", "repeat_until": {"locator": "x"}, "max": 2, "do": []}]},  # two kinds
+])
+def test_a_malformed_loop_is_refused(bad):
+    with pytest.raises(WorkflowError):
+        Workflow.from_dict(bad)

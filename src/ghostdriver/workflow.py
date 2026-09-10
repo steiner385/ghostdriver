@@ -122,13 +122,44 @@ class Branch:
     note: str = ""
 
 
-#: A node in a macro body is a leaf step or a branch. The tree is recursive:
-#: a branch's arms are themselves nodes.
-Node = Step | Branch
+@dataclass(frozen=True)
+class RepeatUntil:
+    """Run `do` while `until` does NOT hold, checked *before* each iteration
+    (so an already-satisfied condition runs it zero times), up to `max`
+    times. A macro cannot spin: `max` is required and capped (v2, #97)."""
+    until: Guard
+    do: tuple[Node, ...]
+    max: int
+    note: str = ""
 
-#: How deep branches may nest. A bound keeps a macro something a person can
-#: still read at a glance, the same instinct as `pace`'s cap (D#76).
+
+@dataclass(frozen=True)
+class ForEach:
+    """Run `do` once per item in `items`, binding `var` -- referenced as
+    ${var} in the arm's args. `items` is a list, or a ${param} that binds to
+    one at run time (v2, #97)."""
+    var: str
+    items: Any
+    do: tuple[Node, ...]
+    note: str = ""
+
+
+#: A node in a macro body is a leaf step, a branch, or a loop. The tree is
+#: recursive: an arm or a loop body is itself a list of nodes.
+Node = Step | Branch | RepeatUntil | ForEach
+
+#: The keys each control-flow node may carry (loops, #97).
+REPEAT_KEYS = frozenset({"repeat_until", "max", "do", "note"})
+FOREACH_KEYS = frozenset({"for_each", "in", "do", "note"})
+
+#: How deep branches and loops may nest. A bound keeps a macro something a
+#: person can still read at a glance, the same instinct as `pace`'s cap (D#76).
 MAX_NEST_DEPTH = 8
+
+#: The hard ceiling on any one loop, so `max` cannot be set absurdly and a
+#: for_each cannot be handed a runaway list. A loop is a convenience, not a
+#: place to park a run (D#76).
+MAX_ITERATIONS = 1000
 
 
 @dataclass(frozen=True)
@@ -191,18 +222,22 @@ def _parse_nodes(raw_list: Any, where: str, *, depth: int = 0) -> tuple[Node, ..
         at = f"{where}[{i}]"
         if not isinstance(raw, dict):
             raise WorkflowError(f"{at} must be an object")
-        is_leaf, is_branch = "tool" in raw, "when" in raw
-        if is_leaf and is_branch:
+        kinds = [k for k in ("tool", "when", "repeat_until", "for_each")
+                 if k in raw]
+        if len(kinds) != 1:
             raise WorkflowError(
-                f"{at} has both 'tool' and 'when'; a node is a step or a branch, "
-                "not both")
-        if is_branch:
-            nodes.append(_parse_branch(raw, at, depth=depth))
-        elif is_leaf:
+                f"{at} must be exactly one of a step ('tool'), a branch "
+                "('when'), or a loop ('repeat_until' / 'for_each'); it has "
+                f"{sorted(kinds) or 'none of them'}")
+        kind = kinds[0]
+        if kind == "tool":
             nodes.append(_parse_step(raw, at))
+        elif kind == "when":
+            nodes.append(_parse_branch(raw, at, depth=depth))
+        elif kind == "repeat_until":
+            nodes.append(_parse_repeat(raw, at, depth=depth))
         else:
-            raise WorkflowError(
-                f"{at} needs a 'tool' (a step) or a 'when' (a branch)")
+            nodes.append(_parse_foreach(raw, at, depth=depth))
     return tuple(nodes)
 
 
@@ -233,6 +268,51 @@ def _parse_branch(raw: dict, where: str, *, depth: int) -> Branch:
         when=_parse_guard(raw["when"], f"{where}.when"),
         then=_parse_nodes(raw["then"], f"{where}.then", depth=depth + 1),
         otherwise=otherwise,
+        note=str(raw.get("note", "")),
+    )
+
+
+def _parse_repeat(raw: dict, where: str, *, depth: int) -> RepeatUntil:
+    _reject_unknown(where, raw, REPEAT_KEYS)
+    if "do" not in raw:
+        raise WorkflowError(f"{where}: a 'repeat_until' loop needs a 'do'")
+    max_raw = raw.get("max")
+    if not isinstance(max_raw, int) or isinstance(max_raw, bool) or max_raw < 1:
+        raise WorkflowError(
+            f"{where}: a loop needs 'max', a positive integer bound on its "
+            "iterations, so it cannot spin")
+    if max_raw > MAX_ITERATIONS:
+        raise WorkflowError(
+            f"{where}: max {max_raw} exceeds the {MAX_ITERATIONS} ceiling on a loop")
+    return RepeatUntil(
+        until=_parse_guard(raw["repeat_until"], f"{where}.repeat_until"),
+        do=_parse_nodes(raw["do"], f"{where}.do", depth=depth + 1),
+        max=max_raw,
+        note=str(raw.get("note", "")),
+    )
+
+
+def _parse_foreach(raw: dict, where: str, *, depth: int) -> ForEach:
+    _reject_unknown(where, raw, FOREACH_KEYS)
+    var = raw.get("for_each")
+    if not isinstance(var, str) or not var.isidentifier():
+        raise WorkflowError(
+            f"{where}: 'for_each' names the loop variable, an identifier like "
+            f"'row'; got {var!r}")
+    if "in" not in raw:
+        raise WorkflowError(f"{where}: a 'for_each' loop needs an 'in' -- a list "
+                            "or a ${param} that binds to one")
+    items = raw["in"]
+    if not isinstance(items, (list, str)):
+        raise WorkflowError(
+            f"{where}: 'in' must be a list or a ${{param}} string, not "
+            f"{type(items).__name__}")
+    if "do" not in raw:
+        raise WorkflowError(f"{where}: a 'for_each' loop needs a 'do'")
+    return ForEach(
+        var=var,
+        items=list(items) if isinstance(items, list) else items,
+        do=_parse_nodes(raw["do"], f"{where}.do", depth=depth + 1),
         note=str(raw.get("note", "")),
     )
 
@@ -471,9 +551,12 @@ def run_macro_body(
     records: list[MacroStep] = []
     state: dict[str, Any] = {"stopped": False, "refused": None}
 
-    def walk(nodes: tuple[Node, ...], path: str) -> None:
+    def stopping() -> bool:
+        return bool(state["stopped"] or state["refused"])
+
+    def walk(nodes: tuple[Node, ...], path: str, bindings: dict[str, Any]) -> None:
         for i, node in enumerate(nodes):
-            if state["stopped"] or state["refused"]:
+            if stopping():
                 return
             at = f"{path}{i}"
             if isinstance(node, Branch):
@@ -482,7 +565,13 @@ def run_macro_body(
                     state["refused"] = f"{at}.when: {err}"
                     return
                 arm, label = (node.then, "then") if holds else (node.otherwise, "else")
-                walk(arm, f"{at}.{label}.")
+                walk(arm, f"{at}.{label}.", bindings)
+                continue
+            if isinstance(node, RepeatUntil):
+                _run_repeat(node, at, bindings)
+                continue
+            if isinstance(node, ForEach):
+                _run_foreach(node, at, bindings)
                 continue
 
             bound_args, unbound = bind(node.args, bindings)
@@ -503,7 +592,52 @@ def run_macro_body(
                 state["stopped"] = True
                 return
 
-    walk(nodes, "")
+    def _run_repeat(node: RepeatUntil, at: str, bindings: dict[str, Any]) -> None:
+        # Check before each iteration: an already-satisfied condition runs the
+        # body zero times, and a run that reaches `max` without the condition
+        # holding is a failure -- the loop did not achieve what it named -- not
+        # a silent stop.
+        for iteration in range(node.max):
+            holds, err = _guard_holds(box, session_id, node.until, bindings)
+            if err is not None:
+                state["refused"] = f"{at}.repeat_until: {err}"
+                return
+            if holds:
+                return
+            walk(node.do, f"{at}.repeat[{iteration}].", bindings)
+            if stopping():
+                return
+        records.append(MacroStep(
+            f"{at}.repeat_until", "repeat_until", False,
+            [f"the condition never held after {node.max} iterations"], False, False))
+        if stop_on_failure:
+            state["stopped"] = True
+
+    def _run_foreach(node: ForEach, at: str, bindings: dict[str, Any]) -> None:
+        items = node.items
+        if isinstance(items, str):
+            items, unbound = bind(items, bindings)
+            if unbound:
+                state["refused"] = (
+                    f"{at}.for_each: unbound param(s) {unbound} in 'in'; a "
+                    "for_each iterates a bound list")
+                return
+        if not isinstance(items, list):
+            state["refused"] = (
+                f"{at}.for_each: 'in' resolved to {type(items).__name__}, not a "
+                "list; a for_each iterates a list")
+            return
+        if len(items) > MAX_ITERATIONS:
+            state["refused"] = (
+                f"{at}.for_each: {len(items)} items exceeds the {MAX_ITERATIONS} "
+                "ceiling on a loop")
+            return
+        for j, item in enumerate(items):
+            walk(node.do, f"{at}.each[{j}].", {**bindings, node.var: item})
+            if stopping():
+                return
+
+    walk(nodes, "", bindings)
     stopped_at = None
     if state["stopped"]:
         stopped_at = next((r.path for r in records if not r.ok), None)
@@ -625,14 +759,15 @@ def run_workflow(
         session = attached["session_id"]
 
         for index, step in enumerate(workflow.steps):
-            if isinstance(step, Branch):
-                # The format holds branches (#84); executing them is the macro
-                # runner's job (#85). This linear runner fails clean rather
-                # than pretend, so a branch reaching it is a plain error.
+            if isinstance(step, (Branch, RepeatUntil, ForEach)):
+                # The format holds branches and loops (#84, #97); executing
+                # them is the macro runner's job (run_macro_body). This linear
+                # runner fails clean rather than pretend, so control flow
+                # reaching it is a plain error.
                 report.steps.append(StepReport(
-                    index, "when", {}, False,
-                    ["a 'when' branch needs the macro runner (#85); this "
-                     "runner executes linear steps only"], 0, None, step.note))
+                    index, "control-flow", {}, False,
+                    ["a branch or loop needs the macro runner (run_macro_body); "
+                     "this runner executes linear steps only"], 0, None, step.note))
                 report.verdict = "failed"
                 break
             tool = getattr(box, step.tool, None)

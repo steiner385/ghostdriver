@@ -182,14 +182,15 @@ surprise them, the scope is wrong.
 Modeled on how the Windows backend was built -- the smallest useful thing
 first, each phase standing on its own.
 
-1. **v1 -- record / replay / delete of linear + `when` macros.** The batch
+1. **v1 -- record / replay / delete of linear + `when` macros. [built, #83-#88]**
+   The batch
    engine gains persistence, params, and one branch form. `macro_record`
    (verified steps only), `macro_replay` (with `dry_run`), `macro_list`,
    `macro_show`, `macro_delete`. Provenance marks verified-vs-delivered. This
    alone captures the funnel toggle and any fixed repetitive sequence.
-2. **v2 -- loops.** `repeat_until` and `for_each`. Turns the embed loop and
-   grid paging into single macros. Needs a bound on iterations (`max`) so a
-   macro cannot spin, the same instinct as `pace`'s cap.
+2. **v2 -- loops. [built, #97]** `repeat_until` and `for_each`. Turns the embed
+   loop and grid paging into single macros. Bounded: `max` is required and
+   capped, so a macro cannot spin -- the same instinct as `pace`'s cap.
 3. **v3 -- reactive `on_disturbance` handlers.** Operator-declared, scoped,
    consent-designed as above. Built last because it is where autonomy and the
    consent model meet, and it must not be rushed.
