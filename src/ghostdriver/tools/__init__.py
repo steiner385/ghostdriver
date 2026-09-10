@@ -34,6 +34,7 @@ from .learning import LearningTools
 from .lifecycle import LifecycleTools
 from .macro import MacroTools
 from .pace import PaceTools
+from .recording import capture_step
 from .screen import ScreenTools
 from .seek import SeekTools
 from .status import StatusTools
@@ -94,6 +95,15 @@ def _traced_and_reporting(fn, *, session_tool: bool):
                         result["watchdog_events"] = events
                     if watch.suspended_reason:
                         result["watchdog_suspended"] = watch.suspended_reason
+                # If this session is recording (#88), buffer the call as a
+                # macro step. The dict lookup is the whole cost when it is
+                # not -- the common case -- so it rides here on every call.
+                if self._recordings:
+                    recording = self._recordings.get(session_id)
+                    if recording is not None:
+                        step = capture_step(fn.__name__, bound, result)
+                        if step is not None:
+                            recording["steps"].append(step)
             return result
         except AccessibilityUnavailable as exc:
             # The platform is supported and its accessibility service is not

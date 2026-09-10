@@ -286,6 +286,79 @@ class MacroTools(_ToolboxCore):
             result["report_saved_to"] = None
         return result
 
+    # --- recording (#88) ---------------------------------------------------
+
+    def record_start(self, session_id: str) -> dict:
+        """Begin recording this session's actuations into a buffer, to be
+        saved as a macro. Only the doing is captured -- clicks, typing, waits
+        -- not the reads used to decide, and only calls that succeed, so a
+        refused secret never lands in a macro. Each captured step carries
+        whether it was verified or only delivered (D66)."""
+        try:
+            session = self.sessions.authorize(session_id, "record_start")
+        except GhostdriverError as exc:
+            return _error(exc.kind, exc.message)
+        if session_id in self._recordings:
+            return _error(ErrorKind.NOT_ACTIONABLE,
+                          "already recording this session; record_save or "
+                          "record_discard the current one first")
+        self._recordings[session_id] = {
+            "steps": [], "started_at": time.time(),
+            "profile_id": session.profile.profile_id, "tier": session.tier.value,
+        }
+        return {"ok": True, "recording": True, "session": session_id}
+
+    def record_save(self, session_id: str, name: str, *, description: str = "",
+                    params: dict | None = None) -> dict:
+        """Stop recording and save the buffered steps as a macro. Provenance
+        records when and against which profile it was recorded. The result
+        says how many steps are delivery_only (unconfirmed), so the recorder
+        is never sold as more certain than it is."""
+        try:
+            self.sessions.authorize(session_id, "record_save")
+        except GhostdriverError as exc:
+            return _error(exc.kind, exc.message)
+        recording = self._recordings.pop(session_id, None)
+        if recording is None:
+            return _error(ErrorKind.NOT_ACTIONABLE,
+                          "not recording this session; record_start first")
+        steps = recording["steps"]
+        if not steps:
+            return _error(ErrorKind.NOT_ACTIONABLE,
+                          "nothing a macro can replay was recorded -- the session "
+                          "did no actuations, or none succeeded")
+        provenance = {
+            "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                         time.gmtime(recording["started_at"])),
+            "recorded_against": recording["profile_id"],
+            "revision": 1,
+        }
+        result = self.macro_save(name, steps, description=description,
+                                 tier=recording["tier"], params=params,
+                                 provenance=provenance)
+        if result.get("ok"):
+            delivered = sum(1 for step in steps if step.get("delivery_only"))
+            result["recorded"] = len(steps)
+            result["delivery_only"] = delivered
+            if delivered:
+                result["note"] = (
+                    f"{delivered} of {len(steps)} recorded steps are delivery_only "
+                    "-- an offset click on a painted region, or an actuation with no "
+                    "expect -- so replay cannot confirm them by locator; review them")
+        else:
+            # the save was refused: put the recording back so it is not lost
+            self._recordings[session_id] = recording
+        return result
+
+    def record_discard(self, session_id: str) -> dict:
+        """Stop recording and throw the buffer away."""
+        try:
+            self.sessions.authorize(session_id, "record_discard")
+        except GhostdriverError as exc:
+            return _error(exc.kind, exc.message)
+        discarded = self._recordings.pop(session_id, None) is not None
+        return {"ok": True, "discarded": discarded}
+
 
 def _descendants(pid: int) -> list:
     """The processes the target spawned, through the backend -- so the

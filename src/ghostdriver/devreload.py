@@ -69,7 +69,7 @@ STABLE = frozenset({
 })
 
 #: Toolbox attributes that are live state, carried across a rebuild.
-CARRY = ("_desktops", "_watches", "_tree_cache", "_trace")
+CARRY = ("_desktops", "_watches", "_tree_cache", "_trace", "_recordings")
 
 
 def enabled() -> bool:

@@ -672,6 +672,41 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     ) -> dict[str, Any]:
         return box.macro_replay(session_ref, name, params=params, dry_run=dry_run)
 
+    @server.tool(annotations=READS, description=(
+        "Begin recording this session's actuations into a macro. Only the "
+        "doing is captured -- clicks, typing, waits, not the reads used to "
+        "decide -- and only calls that succeed, so a refused secret is never "
+        "recorded. Each step records whether it was verified (its expect "
+        "held) or only delivered (an offset click, or an action with no "
+        "expect). Stop with record_save or record_discard."
+    ))
+    def record_start(session_ref: SessionId) -> dict[str, Any]:
+        return box.record_start(session_ref)
+
+    @server.tool(annotations=READS, description=(
+        "Stop recording and save the buffered steps as a macro under this "
+        "name, with provenance (when, and which profile it was recorded "
+        "against). The result says how many steps are delivery_only, so a "
+        "recording is never sold as more certain than it is. `params` and a "
+        "`description` may be added now, or by editing the file later."
+    ))
+    def record_save(
+        session_ref: SessionId,
+        name: Annotated[str, Field(description="The macro name to save under.")],
+        description: Annotated[str, Field(description="One line, shown in macro_list.")] = "",
+        params: Annotated[dict | None, Field(description=(
+            "name -> {required, note}, to parameterize the recorded steps "
+            "(reference as ${name} after editing the args)."
+        ))] = None,
+    ) -> dict[str, Any]:
+        return box.record_save(session_ref, name, description=description, params=params)
+
+    @server.tool(annotations=READS, description=(
+        "Stop recording this session and throw the buffer away."
+    ))
+    def record_discard(session_ref: SessionId) -> dict[str, Any]:
+        return box.record_discard(session_ref)
+
     @server.tool(annotations=CHANGES_SCREEN, description=(
         "Bring a window of the target to the front -- the deliberate pair to "
         "isolation=minimized. Everything else works from the background, so "

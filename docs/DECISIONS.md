@@ -4859,3 +4859,49 @@ profile warning, the error paths -- is proven against a backend-free session
 (`SessionManager.attach`, no target) in `tests/test_macro_replay.py`, so it
 runs on any platform; the one end-to-end run against the fixture is the single
 Windows-only test there. `env: any` for all but that.
+
+### D#88. Recording captures the doing, only when it succeeds, and flags what it could not confirm
+
+**Context.** The last of macro v1 (#81): turn what an agent just did into a
+macro, without a person hand-writing JSON. The hard part is capturing *intent*
+honestly on a target where a click can be verified or blind and the durable
+unit is a locator, not a coordinate.
+
+**Decision.** `record_start` opens a buffer for a session; every actuation on
+that session is captured as a macro step as it happens; `record_save` writes
+the buffer as a macro (with provenance) and `record_discard` throws it away.
+Three rules make the capture honest rather than a keystroke log:
+
+- **Only the doing.** The recorded set is the actuations and the two waits --
+  not the reads (`find`, `read`, `describe`, ...) the agent used to *decide*.
+  A recording is the macro, not the exploration around it, so it replays
+  clean. A successful wait is captured as verified: the condition it named
+  actually held.
+- **Only what succeeded.** A call that did not return `ok` is never buffered.
+  This is where the secret boundary lives for free: typing characters into a
+  protected field is already refused, so it never returns ok, so a typed
+  credential is never recorded -- and the credential path stays `await_human`,
+  which never carries the value.
+- **Flag what could not be confirmed.** Each step records `verified` (its
+  `expect` held) or `delivery_only` (an offset click on a painted region, or
+  an actuation with no postcondition). An offset click is `delivery_only`
+  whatever its verdict, because a coordinate can never be re-confirmed by
+  locator (D66). Nothing is dropped -- losing an action would produce a macro
+  that replays wrong -- but `record_save` reports how many steps are
+  `delivery_only`, so a recording is never sold as more certain than it is.
+  "Verified steps only" is satisfied by construction: every recordable ok
+  step is either verified or flagged, and both are kept.
+
+**The seam.** Capture rides on the one wrapper every tool result already
+passes through (the trace/watchdog seam), so no tool has to know it is being
+recorded; the cost when nothing is recording is a single dict lookup. The
+buffer lives on the toolbox (carried across a dev reload) and a refused save
+puts it back rather than losing it.
+
+**Evidence.** `capture_step`'s rule (what records, how it is flagged) and the
+`record_start`/`save`/`discard` lifecycle are proven against a backend-free
+session in `tests/test_macro_record.py` (`env: any`); one Windows-only test
+records a real click against the fixture, confirms the read beside it was not
+recorded, and reads the macro back. This closes macro v1: record, replay,
+modify (edit the file), delete -- of parameterized linear-and-branch macros
+(#83-#88). Loops and reactive handlers are v2/v3 (docs/MACROS.md).
