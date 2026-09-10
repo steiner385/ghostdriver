@@ -36,6 +36,7 @@ PLACEHOLDER = {
     "ask": "please",
     "steps": [{"tool": "describe", "args": {}}],
     "seconds": 0.01,
+    "name": "some-macro",
 }
 
 

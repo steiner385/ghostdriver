@@ -43,7 +43,8 @@ READ_TOOLS = {
 BATCH_TOOLS = {"batch"}
 
 #: Macro lifecycle bookkeeping over the operator directory (#86). Session-free.
-MACRO_TOOLS = {"macro_save", "macro_list", "macro_show", "macro_delete"}
+MACRO_TOOLS = {"macro_save", "macro_list", "macro_show", "macro_delete",
+               "macro_replay"}
 
 #: Reachable only from a session opened at the interactive tier. Registered
 #: unconditionally -- the tier check happens per call, against the session,

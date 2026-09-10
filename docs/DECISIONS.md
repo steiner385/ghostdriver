@@ -4816,3 +4816,46 @@ Replaying a macro is `macro_replay` (#87), which wraps `run_macro_body`
 (D#85) with attach, the watch and the report; recording one from a live
 session is `macro_record` (#88). `env: any`: the tools are proven against a
 temp operator directory in `tests/test_macro_tools.py`, no fixture.
+
+### D#87. macro_replay: the operator's attach is the consent, and a dry run is always safe
+
+**Context.** The macro runner (D#85) evaluates a body; the CRUD tools (D#86)
+keep one. `macro_replay` joins them into the verb that makes the feature
+usable: run a saved macro against a live target, verified, watched, reported.
+
+**Decision.** `macro_replay(session_ref, name, params, dry_run)` runs against
+an **already-attached session** rather than attaching itself. The operator
+approved the target and chose its tier by attaching; replay inherits that
+consent and runs the body through the shared core (D#85) -- every step the
+same checks a standalone call gets -- under the interference watch a workflow
+run uses, so a foreground the target takes mid-run fails the run whatever the
+steps said. It is a `read_only`-tier tool like `batch`: each step re-checks
+its own tier, and the macro's *declared* tier is checked against the session's
+up front, so a macro that needs `interactive` on a `read_only` session fails
+fast with the reason instead of midway.
+
+Three judgment calls, each in the project's grain:
+
+- **A dry run inspects, and is never gated.** `dry_run` resolves params and
+  returns the plan without acting -- and is allowed below the macro's tier and
+  with params still unbound (they are *marked*, not refused). Looking at what
+  a macro would do must be safe from any session; the refusals are for the run,
+  not the look. A branch in the plan shows *both* arms, because its condition
+  is read from the screen the previous step leaves -- a plan cannot resolve it
+  without acting, and says so (docs/MACROS.md open questions).
+- **A real run binds or refuses (D33).** A missing required param stops the
+  run naming what is missing; a macro never guesses a value.
+- **A profile mismatch warns, not refuses.** `provenance.recorded_against` is
+  compared to the session's `profile_id` (now carried on `Profile`); a
+  mismatch is a warning that a locator from one target class may mean nothing
+  on another -- the run proceeds and the steps are watched, because only a
+  locator that actually fails to resolve is grounds to stop.
+
+Replays from the start and reports where it stopped; a report lands in the
+operator directory. Resume is deferred.
+
+**Evidence.** The logic -- binding, the dry-run plan, the tier gate, the
+profile warning, the error paths -- is proven against a backend-free session
+(`SessionManager.attach`, no target) in `tests/test_macro_replay.py`, so it
+runs on any platform; the one end-to-end run against the fixture is the single
+Windows-only test there. `env: any` for all but that.
