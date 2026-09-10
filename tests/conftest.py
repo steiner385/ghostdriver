@@ -8,6 +8,27 @@ import time
 import psutil
 import pytest
 
+# --- keep the suite off the operator's desktop (#93) -----------------------
+# Every Windows fixture is a console-subsystem python.exe spawned with Popen.
+# The fixture *windows* are already created off-screen and never activated
+# (see the owned-window helpers below), so they never appear -- but a plain
+# Popen of a console program still pops a console window, and hundreds of them
+# flashing across a run is its own disruption of whoever is at the keyboard.
+# CREATE_NO_WINDOW gives the child no console; stdout=PIPE is unaffected, so
+# the JSON handshake the fixtures print still arrives. Applied once here, to
+# every Popen in the test process, so no spawn site (there are ~two dozen) has
+# to remember -- and so a new test cannot reintroduce the flash by forgetting.
+if sys.platform == "win32":
+    _CREATE_NO_WINDOW = 0x08000000
+    _base_popen_init = subprocess.Popen.__init__
+
+    @functools.wraps(_base_popen_init)
+    def _quiet_popen_init(self, *args, **kwargs):
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | _CREATE_NO_WINDOW
+        _base_popen_init(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = _quiet_popen_init  # type: ignore[method-assign]
+
 
 def _live_watchers() -> list[str]:
     """Names of any live watch threads. A MinimizedWatch or InterferenceWatch
