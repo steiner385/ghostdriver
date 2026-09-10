@@ -4667,3 +4667,36 @@ refuses either name in a step's args. `env: any`: the rename and its guard
 are platform-neutral, proven through the server's dispatch and over real
 stdio. Root cause is client-side, but the fix that removes the collision
 lives here, so it lives here.
+
+### D#83. One execution core, shared by `batch` and the macro runner
+
+**Context.** `batch` (D#75) carried the loop that makes a list of tool calls
+safe to run as one: the allowlist, the refusal of a step that carries its own
+session, the per-step dispatch, the bad-argument-is-a-step-failure rule, the
+per-step verdict, and stop-on-first-failure. The macro runner (#81, #87) needs
+exactly that loop. Two copies of a safety model is one copy too many -- the
+day they drift, one of them is wrong and nobody notices (the pattern D#39
+named).
+
+**Decision.** The loop lives in `stepper.run_steps(toolbox, session_id, steps,
+*, stop_on_failure, context)`, and `batch` is a thin caller: it authorizes
+*itself* as the `batch` tool, then hands the run to the core. The macro runner
+will authorize itself as `macro_replay` and hand its resolved body to the same
+core. The core authorizes nothing -- each step's own tool method authorizes
+the session again, which is the whole point: the core adds sequencing, never a
+path around a tool's own checks. `context` ("batch", "macro") only names the
+caller in the wording of a refusal.
+
+**A pure refactor, and held to it.** `batch`'s public result is unchanged
+byte-for-byte, proven by `tests/test_batch.py` passing untouched against the
+fixture. The allowlist moved verbatim (renamed `BATCHABLE` -> `RUNNABLE_TOOLS`,
+no external caller referenced the old name) and now has a guard test naming
+what it must and must not contain. The core is pure with respect to the
+desktop -- it calls methods on a toolbox handed in -- so it is proven with a
+fake toolbox in `tests/test_stepper.py` and needs no fixture (`env: any`),
+the same split the workflow runner already uses.
+
+**Not changed.** The tier model is unchanged: the core does not check tier,
+because each step's tool method does, per step, which is what lets a
+read-only session's batch run its reads and refuse its act steps (D#75). This
+is the foundation the rest of v1 (#84-#88) builds on.
