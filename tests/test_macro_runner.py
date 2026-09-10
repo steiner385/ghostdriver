@@ -206,3 +206,88 @@ def test_stop_on_failure_false_runs_past_a_failing_leaf():
     out = run_macro_body(box, "s", macro(body).steps, {}, stop_on_failure=False)
 
     assert not out["ok"] and out["completed"] == 2
+
+
+# --- loops: evaluation (#97) ----------------------------------------------
+
+def test_for_each_runs_the_body_once_per_item_binding_the_var():
+    body = [{"for_each": "row", "in": ["A", "B", "C"],
+             "do": [{"tool": "click", "args": {"locator": "row=${row}"}}]}]
+    box = FakeBox({"click": {"ok": True}})
+
+    out = run_macro_body(box, "s", macro(body).steps, {})
+
+    assert out["ok"] and box.clicks() == ["row=A", "row=B", "row=C"]
+    assert [s["path"] for s in out["steps"]] == ["0.each[0].0", "0.each[1].0", "0.each[2].0"]
+
+
+def test_for_each_binds_a_list_from_a_param():
+    body = [{"for_each": "x", "in": "${items}",
+             "do": [{"tool": "click", "args": {"locator": "${x}"}}]}]
+    box = FakeBox({"click": {"ok": True}})
+
+    out = run_macro_body(box, "s", macro(body).steps, {"items": ["p", "q"]})
+
+    assert out["ok"] and box.clicks() == ["p", "q"]
+
+
+def test_for_each_refuses_an_in_that_is_not_a_list():
+    body = [{"for_each": "x", "in": "${items}", "do": [{"tool": "click", "args": {"locator": "x"}}]}]
+
+    out = run_macro_body(FakeBox({}), "s", macro(body).steps, {"items": "not-a-list"})
+
+    assert not out["ok"] and "not a list" in out["refused"]
+
+
+def test_repeat_until_stops_when_the_condition_holds():
+    body = [{"repeat_until": {"locator": "class=Done"}, "max": 5,
+             "do": [{"tool": "click", "args": {"locator": "next"}}]}]
+    # absent twice (0 elements), then present
+    box = FakeBox({"find": [{"ok": True, "elements": []}, {"ok": True, "elements": []},
+                            {"ok": True, "elements": [{"a": 1}]}], "click": {"ok": True}})
+
+    out = run_macro_body(box, "s", macro(body).steps, {})
+
+    assert out["ok"] and box.clicks() == ["next", "next"], "ran the body until Done appeared"
+
+
+def test_repeat_until_runs_zero_times_when_already_satisfied():
+    body = [{"repeat_until": {"locator": "class=Done"}, "max": 5,
+             "do": [{"tool": "click", "args": {"locator": "next"}}]}]
+    box = FakeBox({"find": {"ok": True, "elements": [{"a": 1}]}, "click": {"ok": True}})
+
+    out = run_macro_body(box, "s", macro(body).steps, {})
+
+    assert out["ok"] and box.clicks() == [], "the condition already held; the body never ran"
+
+
+def test_repeat_until_reaching_max_without_the_condition_is_a_failure():
+    body = [{"repeat_until": {"locator": "class=Done"}, "max": 3,
+             "do": [{"tool": "click", "args": {"locator": "next"}}]}]
+    box = FakeBox({"find": {"ok": True, "elements": []}, "click": {"ok": True}})
+
+    out = run_macro_body(box, "s", macro(body).steps, {})
+
+    assert not out["ok"] and len(box.clicks()) == 3
+    assert any("never held" in " ".join(s["failures"]) for s in out["steps"] if s.get("failures"))
+
+
+def test_a_condition_the_target_cannot_read_refuses_a_loop():
+    body = [{"repeat_until": {"locator": "class=Done"}, "max": 5,
+             "do": [{"tool": "click", "args": {"locator": "next"}}]}]
+    box = FakeBox({"find": {"ok": False, "error": {"message": "gone"}}})
+
+    out = run_macro_body(box, "s", macro(body).steps, {})
+
+    assert not out["ok"] and "could not evaluate the condition" in out["refused"]
+
+
+def test_a_loop_body_step_failure_stops_the_loop():
+    body = [{"for_each": "x", "in": ["a", "b", "c"],
+             "do": [{"tool": "find", "args": {"locator": "X"}, "expect": {"match_count": 1}}]}]
+    # find returns match_count 0 -> the expect fails on the first item
+    box = FakeBox({"find": {"ok": True, "match_count": 0}})
+
+    out = run_macro_body(box, "s", macro(body).steps, {})
+
+    assert not out["ok"] and out["completed"] == 1, "stopped at the first item's failure"
