@@ -149,6 +149,41 @@ class OperatorDir:
             return []
         return sorted(p.stem for p in self.workflows.glob("*.json"))
 
+    @property
+    def workflow_archive(self) -> Path:
+        """Where a deleted macro goes, out of the listing but recoverable
+        (a leading-dot folder `glob("*.json")` does not descend into)."""
+        return self.workflows / ".archive"
+
+    @staticmethod
+    def _bare_name(name: str) -> str:
+        """A macro name is a bare name the operator chose, never a path -- the
+        folder is the operator's and the file goes in it, nowhere else."""
+        if not name or any(sep in name for sep in ("/", "\\")) or name in (".", ".."):
+            raise OperatorDirError(
+                f"a macro name is a bare name, not a path; got {name!r}")
+        return name
+
+    def save_workflow(self, name: str, data: dict) -> tuple[Path, bool]:
+        """Write a macro to workflows/<name>.json. Returns (path, replaced):
+        `replaced` says whether a macro of that name was already there, so a
+        save that overwrites is never silent."""
+        self._bare_name(name)
+        self.workflows.mkdir(parents=True, exist_ok=True)
+        path = self.workflows / f"{name}.json"
+        replaced = path.exists()
+        path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+        return path, replaced
+
+    def archive_workflow(self, name: str, stamp: str) -> Path:
+        """Move a macro to the archive. `workflow_path` raises if it is not
+        there, so a delete of nothing is a clear error, not a silent no-op."""
+        source = self.workflow_path(name)
+        self.workflow_archive.mkdir(parents=True, exist_ok=True)
+        dest = self.workflow_archive / f"{name}-{stamp}.json"
+        source.rename(dest)
+        return dest
+
     # --- reports ---------------------------------------------------------------
 
     def write_report(self, name: str, stamp: str, data: dict) -> Path:
