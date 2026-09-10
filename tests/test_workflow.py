@@ -12,6 +12,10 @@ import pytest
 
 from ghostdriver.operator import ENV_VAR, OperatorDir, OperatorDirError
 from ghostdriver.workflow import (
+    Branch,
+    Guard,
+    Param,
+    Provenance,
     RunReport,
     Step,
     Workflow,
@@ -350,3 +354,99 @@ def test_the_watch_records_the_target_taking_the_foreground_and_cursor_moves():
     kinds = [e["kind"] for e in watch.events()]
     assert kinds == ["foreground_taken", "cursor_moved"]
     assert watch.events()[1]["to"] == [3, 4]
+
+
+# --- the macro format extension (#84) -------------------------------------
+
+def test_a_macro_parses_params_provenance_and_step_flags():
+    wf = Workflow.from_dict({
+        "name": "embed", "tier": "interactive",
+        "params": {"plan_id": {"required": True, "note": "the plan"}},
+        "provenance": {"recorded_at": "2026-09-10T00:00:00Z",
+                       "recorded_against": "ca4904", "revision": 3},
+        "steps": [
+            {"tool": "click", "args": {"locator": "type=TabItem name=${plan_id}"},
+             "expect": {"verified": "effect"}, "verified": True},
+            {"tool": "click", "args": {"locator": "class=THtLeftPanel", "at": {"x": 11, "y": 100}},
+             "delivery_only": True, "note": "painted gutter"},
+        ],
+    })
+
+    assert wf.params == (Param("plan_id", True, "the plan"),)
+    assert wf.provenance == Provenance("2026-09-10T00:00:00Z", "ca4904", 3)
+    assert wf.steps[0].verified is True and wf.steps[0].delivery_only is False
+    assert wf.steps[1].delivery_only is True and wf.steps[1].verified is False
+
+
+def test_a_legacy_workflow_still_loads_with_empty_params_and_provenance():
+    wf = Workflow.from_dict({"steps": [{"tool": "find", "args": {"locator": "x"}}]})
+
+    assert wf.params == () and wf.provenance.is_empty
+    assert isinstance(wf.steps[0], Step) and wf.steps[0].verified is False
+
+
+def test_a_when_branch_parses_with_both_arms():
+    wf = Workflow.from_dict({"steps": [
+        {"when": {"locator": "class=Funnel", "pressed": True},
+         "then": [{"tool": "click", "args": {"locator": "class=Funnel"}}],
+         "else": [{"tool": "click", "args": {"locator": "class=Funnel"}},
+                  {"tool": "click", "args": {"locator": "class=Funnel"}}],
+         "note": "toggle"}]})
+
+    branch = wf.steps[0]
+    assert isinstance(branch, Branch)
+    assert branch.when == Guard(locator="class=Funnel", pressed=True)
+    assert len(branch.then) == 1 and len(branch.otherwise) == 2
+    assert branch.note == "toggle"
+
+
+def test_a_branch_with_no_else_defaults_to_an_empty_arm():
+    wf = Workflow.from_dict({"steps": [
+        {"when": {"locator": "class=X"}, "then": [{"tool": "click", "args": {"locator": "x"}}]}]})
+
+    assert isinstance(wf.steps[0], Branch) and wf.steps[0].otherwise == ()
+
+
+def test_a_branch_may_nest_and_too_deep_is_refused():
+    inner = {"tool": "click", "args": {"locator": "x"}}
+    node = inner
+    for _ in range(3):  # a few levels: fine
+        node = {"when": {"locator": "class=X"}, "then": [node]}
+    Workflow.from_dict({"steps": [node]})  # no raise
+
+    node = inner
+    for _ in range(12):  # past MAX_NEST_DEPTH
+        node = {"when": {"locator": "class=X"}, "then": [node]}
+    with pytest.raises(WorkflowError, match="nest deeper"):
+        Workflow.from_dict({"steps": [node]})
+
+
+@pytest.mark.parametrize("bad", [
+    {"steps": [{"tool": "click", "typo": 1}]},                       # unknown step key
+    {"steps": [{"when": {"locator": "x"}}]},                          # branch without then
+    {"steps": [{"when": {"nope": 1}, "then": [{"tool": "click"}]}]},  # guard unknown key
+    {"steps": [{"when": {"selected": True}, "then": [{"tool": "click"}]}]},  # guard without locator
+    {"steps": [{"tool": "click", "when": {"locator": "x"}, "then": []}]},    # both tool and when
+    {"steps": [{"foo": 1}]},                                          # neither tool nor when
+    {"steps": [{"when": {"locator": "x"}, "then": [{"tool": "click"}], "oops": 1}]},  # unknown branch key
+    {"steps": [{"tool": "click"}], "params": {"p": {"bad": 1}}},      # unknown param key
+    {"steps": [{"tool": "click"}], "provenance": {"revision": "x"}},  # non-integer revision
+    {"steps": [{"when": {"locator": "x", "pressed": "yes"}, "then": [{"tool": "click"}]}]},  # non-bool
+])
+def test_a_malformed_macro_body_is_refused_with_a_reason(bad):
+    with pytest.raises(WorkflowError):
+        Workflow.from_dict(bad)
+
+
+def test_the_linear_runner_fails_clean_on_a_branch_until_the_macro_runner():
+    """The format holds a branch (#84); executing it is the macro runner's
+    job (#85). The linear runner must not crash on one -- it fails clean."""
+    box = FakeBox({"click": {"ok": True}})
+    wf = Workflow.from_dict({"name": "m", "tier": "interactive", "steps": [
+        {"when": {"locator": "class=X"}, "then": [{"tool": "click", "args": {"locator": "x"}}]}]})
+
+    report = run_workflow(box, wf, pid=1234, watch=FakeWatch())
+
+    assert report.verdict == "failed"
+    assert any("macro runner (#85)" in f for f in report.steps[0].failures)
+    assert report.release.get("ok"), "it still released the session"

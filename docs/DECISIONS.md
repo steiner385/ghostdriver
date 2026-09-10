@@ -4700,3 +4700,41 @@ the same split the workflow runner already uses.
 because each step's tool method does, per step, which is what lets a
 read-only session's batch run its reads and refuse its act steps (D#75). This
 is the foundation the rest of v1 (#84-#88) builds on.
+
+### D#84. The workflow format becomes the macro format, and refuses what it cannot read
+
+**Context.** Macro v1 (#81) needs a file format, and `workflow.py` already
+had most of one -- steps, dotted-path assertions, a runner, a report. Rather
+than a second format that drifts from the first, the macro format *is* the
+workflow format, extended. This slice is the data model and its validation
+only; binding params and evaluating branches is #85.
+
+**Decision.** Four additions, each earning its place:
+
+- **`params` and `provenance`** on the workflow. A macro that embeds a
+  specific id is a screenshot; one that declares `${plan_id}` and binds it at
+  replay is a tool. Provenance records `recorded_against` (a profile id) so
+  replay can be honest that a macro recorded on one target class means nothing
+  on another.
+- **`verified` and `delivery_only`** on a step. The honesty rule made
+  structural: a recorded step says whether it carried a postcondition that
+  held, and an offset click on a painted region is flagged as the least
+  replayable thing a macro can hold (D66) rather than passed off as a control.
+- **A `when` branch node.** `steps` is now a tree of leaves and branches
+  (`Node = Step | Branch`), one v1 control-flow form; loops and handlers are
+  v2/v3 (docs/MACROS.md). Conditions are `Guard`s in the locator/`expect`
+  vocabulary -- never embedded code, so the whole macro stays inspectable and
+  denylist-checkable.
+
+**The loader refuses what it cannot read.** Unknown keys on a step, branch,
+guard, param or provenance are errors naming the allowed set (D33), the way
+`expect` refuses one (D#71) -- a typo that silently drops an assertion is the
+footgun the format exists to close. Nesting is bounded (`MAX_NEST_DEPTH`), the
+same instinct as `pace`'s cap: a macro too deep to read at a glance is
+refused. Every existing workflow still loads unchanged, with empty params and
+provenance.
+
+**Held to model-only.** The linear `run_workflow` does not execute a branch;
+it fails clean with a pointer to #85 rather than crash, so a branch reaching
+it is a plain error, not a traceback. `env: any`: the model and its refusals
+are proven with `Workflow.from_dict` in `tests/test_workflow.py`, no fixture.
