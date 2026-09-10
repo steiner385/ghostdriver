@@ -581,6 +581,70 @@ def build_server(sessions: SessionManager | None = None) -> Any:
               ))] = True) -> dict[str, Any]:
         return box.batch(session_ref, steps, stop_on_failure=stop_on_failure)
 
+    @server.tool(annotations=READS, description=(
+        "Save a step-list as a named macro under the operator directory, so a "
+        "sequence you have worked out -- the batch you just ran, say -- can be "
+        "replayed later. `steps` is the macro body: leaves ({tool, args, "
+        "expect, ...}) and `when` branches ({when: {locator, ...}, then: [...], "
+        "else: [...]}). `params` declares values bound at replay and referenced "
+        "as ${name} in a step's args; `provenance` records where it came from. "
+        "A malformed macro is refused here, not at replay. Operator "
+        "bookkeeping: it touches the operator directory, not a target."
+    ))
+    def macro_save(
+        name: Annotated[str, Field(description="A bare macro name (no path).")],
+        steps: Annotated[list[dict], Field(description=(
+            "The macro body: leaf steps and/or `when` branches (see the tool "
+            "description). A leaf omits the session; the replay supplies it."
+        ))],
+        description: Annotated[str, Field(description="One line, shown in macro_list.")] = "",
+        tier: Annotated[str, Field(description=(
+            "The tier replay opens the session at: read_only, interactive, full."
+        ))] = "read_only",
+        isolation: Annotated[str, Field(description="none (default) or minimized.")] = "none",
+        profile: Annotated[str | None, Field(description=(
+            "A profile name replay attaches under; also the target class this "
+            "macro was written for."
+        ))] = None,
+        params: Annotated[dict | None, Field(description=(
+            "name -> {required, note}. Referenced as ${name} in a step's args."
+        ))] = None,
+        provenance: Annotated[dict | None, Field(description=(
+            "{recorded_at, recorded_against (a profile id), revision}."
+        ))] = None,
+    ) -> dict[str, Any]:
+        return box.macro_save(name, steps, description=description, tier=tier,
+                              isolation=isolation, profile=profile, params=params,
+                              provenance=provenance)
+
+    @server.tool(annotations=READS, description=(
+        "List the saved macros: each name, its one-line description, its step "
+        "count and its params."
+    ))
+    def macro_list() -> dict[str, Any]:
+        return box.macro_list()
+
+    @server.tool(annotations=READS, description=(
+        "Read one macro back: its metadata, provenance, params, and per-step "
+        "verified / delivery_only flags -- so you can see, before replaying, "
+        "which steps were confirmed and which were only delivered (an offset "
+        "click on a painted region cannot be verified by locator)."
+    ))
+    def macro_show(
+        name: Annotated[str, Field(description="The macro name.")],
+    ) -> dict[str, Any]:
+        return box.macro_show(name)
+
+    @server.tool(annotations=READS, description=(
+        "Archive a macro. It leaves the listing but stays recoverable under "
+        "the operator directory's archive -- a delete you can undo, because "
+        "the macro is the operator's, not the tool's."
+    ))
+    def macro_delete(
+        name: Annotated[str, Field(description="The macro name to archive.")],
+    ) -> dict[str, Any]:
+        return box.macro_delete(name)
+
     @server.tool(annotations=CHANGES_SCREEN, description=(
         "Bring a window of the target to the front -- the deliberate pair to "
         "isolation=minimized. Everything else works from the background, so "

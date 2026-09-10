@@ -64,6 +64,11 @@ TIER_TOOLS: dict[Tier, frozenset[str]] = {
         # Recording a launch decision is consent bookkeeping, like
         # grant_targets -- available at every tier.
         "grant_launch",
+        # Macro bookkeeping over the operator directory: session-free, like
+        # list_targets and grant_targets. Saving/reading/listing/archiving a
+        # macro touches no target (#86). Replaying one is macro_replay (#87),
+        # which enforces the macro's own tier per step.
+        "macro_save", "macro_list", "macro_show", "macro_delete",
     }),
     Tier.INTERACTIVE: frozenset({
         "click", "type_text", "set_value", "send_keys",

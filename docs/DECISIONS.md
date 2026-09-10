@@ -4779,3 +4779,40 @@ desktop -- toolbox handed in -- and proven with a fake in
 the report are `macro_replay`'s (#87), which wraps this core. The `batch`
 extraction is behavior-preserving, proven by `test_batch.py` and
 `test_stepper.py` staying green.
+
+### D#86. Macros are workflow files, and their lifecycle is operator bookkeeping
+
+**Context.** Macro v1 needs somewhere to keep a macro and the verbs to manage
+one. A macro is a workflow file (D#84), and the operator directory already had
+a `workflows/` folder with a loader. So macros do not get a second store or a
+second format: they *are* workflows, and `macro_save/list/show/delete` operate
+on the same files.
+
+**Decision.** Four tools, and they are session-free -- like `list_targets` and
+`grant_targets`, they touch the operator directory, not a target, and take no
+`session_ref`. Placed at the `read_only` tier so the tool surface and the tier
+table still name the same set (the contract that a tool no tier permits cannot
+exist), even though, being session-free, none runs the per-session tier check.
+
+- **`macro_save`** validates through `Workflow.from_dict` before it writes, so
+  a malformed macro is refused at save, not discovered at replay. It reports
+  `replaced` when it overwrites, so a save that modifies is never silent
+  (modify is re-save; a structured-edit tool would be a worse editor than a
+  text editor).
+- **`macro_show`** surfaces the provenance and each step's `verified` /
+  `delivery_only` flags -- the honesty a reader needs before replaying, so a
+  macro full of blind offset clicks cannot hide as a clean sequence.
+- **`macro_delete`** archives rather than destroys: the macro leaves the
+  listing but stays recoverable under `workflows/.archive/`. Deleting operator
+  data the tool did not create is a thing to be able to undo (the look-before
+  rule); a `glob("*.json")` listing does not descend into the dot-folder, so
+  the archive stays out of the way.
+- Every verb without an operator directory says so plainly (D10), rather than
+  writing into a virtualized path the operator's shell cannot see (the trap
+  D65 was built around).
+
+**Held to bookkeeping.** No tool here attaches, actuates, or reads a target.
+Replaying a macro is `macro_replay` (#87), which wraps `run_macro_body`
+(D#85) with attach, the watch and the report; recording one from a live
+session is `macro_record` (#88). `env: any`: the tools are proven against a
+temp operator directory in `tests/test_macro_tools.py`, no fixture.

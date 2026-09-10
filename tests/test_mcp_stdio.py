@@ -42,6 +42,9 @@ READ_TOOLS = {
 #: Runs other session tools in one call (D#75).
 BATCH_TOOLS = {"batch"}
 
+#: Macro lifecycle bookkeeping over the operator directory (#86). Session-free.
+MACRO_TOOLS = {"macro_save", "macro_list", "macro_show", "macro_delete"}
+
 #: Reachable only from a session opened at the interactive tier. Registered
 #: unconditionally -- the tier check happens per call, against the session,
 #: because a server cannot know at startup which tier a caller will open.
@@ -60,7 +63,7 @@ LEARNING_TOOLS = {"probe_phase2", "probe_grid", "grid_seek"}
 LAUNCH_TOOLS = {"launch_isolated", "grant_launch"}
 
 EXPECTED_TOOLS = (READ_TOOLS | ACTUATION_TOOLS | CURATION_TOOLS
-                  | LEARNING_TOOLS | LAUNCH_TOOLS | BATCH_TOOLS)
+                  | LEARNING_TOOLS | LAUNCH_TOOLS | BATCH_TOOLS | MACRO_TOOLS)
 
 
 def _server_parameters() -> StdioServerParameters:
