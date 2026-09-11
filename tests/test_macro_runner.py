@@ -291,3 +291,98 @@ def test_a_loop_body_step_failure_stops_the_loop():
     out = run_macro_body(box, "s", macro(body).steps, {})
 
     assert not out["ok"] and out["completed"] == 1, "stopped at the first item's failure"
+
+
+# --- reactive handlers: evaluation (#106) ---------------------------------
+
+class DialogBox:
+    """A fake where a named dialog is up until a 'dismiss' click clears it
+    (or stays up forever, for the loop-bound case)."""
+
+    def __init__(self, up=True, persistent=False):
+        self.up = up
+        self.persistent = persistent
+        self.calls = []
+
+    def find(self, session_id, locator, all_windows=False):
+        self.calls.append(("find", locator))
+        present = self.up and "Dialog" in locator
+        return {"ok": True, "match_count": 1 if present else 0,
+                "elements": [{}] if present else []}
+
+    def click(self, session_id, locator, **kw):
+        self.calls.append(("click", locator))
+        if locator == "dismiss" and not self.persistent:
+            self.up = False
+        return {"ok": True, "verified": "delivery_only"}
+
+    def __getattr__(self, name):
+        def tool(session_id, *a, **kw):
+            self.calls.append((name, a))
+            return {"ok": True}
+        return tool
+
+    def clicks(self):
+        return [c[1] for c in self.calls if c[0] == "click"]
+
+
+RETRY_HANDLER = [{"on_disturbance": {"window": "class=Dialog"},
+                  "handle": [{"tool": "click", "args": {"locator": "dismiss"}}],
+                  "then": "retry", "max": 3}]
+
+
+def test_a_handler_fires_when_its_window_appears_then_retries_the_step():
+    wf = macro([{"tool": "click", "args": {"locator": "action"}}], handlers=RETRY_HANDLER)
+    box = DialogBox(up=True)
+
+    out = run_macro_body(box, "s", wf.steps, {}, handlers=wf.handlers)
+
+    assert out["ok"] and box.clicks() == ["action", "dismiss", "action"]
+    paths = [s["path"] for s in out["steps"]]
+    assert "0.on_disturbance[0]" in paths and "0.retry[1]" in paths
+
+
+def test_a_handler_does_not_fire_when_its_window_is_absent():
+    wf = Workflow.from_dict({"name": "m", "steps": [{"tool": "click", "args": {"locator": "action"}}],
+                             "handlers": RETRY_HANDLER})
+    box = DialogBox(up=False)
+
+    out = run_macro_body(box, "s", wf.steps, {}, handlers=wf.handlers)
+
+    assert out["ok"] and box.clicks() == ["action"]
+
+
+def test_then_continue_handles_but_does_not_retry():
+    handlers = [{"on_disturbance": {"window": "class=Dialog"},
+                 "handle": [{"tool": "click", "args": {"locator": "dismiss"}}],
+                 "then": "continue"}]
+    wf = Workflow.from_dict({"name": "m", "steps": [{"tool": "click", "args": {"locator": "action"}}],
+                             "handlers": handlers})
+    box = DialogBox(up=True)
+
+    out = run_macro_body(box, "s", wf.steps, {}, handlers=wf.handlers)
+
+    assert out["ok"] and box.clicks() == ["action", "dismiss"], "dismissed, but not re-run"
+
+
+def test_a_persistent_disturbance_stops_after_max_firings_rather_than_looping():
+    wf = Workflow.from_dict({"name": "m", "steps": [{"tool": "click", "args": {"locator": "action"}}],
+                             "handlers": RETRY_HANDLER})
+    box = DialogBox(up=True, persistent=True)
+
+    out = run_macro_body(box, "s", wf.steps, {}, handlers=wf.handlers)
+
+    assert not out["ok"] and "fired 3 times" in out["refused"]
+
+
+def test_a_handler_step_goes_through_the_allowlist():
+    # a handler that names a withheld tool is refused the same as any step
+    handlers = [{"on_disturbance": {"window": "class=Dialog"},
+                 "handle": [{"tool": "attach", "args": {}}], "then": "continue"}]
+    wf = Workflow.from_dict({"name": "m", "steps": [{"tool": "click", "args": {"locator": "action"}}],
+                             "handlers": handlers})
+    box = DialogBox(up=True)
+
+    out = run_macro_body(box, "s", wf.steps, {}, handlers=wf.handlers)
+
+    assert not out["ok"] and "cannot run in a macro" in out["refused"]
