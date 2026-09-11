@@ -584,18 +584,23 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     @server.tool(annotations=READS, description=(
         "Save a step-list as a named macro under the operator directory, so a "
         "sequence you have worked out -- the batch you just ran, say -- can be "
-        "replayed later. `steps` is the macro body: leaves ({tool, args, "
-        "expect, ...}) and `when` branches ({when: {locator, ...}, then: [...], "
-        "else: [...]}). `params` declares values bound at replay and referenced "
-        "as ${name} in a step's args; `provenance` records where it came from. "
+        "replayed later. `steps` is the macro body, a tree of: leaves ({tool, "
+        "args, expect, ...}); `when` branches ({when: {locator, ...}, then: "
+        "[...], else: [...]}); and loops -- {repeat_until: {locator, ...}, max: "
+        "N, do: [...]} runs `do` until the condition holds (max is required and "
+        "capped, so it cannot spin), and {for_each: \"var\", in: <list or "
+        "${param}>, do: [...]} runs `do` once per item, binding ${var} in the "
+        "arm. `params` declares values bound at replay and referenced as "
+        "${name} in a step's args; `provenance` records where it came from. "
         "A malformed macro is refused here, not at replay. Operator "
         "bookkeeping: it touches the operator directory, not a target."
     ))
     def macro_save(
         name: Annotated[str, Field(description="A bare macro name (no path).")],
         steps: Annotated[list[dict], Field(description=(
-            "The macro body: leaf steps and/or `when` branches (see the tool "
-            "description). A leaf omits the session; the replay supplies it."
+            "The macro body: leaf steps, `when` branches, and `repeat_until` / "
+            "`for_each` loops (see the tool description). A leaf omits the "
+            "session; the replay supplies it."
         ))],
         description: Annotated[str, Field(description="One line, shown in macro_list.")] = "",
         tier: Annotated[str, Field(description=(
