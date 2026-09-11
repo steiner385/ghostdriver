@@ -617,10 +617,16 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         provenance: Annotated[dict | None, Field(description=(
             "{recorded_at, recorded_against (a profile id), revision}."
         ))] = None,
+        handlers: Annotated[list[dict] | None, Field(description=(
+            "Reactive handlers, active for the whole run: each {on_disturbance: "
+            "{window: <class locator>}, handle: [steps], then: 'retry'|'continue', "
+            "max: N}. Fires when the named window appears; bounded and never a "
+            "wildcard (#106)."
+        ))] = None,
     ) -> dict[str, Any]:
         return box.macro_save(name, steps, description=description, tier=tier,
                               isolation=isolation, profile=profile, params=params,
-                              provenance=provenance)
+                              provenance=provenance, handlers=handlers)
 
     @server.tool(annotations=READS, description=(
         "List the saved macros: each name, its one-line description, its step "

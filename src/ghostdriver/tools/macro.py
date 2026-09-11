@@ -100,11 +100,14 @@ class MacroTools(_ToolboxCore):
     def macro_save(self, name: str, steps: list, *, description: str = "",
                    tier: str = "read_only", isolation: str = "none",
                    profile: str | None = None, params: dict | None = None,
-                   provenance: dict | None = None) -> dict:
+                   provenance: dict | None = None, handlers: list | None = None) -> dict:
         """Persist a step-list as a macro, validated. The steps are the macro
-        body (leaves and `when` branches, D#84); `params` and `provenance` are
-        stored as given. A malformed macro is refused here, not at replay."""
+        body (leaves, `when` branches, loops, D#84/#97); `handlers` are reactive
+        on_disturbance handlers (#106); `params` and `provenance` are stored as
+        given. A malformed macro is refused here, not at replay."""
         doc: dict = {"name": name, "steps": steps, "tier": tier}
+        if handlers:
+            doc["handlers"] = handlers
         if description:
             doc["description"] = description
         if isolation != "none":
@@ -176,6 +179,9 @@ class MacroTools(_ToolboxCore):
                            "recorded_against": wf.provenance.recorded_against,
                            "revision": wf.provenance.revision},
             "steps": [_describe_node(n) for n in wf.steps],
+            "handlers": [{"on_disturbance": h.window, "then": h.then, "max": h.max,
+                          "handle": [_describe_node(n) for n in h.handle]}
+                         for h in wf.handlers],
         }
 
     def macro_delete(self, name: str) -> dict:
@@ -247,8 +253,12 @@ class MacroTools(_ToolboxCore):
                 "ok": True, "dry_run": True, "name": wf.name, "tier": wf.tier,
                 "warnings": warnings, "missing_required": missing,
                 "plan": [_plan_node(n, bindings) for n in wf.steps],
+                "handlers": [{"on_disturbance": h.window, "then": h.then, "max": h.max,
+                              "handle": [_plan_node(n, bindings) for n in h.handle]}
+                             for h in wf.handlers],
                 "note": "nothing was actuated; a branch resolves at run time, so "
-                        "the plan shows both arms",
+                        "the plan shows both arms, and a handler fires only if its "
+                        "window appears",
             }
 
         # A real run binds or refuses (D33), and needs a session at least the
@@ -276,7 +286,7 @@ class MacroTools(_ToolboxCore):
         watch.start()
         try:
             outcome = run_macro_body(self, session_id, wf.steps, bindings,
-                                     context="macro")
+                                     context="macro", handlers=wf.handlers)
         finally:
             watch.stop()
         interference = watch.events()

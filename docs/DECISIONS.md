@@ -4944,3 +4944,59 @@ remain v3.
 failure, per-item binding, a non-list `in`, an unreadable condition, and a body
 failure stopping the loop -- in `tests/test_macro_runner.py`, all with a fake
 toolbox (`env: any`).
+
+### D#106. Reactive handlers: named, bounded, and unable to do what a step could not
+
+**Context.** Macro v3, the last phase and the one the spec held back on
+purpose: a macro that reacts to the UI. The value is real -- dismiss the
+connection-lost dialog that froze the app in D20/D48 and carry on -- and so is
+the danger: a thing that acts on its own reading of the screen is the opposite
+of "a measurement never overrules the person" (D28, D35). So the design is
+small, and every part of it exists to keep a reaction inside what the operator
+already authorized.
+
+**Decision.** A macro may declare `handlers`, active for the whole run:
+
+```json
+{"on_disturbance": {"window": "class=TConnLostDlg"},
+ "handle": [ ... ], "then": "retry", "max": 3}
+```
+
+- **Named, never a wildcard.** A handler fires only for the window class the
+  operator wrote. `*` (or `class=*`) is refused at parse. A handler reacts to a
+  case a person named, not to anything that appears.
+- **Its actions are ordinary steps.** `handle` runs through the same core every
+  leaf does (`step_refusal` + `call_tool`, D#83): the allowlist, the per-step
+  tier, the denylist enforced in the tool. A handler can click nothing a live
+  call could not, and cannot take the foreground (not on the allowlist).
+- **Bounded.** Each handler has a capped `max` firings; past it the run stops
+  with the reason rather than dismiss-and-retry forever. `then: retry` re-runs
+  the interrupted step (the connection-lost case: dismiss, then retry the click
+  the dialog blocked); `then: continue` (default) proceeds. A handler's own
+  steps do not re-trigger handlers, so a reaction cannot recurse.
+- **Visible.** Every firing is a step in the result (`on_disturbance[i]`,
+  then the `handle` steps, then a `retry[n]` of the interrupted step), so a
+  reaction is never silent.
+- **Checked after an actuation only** -- a dialog appears in response to an
+  action, not a read -- and by an ordinary `find` for the named window, which
+  is itself a safe read.
+
+**A structural choice the spec left open.** The spec sketched `on_disturbance`
+inline among the control-flow shapes; it is instead a **top-level `handlers`
+list**, because a handler is a property of the whole run, not a point in the
+step sequence, and inline registration would be order-dependent and confusing.
+Recording does not capture handlers (D#88); they are authored, like the loops.
+
+**The test the design has to pass** (docs/MACROS.md): a reactive macro can do
+nothing an operator watching the screen could not have authorized in advance by
+naming the case. Named windows, allowlisted actions, bounded firings, visible
+reactions -- each is one clause of that promise.
+
+**Evidence.** Parsing and its refusals (no on_disturbance, a wildcard window,
+no handle, a bad `then`/`max`, over the ceiling) in `tests/test_workflow.py`;
+evaluation -- a handler firing and retrying, not firing when absent,
+`continue` vs `retry`, the max-firings bound stopping a persistent
+disturbance, and a handler step held to the allowlist -- in
+`tests/test_macro_runner.py`, all with a fake toolbox (`env: any`). This
+completes the macro roadmap (#81): v1 record/replay/delete, v2 loops, v3
+reactive handlers.

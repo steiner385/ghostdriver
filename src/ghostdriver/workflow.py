@@ -144,8 +144,23 @@ class ForEach:
     note: str = ""
 
 
+@dataclass(frozen=True)
+class Handler:
+    """React to a UI disturbance the operator named (v3, #106). `window` is a
+    locator for the window whose appearance triggers `handle` -- ordinary
+    macro steps, run through the same checks any leaf gets. `then` is 'retry'
+    (re-run the interrupted step) or 'continue'. Bounded: `max` firings, past
+    which the run stops rather than react in a loop. A handler is authored,
+    never a wildcard, never learned."""
+    window: str
+    handle: tuple[Node, ...]
+    then: str = "continue"
+    max: int = 3
+
+
 #: A node in a macro body is a leaf step, a branch, or a loop. The tree is
-#: recursive: an arm or a loop body is itself a list of nodes.
+#: recursive: an arm or a loop body is itself a list of nodes. A Handler is not
+#: a node -- it is declared for the whole run, and its `handle` is nodes.
 Node = Step | Branch | RepeatUntil | ForEach
 
 #: The keys each control-flow node may carry (loops, #97).
@@ -161,6 +176,15 @@ MAX_NEST_DEPTH = 8
 #: place to park a run (D#76).
 MAX_ITERATIONS = 1000
 
+#: The keys a reactive handler and its trigger may carry (#106).
+HANDLER_KEYS = frozenset({"on_disturbance", "handle", "then", "max"})
+ON_DISTURBANCE_KEYS = frozenset({"window"})
+
+#: The hard ceiling on how many times one handler may fire in a run, so a
+#: disturbance that keeps recurring stops the run with a reason rather than
+#: dismiss-and-retry forever.
+MAX_HANDLER_FIRINGS = 20
+
 
 @dataclass(frozen=True)
 class Workflow:
@@ -173,6 +197,10 @@ class Workflow:
     #: Params bound at replay, `${name}` in a step's args (#85 substitutes).
     params: tuple[Param, ...] = ()
     provenance: Provenance = field(default_factory=Provenance)
+    #: Reactive handlers, active for the whole run (#106). Declared at the top
+    #: level, not inline in steps, because a handler is a property of the run,
+    #: not a point in it.
+    handlers: tuple[Handler, ...] = ()
 
     @classmethod
     def load(cls, path: Path) -> Workflow:
@@ -198,6 +226,7 @@ class Workflow:
             description=str(data.get("description", "")),
             params=_parse_params(data.get("params")),
             provenance=_parse_provenance(data.get("provenance")),
+            handlers=_parse_handlers(data.get("handlers")),
         )
 
 
@@ -373,6 +402,50 @@ def _parse_provenance(raw: Any) -> Provenance:
     )
 
 
+def _parse_handlers(raw: Any) -> tuple[Handler, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise WorkflowError("'handlers' must be a list of on_disturbance handlers")
+    handlers: list[Handler] = []
+    for i, item in enumerate(raw):
+        where = f"handlers[{i}]"
+        if not isinstance(item, dict):
+            raise WorkflowError(f"{where} must be an object")
+        _reject_unknown(where, item, HANDLER_KEYS)
+        trigger = item.get("on_disturbance")
+        if not isinstance(trigger, dict):
+            raise WorkflowError(
+                f"{where}: 'on_disturbance' names the window to react to")
+        _reject_unknown(f"{where}.on_disturbance", trigger, ON_DISTURBANCE_KEYS)
+        window = trigger.get("window")
+        if (not isinstance(window, str) or not window.strip()
+                or window.strip() in ("*", "class=*")):
+            raise WorkflowError(
+                f"{where}: on_disturbance.window must name a specific window "
+                "(a class locator), never a wildcard -- a handler reacts to a "
+                "case the operator named, not to anything that appears")
+        if "handle" not in item:
+            raise WorkflowError(
+                f"{where}: a handler needs a 'handle' -- the steps to run")
+        then = item.get("then", "continue")
+        if then not in ("continue", "retry"):
+            raise WorkflowError(
+                f"{where}: 'then' is 'continue' or 'retry', not {then!r}")
+        max_raw = item.get("max", 3)
+        if not isinstance(max_raw, int) or isinstance(max_raw, bool) or max_raw < 1:
+            raise WorkflowError(f"{where}: 'max' must be a positive integer")
+        if max_raw > MAX_HANDLER_FIRINGS:
+            raise WorkflowError(
+                f"{where}: max {max_raw} exceeds the {MAX_HANDLER_FIRINGS} "
+                "ceiling on handler firings")
+        handlers.append(Handler(
+            window=window,
+            handle=_parse_nodes(item["handle"], f"{where}.handle"),
+            then=then, max=max_raw))
+    return tuple(handlers)
+
+
 # --- assertions ------------------------------------------------------------
 
 def dig(data: Any, path: str) -> tuple[bool, Any]:
@@ -534,6 +607,7 @@ def run_macro_body(
     *,
     context: str = "macro",
     stop_on_failure: bool = True,
+    handlers: tuple[Handler, ...] = (),
 ) -> dict:
     """Walk a macro body against one session: substitute params, evaluate
     `when` branches, and dispatch each leaf through the shared allowlist (#83).
@@ -549,10 +623,47 @@ def run_macro_body(
     from .tools.stepper import call_tool, step_refusal
 
     records: list[MacroStep] = []
-    state: dict[str, Any] = {"stopped": False, "refused": None}
+    state: dict[str, Any] = {"stopped": False, "refused": None, "in_handler": False}
+    handler_counts: dict[int, int] = {}
+
+    #: The actuations a declared disturbance is checked after: a dialog appears
+    #: in response to an action, not a read.
+    _ACTUATIONS = frozenset({"click", "set_value", "type_text", "send_keys"})
 
     def stopping() -> bool:
         return bool(state["stopped"] or state["refused"])
+
+    def react(tool: str, step_path: str, bindings: dict[str, Any]) -> str | None:
+        """After an actuation, run the first declared handler whose window is
+        present, and return its `then` ('retry'/'continue'), or None. A
+        handler's own steps do not re-trigger handlers (`in_handler`), so the
+        reaction cannot recurse; each handler's `max` firings bound it, past
+        which the run stops rather than loop."""
+        if not handlers or tool not in _ACTUATIONS or state["in_handler"]:
+            return None
+        for index, handler in enumerate(handlers):
+            found = box.find(session_id, handler.window, all_windows=True)
+            if not found.get("ok") or (found.get("match_count") or 0) < 1:
+                continue
+            handler_counts[index] = handler_counts.get(index, 0) + 1
+            if handler_counts[index] > handler.max:
+                state["refused"] = (
+                    f"{step_path}: the handler for {handler.window!r} has fired "
+                    f"{handler.max} times and the disturbance is still there; "
+                    "stopping rather than react in a loop")
+                return None
+            records.append(MacroStep(
+                f"{step_path}.on_disturbance[{index}]", "on_disturbance",
+                True, [], False, False))
+            state["in_handler"] = True
+            try:
+                walk(handler.handle, f"{step_path}.handle.", bindings)
+            finally:
+                state["in_handler"] = False
+            if stopping():
+                return None
+            return handler.then
+        return None
 
     def walk(nodes: tuple[Node, ...], path: str, bindings: dict[str, Any]) -> None:
         for i, node in enumerate(nodes):
@@ -584,13 +695,24 @@ def run_macro_body(
             if refusal is not None:
                 state["refused"] = refusal
                 return
-            result = call_tool(box, session_id, node.tool, bound_args)
-            failures = check(node, result)
-            records.append(MacroStep(at, node.tool, not failures, failures,
-                                     node.verified, node.delivery_only))
-            if failures and stop_on_failure:
-                state["stopped"] = True
-                return
+            attempt = 0
+            while True:
+                attempt += 1
+                step_path = at if attempt == 1 else f"{at}.retry[{attempt - 1}]"
+                result = call_tool(box, session_id, node.tool, bound_args)
+                failures = check(node, result)
+                records.append(MacroStep(step_path, node.tool, not failures,
+                                         failures, node.verified, node.delivery_only))
+                if failures and stop_on_failure:
+                    state["stopped"] = True
+                    return
+                if react(node.tool, step_path, bindings) == "retry":
+                    if stopping():
+                        return
+                    continue
+                if stopping():
+                    return
+                break
 
     def _run_repeat(node: RepeatUntil, at: str, bindings: dict[str, Any]) -> None:
         # Check before each iteration: an already-satisfied condition runs the

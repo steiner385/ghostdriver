@@ -191,9 +191,14 @@ first, each phase standing on its own.
 2. **v2 -- loops. [built, #97]** `repeat_until` and `for_each`. Turns the embed
    loop and grid paging into single macros. Bounded: `max` is required and
    capped, so a macro cannot spin -- the same instinct as `pace`'s cap.
-3. **v3 -- reactive `on_disturbance` handlers.** Operator-declared, scoped,
-   consent-designed as above. Built last because it is where autonomy and the
-   consent model meet, and it must not be rushed.
+3. **v3 -- reactive `on_disturbance` handlers. [built, #106]**
+   Operator-declared, scoped, consent-designed as above. Declared at the top
+   level (`handlers`), not inline, because a handler is active for the whole
+   run rather than at a point in it; each is checked after an actuation, fires
+   only for its named window, runs its `handle` through the same safe core,
+   and is bounded by `max` firings (`then: retry` re-runs the interrupted step,
+   `continue` proceeds). A persistent disturbance stops the run with a reason
+   rather than react in a loop.
 
 ## Open questions, to settle by building
 

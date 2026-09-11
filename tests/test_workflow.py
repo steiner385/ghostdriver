@@ -15,6 +15,7 @@ from ghostdriver.workflow import (
     Branch,
     ForEach,
     Guard,
+    Handler,
     Param,
     Provenance,
     RepeatUntil,
@@ -491,5 +492,47 @@ def test_a_for_each_loop_parses_a_list_and_a_param():
     {"steps": [{"tool": "click", "repeat_until": {"locator": "x"}, "max": 2, "do": []}]},  # two kinds
 ])
 def test_a_malformed_loop_is_refused(bad):
+    with pytest.raises(WorkflowError):
+        Workflow.from_dict(bad)
+
+
+# --- reactive handlers: the format (#106) ---------------------------------
+
+def test_a_handler_parses():
+    wf = Workflow.from_dict({"steps": [{"tool": "click", "args": {"locator": "x"}}],
+        "handlers": [{"on_disturbance": {"window": "class=TConnLostDlg"},
+                      "handle": [{"tool": "click", "args": {"locator": "ok"}}],
+                      "then": "retry", "max": 5}]})
+
+    assert len(wf.handlers) == 1
+    h = wf.handlers[0]
+    assert isinstance(h, Handler)
+    assert h.window == "class=TConnLostDlg" and h.then == "retry" and h.max == 5
+    assert [n.tool for n in h.handle] == ["click"]
+
+
+def test_a_handler_defaults_then_continue_and_max_three():
+    wf = Workflow.from_dict({"steps": [{"tool": "click"}],
+        "handlers": [{"on_disturbance": {"window": "class=D"},
+                      "handle": [{"tool": "click", "args": {"locator": "ok"}}]}]})
+    assert wf.handlers[0].then == "continue" and wf.handlers[0].max == 3
+
+
+@pytest.mark.parametrize("bad", [
+    {"steps": [{"tool": "click"}], "handlers": [{"handle": [{"tool": "click"}]}]},  # no on_disturbance
+    {"steps": [{"tool": "click"}], "handlers": [{"on_disturbance": {"window": "*"},
+        "handle": [{"tool": "click"}]}]},  # wildcard window
+    {"steps": [{"tool": "click"}], "handlers": [{"on_disturbance": {"window": "class=D"}}]},  # no handle
+    {"steps": [{"tool": "click"}], "handlers": [{"on_disturbance": {"window": "class=D"},
+        "handle": [{"tool": "click"}], "then": "explode"}]},  # bad then
+    {"steps": [{"tool": "click"}], "handlers": [{"on_disturbance": {"window": "class=D"},
+        "handle": [{"tool": "click"}], "max": 0}]},  # bad max
+    {"steps": [{"tool": "click"}], "handlers": [{"on_disturbance": {"window": "class=D"},
+        "handle": [{"tool": "click"}], "max": 999}]},  # over ceiling
+    {"steps": [{"tool": "click"}], "handlers": [{"on_disturbance": {"nope": 1},
+        "handle": [{"tool": "click"}]}]},  # unknown trigger key
+    {"steps": [{"tool": "click"}], "handlers": "not-a-list"},
+])
+def test_a_malformed_handler_is_refused(bad):
     with pytest.raises(WorkflowError):
         Workflow.from_dict(bad)
