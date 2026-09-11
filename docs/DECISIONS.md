@@ -5000,3 +5000,29 @@ disturbance, and a handler step held to the allowlist -- in
 `tests/test_macro_runner.py`, all with a fake toolbox (`env: any`). This
 completes the macro roadmap (#81): v1 record/replay/delete, v2 loops, v3
 reactive handlers.
+
+### D#108. A None on the wire is "not given", and a fake that never sends one proves nothing about it
+
+**Context.** The first live shakedown of the macro recorder, against the VendorApp
+sandbox. Two tab switches, each verified `effect`, were recorded
+`verified: true` **and** `delivery_only: true` -- a contradiction -- and their
+args carried every default the wire sent (`at: null`, `modifiers: null`, ...).
+
+**What was wrong.** The MCP layer calls each tool passing every parameter
+explicitly, defaults included, so `at=None` reaches the wrapper's bound args
+as a *present* key. `capture_step` tested `"at" in args` -- presence -- and
+so flagged a verified click as an offset click. Every fake-toolbox test built
+its `bound` dict by hand and never included `at=None`; the real path always
+does. The tests were faithful to a shape the wire never has -- the same class
+of gap D#39 named: a check that cannot run where the failure happens.
+
+**Decision.** Capturing drops None-valued args (a None is "not given"; the
+macro records what was asked, not the defaults the wire carried) and tests
+`at` by value, not by key. The regression test is built from wire-shaped
+bound args, so it fails the way the sandbox did.
+
+**Also seen, and correct.** The replay's interference watch reported ~55
+`cursor_moved` events -- the operator's own mouse during the run -- and no
+`foreground_taken`. Reported, not judged (D28); the run passed. The rest of
+the shakedown held: record, save, `dry_run`, and a real replay that re-ran and
+re-verified both switches against the live target, with a report written.

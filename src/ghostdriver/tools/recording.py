@@ -37,8 +37,14 @@ def capture_step(tool: str, bound: dict, result: dict) -> dict | None:
     """
     if tool not in RECORDABLE or not result.get("ok"):
         return None
+    # The MCP layer passes every parameter explicitly, defaults included, so
+    # `at=None` arrives as a *present* key. A None is "not given": it is
+    # dropped, so the macro records what was asked rather than every default
+    # the wire carried -- and so a present-but-None `at` cannot flag a
+    # verified click as an offset click. Found on the first live shakedown
+    # (#108): the fake tests never passed at=None, the real path always does.
     args = {k: v for k, v in bound.items()
-            if k not in ("session_id", "session_ref")}
+            if k not in ("session_id", "session_ref") and v is not None}
     if tool in ("wait_for", "wait_idle"):
         # A wait that returned ok is verified by construction: the condition
         # it named actually held.
@@ -48,7 +54,7 @@ def capture_step(tool: str, bound: dict, result: dict) -> dict | None:
         verified = verdict in _VERIFIED
         # An offset click (`at`) can never be confirmed by locator -- the
         # least replayable step there is (D66) -- so it is delivery_only
-        # whatever the verdict said.
-        delivery_only = verdict in _DELIVERED or "at" in args
+        # whatever the verdict said. A *value* for at, not a present key.
+        delivery_only = verdict in _DELIVERED or args.get("at") is not None
     return {"tool": tool, "args": args,
             "verified": verified, "delivery_only": delivery_only}
