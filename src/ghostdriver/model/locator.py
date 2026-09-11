@@ -34,9 +34,23 @@ class Locator:
     #: window locator).
     control_type: str | None = None
     name: str | None = None
+    #: A *place* (D72, D#105): `region=left,top,right,bottom`, in the
+    #: coordinates of the top-level window the match lives in -- its own
+    #: rect origin, which is the frame a `capture` of that window shows. A
+    #: node matches when its centre lies inside. This is how a control with
+    #: no name is addressed: Studio's setting fields are unnamed `text`
+    #: nodes told apart only by where they are.
+    region: tuple[int, int, int, int] | None = None
+    #: The value the control must *currently* show, `value="0.16"`. Checked
+    #: by comparison, never by disclosure: the resolver is handed a
+    #: `confirm` callback that answers yes or no, so a withheld field
+    #: (D#34b) is matchable without its contents reaching a result. This is
+    #: what makes a wrong-field write impossible rather than unlikely -- the
+    #: caller states what the field shows and the driver checks first.
+    value: str | None = None
 
     _KEYS = ("class", "text", "role", "visible", "index", "type", "name",
-             "enabled", "handle")
+             "enabled", "handle", "region", "value")
 
     @property
     def is_element(self) -> bool:
@@ -161,6 +175,9 @@ class Locator:
                 except ValueError:
                     raise ValueError(f"handle= takes the handle_ephemeral of a result, not {value!r}") from None
                 continue
+            if key == "region":
+                fields["region"] = _parse_region(value)
+                continue
             if key == "class":
                 fields["class_name"] = value
             elif key == "type":
@@ -180,7 +197,13 @@ class Locator:
     def from_dict(cls, data: dict) -> "Locator":
         data = dict(data)
         within = data.pop("within", None)
-        return cls(within=cls.from_dict(within) if within else None, **data)
+        region = data.pop("region", None)
+        if region is not None:
+            # JSON has no tuples; a profile writes a list or {left,...}.
+            region = (tuple(int(v) for v in region) if isinstance(region, (list, tuple))
+                      else tuple(int(region[k]) for k in ("left", "top", "right", "bottom")))
+        return cls(within=cls.from_dict(within) if within else None,
+                   region=region, **data)
 
     def describe(self) -> str:
         """Human-readable form, for error messages."""
@@ -199,12 +222,31 @@ class Locator:
             parts.append(f"visible={str(self.visible).lower()}")
         if self.index is not None:
             parts.append(f"index={self.index}")
+        if self.region is not None:
+            parts.append("region=" + ",".join(str(v) for v in self.region))
+        if self.value is not None:
+            parts.append(f'value="{self.value}"')
         if self.within:
             # The same syntax `parse` accepts, so a described locator can be
             # handed straight back to it -- error messages quote locators,
             # and one that cannot be copied out of a message is friction.
             parts.append(f"within=({self.within.describe()})")
         return " ".join(parts) or "<empty locator>"
+
+
+def _parse_region(value: str) -> tuple[int, int, int, int]:
+    """`left,top,right,bottom`, four integers, right after left and bottom
+    after top -- an empty or inverted region matches nothing and would read
+    as "not there" rather than as the typo it is."""
+    parts = [p.strip() for p in value.split(",")]
+    if len(parts) != 4 or not all(p.lstrip("-").isdigit() for p in parts):
+        raise ValueError(
+            f"region= takes left,top,right,bottom as four integers, not {value!r}")
+    left, top, right, bottom = (int(p) for p in parts)
+    if right <= left or bottom <= top:
+        raise ValueError(
+            f"region={value!r} is empty: right must exceed left and bottom exceed top")
+    return left, top, right, bottom
 
 
 def _parse_bool(key: str, value: str) -> bool:

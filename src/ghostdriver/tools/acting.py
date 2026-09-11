@@ -8,6 +8,8 @@ carry it; `ActuationTools` and `LearningTools` subclass this.
 """
 
 
+from typing import Any
+
 from ..model.element import AccessibleElement
 from ..model.result import ErrorKind, GhostdriverError
 from .core import (
@@ -143,17 +145,25 @@ class _ActingCore(_DenyCore, _ExpectCore):
 
         return notes.cadence_for(surface_of(handle))
 
-    def _actuator(self, session, *, verify_timeout_s: float | None = None):
+    def _actuator(self, session, *, verify_timeout_s: float | None = None,
+                  tiers=None):
         from ..actuate import Actuator
         from ..backends import current
         snapshot = current().snapshot
 
         observe = lambda: session.run(lambda: snapshot(session.pid))  # noqa: E731
-        if verify_timeout_s is None:
-            return Actuator(observe=observe)
-        return Actuator(observe=observe, verify_timeout_s=verify_timeout_s)
+        kw: dict[str, Any] = {"observe": observe}
+        if verify_timeout_s is not None:
+            kw["verify_timeout_s"] = verify_timeout_s
+        if tiers is not None:
+            # A live session may reach tier 4 -- the real-Enter commit on the
+            # operator's own display (D#111) -- which the default ladder
+            # excludes (D9). Passed explicitly, never on by default.
+            kw["tiers"] = tiers
+        return Actuator(**kw)
 
-    def _perform(self, session, attempts, *, verify_timeout_s: float | None = None, **kw):
+    def _perform(self, session, attempts, *, verify_timeout_s: float | None = None,
+                 tiers=None, **kw):
         """Run an actuation where the target can be seen.
 
         The whole perform is marshalled, not each message: verb posts, the
@@ -164,8 +174,8 @@ class _ActingCore(_DenyCore, _ExpectCore):
         session -- execute inline rather than deadlocking.
         """
         return session.run(
-            lambda: self._actuator(session, verify_timeout_s=verify_timeout_s).perform(
-                attempts, **kw))
+            lambda: self._actuator(session, verify_timeout_s=verify_timeout_s,
+                                   tiers=tiers).perform(attempts, **kw))
 
     def _remember(self, session_id: str, tool: str, locator: str,
                   prepared, result) -> None:

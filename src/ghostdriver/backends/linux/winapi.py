@@ -27,7 +27,26 @@ from .. import UnsupportedPlatform
 from . import display
 
 #: What is answered. Everything else in `winapi` refuses.
-_WIRED = ("class_name", "is_visible_style", "foreground_window")
+_WIRED = ("class_name", "is_visible_style", "foreground_window",
+          "resolve_live_window")
+
+
+def resolve_live_window(pid: int) -> int:
+    """The window to drive live, if the target is the foreground *now* (D#111).
+
+    The "operator-present live actuation" gate: a real keystroke may be sent
+    only into a window of the target the operator is already looking at. So
+    this returns the active window when it belongs to `pid` -- correlated
+    through the tree, because a sandboxed target's windows carry no pid
+    (D#101) -- and 0 otherwise, which the caller reports as "bring the window
+    you want driven to the front and attach again". Enumerating first is what
+    populates the pid<->window attribution the check reads.
+    """
+    from . import display, tree
+
+    tree.enumerate_process(pid)
+    fg = display.active_window() or 0
+    return fg if fg and fg in display.windows_of(pid) else 0
 
 
 def class_name(xid: int) -> str:

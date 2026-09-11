@@ -247,3 +247,102 @@ def _png_size(data: bytes) -> tuple[int, int]:
     if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n":
         raise CaptureError("the capture is not a PNG")
     return (int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big"))
+
+
+def confirms_value(handle: int, expected: str) -> bool | None:
+    """Whether the control currently shows `expected`, without disclosing it.
+
+    This is what makes a place-plus-value locator safe on a platform that
+    withholds a field's contents by class (D#34b, D#105): the answer is a
+    yes or a no, so the value never reaches a result, a trace or a model's
+    context. `None` means the control did not answer within the deadline
+    (D#9) -- not a match, and not a mismatch either.
+
+    A *protected* field (role `password text`) answers None: its contents
+    are never fetched at any grain, so they cannot be confirmed, and a
+    caller must not be able to probe a password by guessing values.
+    """
+    accessible = _accessible(handle)
+    role, states = _role_and_states(accessible)
+
+    def fetch() -> str | None:
+        import gi
+
+        gi.require_version("Atspi", "2.0")
+        from gi.repository import Atspi
+
+        if "Text" not in accessible.get_interfaces():
+            return accessible.get_name()
+        try:
+            count = Atspi.Text.get_character_count(accessible)
+            return Atspi.Text.get_text(accessible, 0, count)
+        except Exception:
+            return None
+
+    return protection.confirms(
+        role, states, expected=expected,
+        read=lambda: call_with_deadline(fetch),
+    )
+
+
+def ink_fraction(handle: int, *,
+                 region: tuple[int, int, int, int] | None = None) -> float:
+    """How much of the window's rendering is not its background colour.
+
+    The same question the Windows `ink_fraction` answers (D66): a control
+    that reads empty but paints content has a broken read path, not empty
+    content. The most common colour is the background; every other pixel is
+    ink. Computed over a downscaled capture so a large region is bounded
+    work -- the question is "blank or not", not "what".
+    """
+    xid = _toplevel_xid(_accessible(handle))
+    if xid is None:
+        return 0.0
+    return ink_fraction_xid(xid, region=region)
+
+
+def ink_fraction_xid(xid: int, *,
+                     region: tuple[int, int, int, int] | None = None) -> float:
+    crop = []
+    if region is not None:
+        left, top, right, bottom = region
+        crop = ["-crop", f"{right - left}x{bottom - top}+{left}+{top}"]
+    try:
+        done = subprocess.run(
+            ["convert", f"x:{xid}", *crop, "-resize", "128x128>", "ppm:-"],
+            capture_output=True, timeout=20, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 0.0
+    return _ink_of_ppm(done.stdout)
+
+
+def _ink_of_ppm(data: bytes) -> float:
+    """1 - (most common pixel fraction), from a binary PPM (P6)."""
+    if not data.startswith(b"P6"):
+        return 0.0
+    # header: P6 <w> <h> <maxval>, whitespace-separated, then binary
+    fields: list[bytes] = []
+    i = 2
+    while len(fields) < 3 and i < len(data):
+        while i < len(data) and data[i] in b" \t\n\r":
+            i += 1
+        start = i
+        while i < len(data) and data[i] not in b" \t\n\r":
+            i += 1
+        fields.append(data[start:i])
+    i += 1  # the single whitespace after maxval
+    try:
+        width, height, _maxval = (int(f) for f in fields)
+    except ValueError:
+        return 0.0
+    pixels = data[i:i + width * height * 3]
+    counts: dict[bytes, int] = {}
+    total = 0
+    for p in range(0, len(pixels) - 2, 3):
+        px = pixels[p:p + 3]
+        counts[px] = counts.get(px, 0) + 1
+        total += 1
+    if not total:
+        return 0.0
+    return round(1.0 - max(counts.values()) / total, 3)

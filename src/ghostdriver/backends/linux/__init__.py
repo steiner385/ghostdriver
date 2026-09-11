@@ -18,7 +18,20 @@ them has been built.
 from typing import Any
 
 from .. import CONTRACT, UnsupportedPlatform
-from . import isolate, modality, reading, restore, tree, verbs
+from . import (
+    clipboard,
+    elements,
+    interference,
+    isolate,
+    modality,
+    reading,
+    restore,
+    tree,
+    verbs,
+)
+from . import (
+    input as _input,
+)
 from . import winapi as _winapi
 
 #: What is wired, and where it lives. Everything else still refuses. The map
@@ -32,19 +45,43 @@ _WIRED: dict[str, Any] = {
     # slice 1, the window tree (#40)
     **dict.fromkeys(
         ("enumerate_process", "top_level_windows", "direct_children",
-         "process_facts", "descendants", "parent_map"),
+         "process_facts", "descendants", "parent_map", "application_name"),
         tree,
     ),
     # slice 2, reading -- under the deadline (D#9) and the disclosure
     # policy (D#34b)
     **dict.fromkeys(
-        ("read_window_text", "is_protected", "disclosure",
-         "capture_window", "CaptureError"),
+        ("read_window_text", "is_protected", "disclosure", "confirms_value",
+         "capture_window", "CaptureError", "ink_fraction"),
         reading,
+    ),
+    # elements that are not windows -- the AT-SPI surface as UIA-shaped
+    # nodes (#104): identity is position plus value, so these carry extents
+    # and defer a field's value to a confirmation (D#104).
+    **dict.fromkeys(
+        ("walk_elements_awake", "is_selected", "_current_value"),
+        elements,
+    ),
+    # acting extras (#105). No posted pair exists (D#11), so button_pair
+    # only refuses what cannot be sent and deepest_child_at is a no-op; the
+    # key tables travel XTest inside a live session (D#111).
+    **dict.fromkeys(
+        ("NAMED_KEYS", "EDIT_ACTIONS", "button_pair", "deepest_child_at"),
+        _input,
+    ),
+    # the clipboard and the two grid routes -- both tier 4 here, because a
+    # copy or a focus needs real input on this toolkit (D#11, D#111).
+    **dict.fromkeys(
+        ("read_clipboard_text", "snapshot_clipboard", "restore_clipboard",
+         "copy_route", "focus_route"),
+        clipboard,
     ),
     # slice 5a, the minimized watch -- sampling for the neutral policy in
     # ghostdriver.isolation, which decides (D#13, D#14)
     **dict.fromkeys(("MinimizedWatch", "WatchError"), isolate),
+    # the interference watch, armed around a live action (D#111); its logic
+    # is the neutral one, this supplies the X samplers.
+    "InterferenceWatch": interference,
     # slice 3, modality and state. Read from the window manager rather than
     # AT-SPI: nothing goes disabled here, so the accessibility tree carries
     # no modality at all (D#12).
@@ -82,15 +119,14 @@ class _LinuxBackend:
             return wired if name in _IS_MODULE else getattr(wired, name)
         raise UnsupportedPlatform(
             f"{name} is not implemented on Linux yet. The window tree, "
-            "reading, the minimized watch, modality and state, and tier 1 "
-            "acting are wired (#40 slices 1, 2, 3, 4a, 5a); this is not part "
-            "of them. The backend is specified in docs/LINUX.md, and is being "
-            "built by measurement. What is left needs two things that do not "
-            "exist yet: synthetic input has nowhere safe to run until the "
-            "nested display is a strategy rather than a test harness (slice "
-            "5b), and assessment needs an embedded document measured (slice "
-            "6, issue #15). docs/LINUX.md tracks what has been measured and "
-            "what has not."
+            "reading, modality and state, the minimized watch, elements, "
+            "acting (tier 1, and tier 4 under the live-actuation consent) "
+            "and the interference watch are wired; this is not part of them. "
+            "What is left is assessment -- region_evidence, resolve_hosted_app, "
+            "assess_uia, assess_msaa -- which needs an embedded document "
+            "measured (#15), and HiddenDesktop / OperatorNotice, which are the "
+            "nested-display strategy. docs/LINUX.md tracks what has been "
+            "measured and what has not."
         )
 
 

@@ -1,6 +1,5 @@
 """Session lifecycle: listing targets, consent, attach, isolated launch, release."""
 
-import uuid
 
 from ..hosting import classify_process, hosted_frame_note, is_frame_host
 from ..isolation import Isolation
@@ -16,11 +15,11 @@ from ..session import ConsentRequired, Profile
 from .core import (
     MAX_ELEMENTS,
     _error,
-    _ToolboxCore,
 )
+from .live import _LiveCore
 
 
-class LifecycleTools(_ToolboxCore):
+class LifecycleTools(_LiveCore):
     """Finding targets, consenting to them, attaching, launching and releasing."""
 
     def list_targets(self) -> dict:
@@ -64,9 +63,11 @@ class LifecycleTools(_ToolboxCore):
             kind, note = classify_process(
                 [winapi.class_name(h) for h in windows]
             )
+            name, name_extra = self._named_target(pid, process.info["name"])
             targets.append({
                 "pid": pid,
-                "name": process.info["name"],
+                "name": name,
+                **name_extra,
                 "top_level_windows": len(windows),
                 "endpoints": [e.normalized for e in endpoints],
                 "summary": describe_target(
@@ -149,6 +150,7 @@ class LifecycleTools(_ToolboxCore):
         profile_path: str | None = None,
         isolation: str = "none",
         clipboard: bool = False,
+        live: bool = False,
     ) -> dict:
         """Open a session against a target the operator has approved.
 
@@ -186,6 +188,23 @@ class LifecycleTools(_ToolboxCore):
         except (psutil.Error, OSError) as exc:
             return _error(ErrorKind.NOT_FOUND, f"cannot read pid {pid}: {exc}")
 
+        # The tier is validated up front, because the live-actuation check
+        # below reads it -- an unknown tier is a clear refusal, not an
+        # uncaught ValueError from inside that check.
+        try:
+            tier_value = Tier(tier)
+        except ValueError:
+            return _error(ErrorKind.DENIED_BY_POLICY,
+                          f"unknown tier {tier!r}; "
+                          f"expected one of {[t.value for t in Tier]}")
+
+        # The operator-present live-actuation consent (D#111), resolved
+        # before the session opens: a live window that is not the foreground
+        # now is a refusal, not a session that quietly cannot commit.
+        live_window, live_error = self._live_window_or_error(pid, tier_value, live)
+        if live_error is not None:
+            return live_error
+
         try:
             profile = (
                 Profile.load(profile_location(profile_path)) if profile_path
@@ -194,7 +213,8 @@ class LifecycleTools(_ToolboxCore):
             session = self.sessions.attach(
                 pid,
                 command_line=command_line,
-                tier=Tier(tier), profile=profile, clipboard=clipboard,
+                tier=tier_value, profile=profile, clipboard=clipboard,
+                live_window=live_window,
             )
         except ConsentRequired as exc:
             endpoints = extract_endpoints(command_line)
@@ -311,89 +331,3 @@ class LifecycleTools(_ToolboxCore):
             # teardown terminates it and closes the desktop.
             desktop.teardown()
         return result
-
-    def launch_isolated(
-        self,
-        command: list[str],
-        *,
-        tier: str = "read_only",
-        announces_pid: bool = False,
-    ) -> dict:
-        """Launch a target onto a hidden desktop and open a session on it.
-
-        The only way to get a hidden-desktop session: the strategy is
-        launch-only, because a window's desktop is fixed when it is created
-        and a running target cannot be moved to one. So this is also the
-        tool\'s one process-launching path, and it is gated the way R1 gates
-        automation -- nothing launches until the operator has approved this
-        exact command. An unapproved command comes back needs_consent naming
-        it; the agent asks, and the operator records the answer with
-        grant_launch. Consent is on the command and lasts the session.
-
-        The guarantee is structural: the target has no foreground to steal
-        because it is not on the input desktop. That is also its cost --
-        nobody can see or interact with it, so a target needing interactive
-        login cannot use this without a SwitchDesktop that takes over the
-        operator\'s screen, which this does not do.
-        """
-        grant = self.sessions.launch_grant_for(command)
-        if grant is None:
-            return {
-                "ok": False,
-                "needs_consent": True,
-                "error": {
-                    "kind": ErrorKind.DENIED_BY_POLICY.value,
-                    "message": (
-                        "launching a process is not automatic: the operator "
-                        "must approve this exact command first. Ask them, "
-                        "then record it with grant_launch."
-                    ),
-                },
-                "command": list(command),
-            }
-        if not grant.allowed:
-            return _error(ErrorKind.DENIED_BY_POLICY,
-                          f"the operator declined to launch {command!r}"
-                          + (f" ({grant.note})" if grant.note else ""))
-
-        from ..backends import current
-        HiddenDesktop = current().HiddenDesktop
-
-        desktop = HiddenDesktop(name=f"ghostdriver-{uuid.uuid4().hex[:8]}")
-        try:
-            desktop.prepare()
-            pid = desktop.launch(list(command), announces_pid=announces_pid)
-        except OSError as exc:
-            desktop.teardown()
-            return _error(ErrorKind.DENIED_BY_ENVIRONMENT,
-                          f"could not launch on a hidden desktop: {exc}")
-
-        # The launch is the consent: a pid grant is recorded from it so the
-        # per-call gate authorizes this session like any other, without a
-        # second question about a target the operator just asked to start.
-        from ..policy import ConsentSource
-
-        self.sessions.record_grant(
-            pid, allowed=True, source=ConsentSource.ELICITED,
-            note=f"launched on a hidden desktop by operator request: {command!r}",
-        )
-        try:
-            session = self.sessions.attach(
-                pid, command_line=list(command), tier=Tier(tier),
-                runner=desktop.run,
-            )
-        except (GhostdriverError, ValueError) as exc:
-            desktop.teardown()
-            kind = getattr(exc, "kind", ErrorKind.DENIED_BY_POLICY)
-            return _error(kind, str(getattr(exc, "message", exc)))
-
-        self._desktops[session.session_id] = desktop
-        summary = session.summary()
-        summary["ok"] = True
-        summary["isolation"] = "hidden_desktop"
-        summary["launched_pid"] = pid
-        summary["note"] = (
-            "launched on a hidden desktop; it is invisible to you and cannot "
-            "take your foreground. Release the session to close it."
-        )
-        return summary

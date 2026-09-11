@@ -148,6 +148,13 @@ class Session:
     #: plain callable so this module stays platform-neutral: it knows a
     #: session may route its calls, not how.
     runner: Callable[[Callable[[], Any]], Any] | None = None
+    #: The window (a backend-opaque id) the operator consented to have driven
+    #: *live*, on their own display -- the "operator-present live actuation"
+    #: class (D#111). Non-zero only when the operator named a window that was
+    #: already the foreground at attach, which is what lets an actuation take
+    #: the real keyboard for an instant to commit a value a toolkit accepts
+    #: no other way. 0 is the default and the safe case: no live input.
+    live_window: int = 0
 
     def run(self, fn):
         """Execute `fn` where this session's target can be seen.
@@ -178,6 +185,12 @@ class Session:
         known = self.profile.sensitivity.describe()
         if known:
             described["input_sensitivity"] = known
+        if self.live_window:
+            described["live_actuation"] = (
+                f"granted for window {self.live_window:#x}: a value this "
+                "session commits may take the real keyboard for an instant, "
+                "aborting if the operator's foreground or pointer moves (D#111)"
+            )
         return described
 
 
@@ -333,6 +346,7 @@ class SessionManager:
         profile: Profile | None = None,
         runner: Callable[[Callable[[], Any]], Any] | None = None,
         clipboard: bool = False,
+        live_window: int = 0,
     ) -> Session:
         """Open a session against `pid`, if it has been consented to.
 
@@ -369,6 +383,7 @@ class SessionManager:
             command_line=tuple(command_line),
             runner=runner,
             clipboard=clipboard,
+            live_window=live_window,
         )
         self._sessions[session.session_id] = session
         return session

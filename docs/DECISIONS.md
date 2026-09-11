@@ -5026,3 +5026,286 @@ bound args, so it fails the way the sandbox did.
 `foreground_taken`. Reported, not judged (D28); the run passed. The rest of
 the shakedown held: record, save, `dry_run`, and a real replay that re-ran and
 re-verified both switches against the live target, with a report written.
+
+## Iteration 4 — the first real Linux target: Bambu Studio (wxGTK3, Flatpak)
+
+*Measured on linux-host-a against Bambu Studio 02.08.02.61 (`com.bambulab.BambuStudio`,
+wxWidgets-on-GTK3), on the operator's own X11 GNOME session on `:0`. These are
+measurement decisions, in the tradition of D#8–D#14: they precede the
+implementation they unblock, and they exist to be contradicted by the next
+target. Every corner of the Linux fixture work so far was measured against
+GTK **4**; this is the first measurement against a **different toolkit on the
+same platform**, and it contradicts the GTK4 findings in three load-bearing
+places.*
+
+### D#101. A Flatpak target lives in three identifier spaces, and none of them is the pid a caller holds
+
+**Context.** The task is to drive the operator's *running* Studio. Step one is
+that `list-targets` shows it. It does not, and the reason is that a sandboxed
+GTK application is not one process wearing one identity but three, and the
+backend's two pid-consuming paths reach for different ones.
+
+**The Flatpak a11y finding, confirmed.** `flatpak info --show-permissions
+com.bambulab.BambuStudio` prints no `--talk-name=org.a11y.Bus`, yet
+`Atspi.get_desktop(0)` lists it. The mechanism is not a permission at all: the
+runtime injects `GTK_MODULES=gail:atk-bridge` and
+`AT_SPI_BUS_ADDRESS=unix:path=/run/flatpak/at-spi-bus` into the sandbox, and an
+`xdg-dbus-proxy` (the process pair `bwrap … xdg-dbus-proxy` shows) brokers the
+a11y bus into it. So the accessibility route is open by default for a GTK
+Flatpak, and `docs/LINUX.md`'s "Sandboxed applications" paragraph -- which
+modelled this as a target the strategy cannot fit (D53) -- is wrong for the
+commonest case. Corrected there.
+
+**Three spaces, measured for two coexisting instances.**
+
+| | operator Studio | scratch Studio |
+|---|---|---|
+| X window (`_NET_CLIENT_LIST`) | `0x680010b` | `0x7c0010b` |
+| pid the X server attributes it to (XRes `LocalClientPIDMask`) = `psutil` real pid | **1461891** | **93102** |
+| pid AT-SPI reports for the application node (`get_process_id`) | **1461887** | **93095** |
+
+The a11y pid is the **proxy's**, one process off the real one, and it differs
+per instance -- so instances are still told apart by `get_process_id`, exactly
+as the earlier probe found, but that pid is *not* the one `psutil` or the X
+server knows the application by.
+
+**Two consequences the backend has to absorb.**
+
+*Windows carry no `_NET_WM_PID`.* Every Studio top-level answers "not found" for
+it. `display.windows_of(pid)` filters `_NET_CLIENT_LIST` by `_NET_WM_PID`, so it
+returns nothing for Studio -- which silently empties `top_level_state`,
+`snapshot`, the capture-by-frame path and the interference watch. The pid a
+window belongs to has to come from the **XRes** extension
+(`res.query_client_ids`, `LocalClientPIDMask`), which answered 1461891 and 93102
+correctly, or from title+`WM_CLASS` correlation. `python-xlib` already ships
+(D#40c) and carries `Xlib.ext.res`, so this is a wiring change, not a new
+dependency.
+
+*The correlation between the X window and the a11y tree is by title and size,
+not pid.* The a11y frame's name equals `_NET_WM_NAME` and its
+`get_extents(SCREEN)` size equals the X geometry (D#40d measured exactly this on
+GTK4, and it holds here). So the two spaces are bridged the way `_xid_of`
+already bridges them, and the real pid is never needed to *drive* the target --
+only to *list* it and to key consent.
+
+**What this leaves open, deliberately.** Which pid *is* the target, for
+`attach` and for consent, is a policy decision that touches the shared session
+model (consent is a process-tree fact, R5/D71, and the proxy and the app are
+siblings under one `bwrap`, not parent and child). It is filed as its own fork
+rather than decided in a measurement entry. Evidence: issue #101; `docs/LINUX.md`
+sandboxed-app paragraph; D#40c; D#40d; D71.
+
+### D#102. On wxGTK3 the commit is a real Enter, and `grab_focus` both works and steals the foreground
+
+**Context.** The whole safety model of driving a live target rests on D#11
+(no tier 3 on GTK/X11) and D#13 (the operator's foreground never moves because
+the target lives on a nested display). Studio breaks the second premise: it
+*must* run on the operator's own display, because the point is to watch the
+setting change in the Studio he is using. So the two questions that decide the
+ladder had to be re-measured against wxGTK3, on `:0`, on a scratch instance.
+
+**The commit is a real Enter, not a tier-1 write. Measured, deterministic.**
+A scratch instance launched with `--datadir` into a temp copy, Prepare › Quality,
+the Layer-height field resolved by screen position and its shown value, each
+trial reset to a committed `0.12` by real keystrokes first:
+
+| path | trials | Studio's own state changed (the preset gains its `*`) |
+|---|---|---|
+| `grab_focus` + `EditableText.set_text_contents` (tier 1) | 5 | **0** |
+| `set_text_contents` alone (tier 1) | 3 | **0** |
+| tier-1 write, then a real `Return` (tier 4) | 3 | **3** |
+
+The tier-1 write changes only the *displayed* text; the readback reads back the
+value it wrote, which is exactly why the earlier one-shot probe (task brief,
+fact 6) read it as a commit -- a stale display mistaken for committed state. The
+commit to Studio's own model fires on wx's Enter/kill-focus handler, which an
+AT-SPI write does not travel through. **So on wxGTK3 there is no tier-1 commit,
+and the value only reaches Studio through a real keystroke -- tier 4, on the
+operator's own display.** That is the rung D9 excludes by default, and whether
+to allow it is a consent decision (issue #103), not something to smuggle in.
+
+**This inverts D#10 for this toolkit.** D#10 measured tier 1 on GTK4 as
+*stronger* than Windows: `set_text_contents` went through `GtkEditable`, the
+binding heard it, no D21 split. On wxGTK3 the binding does *not* hear it, so the
+same call that committed on GTK4 does not commit here. D#10's "slice 4 should
+use it as the tier-1 write path" holds only where the toolkit routes
+`set_text_contents` through its own change handling, and wx does not. The
+toolkit, not the platform, decides.
+
+**`grab_focus` works here and steals the X foreground.** D#10 measured
+`Atspi.Component.grab_focus` *raising* on a GTK4 `Gtk.Entry`. On wxGTK3 it
+returns True -- and it moves `_NET_ACTIVE_WINDOW` to Studio: with a throwaway
+window holding the foreground, a `grab_focus` on a Studio field pulled the
+foreground to Studio (`0x880000a` → `0x7c0010b`). So it is not the harmless
+in-process focus set D#11's tier-4 note assumed focus would have to be; it is a
+focus steal. That is inside D#13 as *stated* -- the guarantee is that no window
+*this tool launched* becomes the foreground, and the operator's own Studio is
+his -- but it means the live-actuation path must not call `grab_focus` unless
+the target is *already* the foreground, and must re-check before it does, or it
+will yank a window the operator has tabbed away from back to the front.
+
+**Why this is one decision and not two.** The commit needs the value in the
+right widget and an Enter delivered to it; directing the Enter needs the widget
+focused; focusing it is the foreground-stealing `grab_focus`. The three facts
+are one mechanism, and the safety model for the live path (issue #103) has to
+hold all three at once. Evidence: issue #102; `/tmp` measurement logs reproduced
+on the scratch instance; D#10; D#11; D#13; D9; D21.
+
+### D#110. A Flatpak target's canonical identity is its a11y application pid
+
+**Context.** D#101 measured that a Flatpak lives in three identifier spaces
+and that `list-targets` therefore could not show Studio. This decides which
+pid a caller holds, because everything above the backend keys on one: consent
+(R5, D71), `attach`, the session.
+
+**The pid that reaches the tree wins.** `enumerate_process` filters the
+accessibility bus by `get_process_id`, so the *only* pid that produces a tree
+is the a11y application pid -- the proxy's, `1461887` for the operator's
+Studio. The real process (`1461891`, what `psutil` and the X server know) can
+be listed but cannot be driven, because no accessible carries it. So the
+canonical identity is the a11y pid, and `list-targets` surfaces it: it walks
+`psutil`, and for each window-owning process asks the bus what it calls
+itself (`application_name`). The `xdg-dbus-proxy` process, which owns Studio's
+a11y tree, is listed as **`bambu-studio`**, with its process name kept beside
+it so a reader still sees what it really is.
+
+**Consent still covers the process tree, and had to be taught the sibling.**
+The proxy and the real process are *siblings* under one `bwrap`, not parent
+and child, so `descendants(a11y_pid)` -- which the interference watch and the
+consent walk both read -- would miss the real process the X server attributes
+Studio's windows to. `descendants` now unions in `display.aliases(pid)`: the
+real pids learned from the correlated windows (via XRes). Without it, the
+watch would see Studio's own window take the foreground and not recognise it
+as the target's -- a false alarm on the very guarantee the tool exists for.
+
+**The window<->pid bridge is XRes, not `_NET_WM_PID`.** Every Studio
+top-level answers "not found" for `_NET_WM_PID` (D#101), so `window_pid`
+falls back to the X-Resource extension (`res.query_client_ids`,
+`LocalClientPIDMask`), which returned the real pid where the property had
+nothing. `python-xlib` already ships (D#40c) and carries `Xlib.ext.res`, so
+this added no dependency.
+
+**Rejected: canonicalise on the real pid and bridge to the a11y pid at every
+call.** It reads more naturally -- the real pid is what a person sees in
+`top` -- but it puts the correlation on the hot path of every tree read
+rather than once at enumeration, and it still cannot drive a target the bus
+does not answer for. The a11y pid is the one that works, so it is the one the
+contract holds. Evidence: issue #101; issue #110; D#101; D#40c; D#40d; D71.
+
+### D#111. Operator-present live actuation: tier 4, on the operator's own display, gated
+
+**Context.** D#102 measured that on wxGTK3 a value reaches the application
+only through a real Enter -- tier 4, which D9 excludes by default -- and that
+`grab_focus` (needed to aim the Enter) raises the window to the foreground.
+Driving Studio in the session the operator is watching needs all three, and
+the safety model has to hold them at once. This decides the consent class the
+task brief left open (issue #103, folded here).
+
+**The decision: a per-session "live actuation" grant, resolved at attach.**
+`attach(live=true)` is allowed only when a window of the target is *already*
+`_NET_ACTIVE_WINDOW` -- the window the operator is looking at -- and records
+its xid as the session's `live_window`. A live window that is not the
+foreground now is a refusal, not a session that quietly cannot commit: the
+result says to bring the window to the front and attach again. Live needs
+tier `interactive` or higher, because a `read_only` session never actuates
+and a live grant on one would authorise nothing.
+
+**What the grant buys, and the guard that bounds it.** With it, `set_value`
+offers a single **tier-4** rung: write the value through `EditableText` (no
+input, no commit), `grab_focus` the field, press a real `Return` through
+XTest. Every step is bracketed by a check that `_NET_ACTIVE_WINDOW` is still
+the consented window and the pointer has not moved; any change **aborts** and
+is reported as a disturbance (D28), never falling back to a display-only
+write. An `InterferenceWatch` is armed around the whole action, so a move the
+synchronous guard misses between its checks is still seen. `grab_focus`
+raising the window is inside D#13 as stated -- the guarantee is that no window
+*this tool launched* takes the foreground, and the operator's own Studio is
+his -- but only because the window was his foreground to begin with, which is
+exactly what `live_window` records.
+
+**Why the write path is one tier-4 rung and not a tier-1 write that falls
+through.** On wxGTK3 the tier-1 write never commits (D#102), so offering it
+would report a display-only success and stop before the Enter. The rung that
+reaches the application is the Enter, so the whole operation reports as tier 4
+-- honest about what took the keyboard. The `shows()` postcondition asks
+`confirms_value` (a yes/no, D#105), not a display read, because the field is
+withheld (D#34b) and a display read would call every successful commit a
+failure.
+
+**What it deliberately is not.** It is not a hidden desktop (the target is on
+the operator's own screen, by design), not a default (off unless asked, and
+refused unless the operator has arranged the foreground), and not silent (the
+session summary names the grant, and an abort says the desktop moved). It is
+the narrowest thing that lets a value reach a toolkit that accepts it no other
+way, and it takes the real keyboard for exactly one keystroke, only while the
+operator is demonstrably present at the window they named. Evidence: issue
+#102; issue #103; issue #111; D#102; D#13; D#34b; D#105; D9; D28.
+
+### D#104. Slice: elements are a view of the enumeration, not a second walk
+
+**Context.** `walk_elements_awake`, `is_selected` and `_current_value` are the
+contract's element view -- the accessibility surface as UIA-shaped nodes. On
+Windows they are a separate UIA walk; here the window tree *is* the
+accessibility tree, so a second walk over the bus would re-fetch what
+enumeration already read, 2,300 nodes on Studio.
+
+**So the tree keeps a registry, and the element view reads it.** Each handle
+carries an `_Entry` with the node's role, name, states and interfaces, fetched
+once during enumeration. `walk_elements_awake` builds `AccessibleElement`s
+from the `WindowNode` tree the caller already holds (its rects) plus those
+entries -- no extra bus calls. An element's handle *is* the accessible's
+handle, because a control here is its own window; `verbs.click_element(e)`
+drives it directly through its Action interface, with no host window to post
+to and no coordinate to convert.
+
+**Identity is position plus value, so an element carries both.** Studio's
+setting fields are unnamed `text` nodes told apart only by where they are and
+what they show (D#101). So `AccessibleElement` carries screen extents, and a
+field's `value` is left `None`: the resolver confirms it by comparison
+(D#105), because reading it would disclose what D#34b withholds. `patterns`
+are synthesised from interfaces -- `EditableText` becomes the neutral `Value`
+so `set_value` finds it -- and `SelectionItem` from the selectable roles and
+the `SELECTED`/`CHECKED` states, since AT-SPI carries selection as state, not
+a pattern. `is_selected` re-reads the live state, because the state that
+proves a click worked is the one after it; `_current_value` withholds an
+editable field for the same reason `read` does.
+
+**No wake step.** The embedded-document case (L8, #15) is unmeasured on Linux,
+so there is no dormant engine to nudge; the name keeps the contract's shape
+for when one is measured, as on Windows. Evidence: issue #104; D#101; D#34b;
+D#105; D56.
+
+### D#105. A place-plus-value locator, and a contract name that confirms without disclosing
+
+**Context.** A control with no caption and no identity can be denied by place
+(D72); it also has to be *addressable* by place, and on a target whose fields
+are unnamed and whose values are withheld, a place alone is not enough -- two
+fields at similar offsets need what they show to tell them apart. But reading
+what they show is the disclosure D#34b withholds. This resolves the tension.
+
+**The locator grows `region` and `value`.** `region=left,top,right,bottom`, in
+the coordinates of the top-level window the match lives in, matches a control
+whose centre lies inside it. `value="0.16"` matches a control that currently
+shows that string. The value is checked by *comparison*, never by disclosure:
+resolution is handed a `confirm(node, expected) -> bool | None` callback, and
+the contents never reach the resolver, a result, a trace or a model's context.
+A `value` locator with no confirmer is refused rather than matched loosely --
+the whole point is to make a wrong-field write impossible rather than
+unlikely, and silently dropping the value half would make it merely unlikely.
+
+**The confirmer is a new contract name, `confirms_value`.** It reads the
+control and returns only whether it equals the expected string. On Linux it is
+`protection.confirms`, which reads under the deadline (D#9) and answers a
+withheld or protected field as a yes/no (or `None`, did not answer) without
+returning the value. On Windows it is a plain `read == expected`, because the
+platform never withholds; a password field reads as not-answering
+cross-process, so it confirms nothing, which is the safe direction. `env:
+both`: the name is added to the shared contract and implemented on both, and
+the Windows side needs re-verification on a Windows host.
+
+**`set_value`'s own check moved onto it.** The tool used to compare the
+display read to the wanted value; on a withheld field that read is `None`, so
+every successful write reported as a failure. It now asks `confirms_value`,
+which is true where the display read is blind -- the fix that lets the live
+commit (D#111) verify itself on Studio at all. Evidence: issue #105; D72;
+D#34b; D#9; D#111.

@@ -23,12 +23,21 @@ CONTRACT: tuple[str, ...] = (
     # the window tree
     "enumerate_process", "top_level_windows", "direct_children", "process_facts", "descendants",
     "parent_map",
+    # what the accessibility bus calls a target, when better than the process
+    # name -- a sandboxed application's a11y pid is its proxy's, so the two
+    # differ (D#101, D#110); None when the process name already suffices.
+    "application_name",
     # reading. `disclosure` names the third state: a read can come back
     # empty-handed because the control did not answer, because the platform
     # protects it, or -- on a platform that cannot tell those apart by
     # inspection -- because the driver declined to look (D#43).
     "read_window_text", "is_protected", "disclosure", "capture_window",
     "CaptureError",
+    # `confirms_value` answers "does this control show this string" as a
+    # yes/no, so a locator can select a control by its current value without
+    # the value being disclosed -- the safe half of a place-plus-value
+    # locator on a platform that withholds a field's contents (D#34b, D#105).
+    "confirms_value",
     # modality and state
     "top_level_state", "blocking_ancestor", "snapshot", "surface_of",
     "restore_process",

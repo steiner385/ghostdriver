@@ -299,8 +299,13 @@ class _ToolboxCore:
         # dialog's controls are.
         index = locator.index
         unindexed = replace(locator, index=None)
+        # `value=` selects a control by what it currently shows, checked by
+        # comparison so a withheld field is matchable without disclosure
+        # (D#105). The reader is the backend's, run where the target lives.
+        confirm = self._value_confirmer(session) if locator.value is not None else None
         if not locator.is_element:
-            found: list = [node for tree in trees for node in resolve(tree, unindexed)]
+            found: list = [node for tree in trees
+                           for node in resolve(tree, unindexed, confirm=confirm)]
             return _pick(found, index)
 
         from ..backends import current
@@ -321,8 +326,20 @@ class _ToolboxCore:
         found = []
         for root, chain in roots:
             walked = session.run(lambda r=root: walk_elements_awake(r))
-            found.extend(resolve_elements(walked, chain, unindexed))
+            found.extend(resolve_elements(walked, chain, unindexed, confirm=confirm))
         return _pick(found, index)
+
+    def _value_confirmer(self, session):
+        """A `confirm(node, expected) -> bool | None` for the resolver, run
+        where the target lives. It answers whether a control shows a string
+        without disclosing what it shows (D#105); the backend decides how."""
+        from ..backends import current
+
+        def confirm(node, expected: str):
+            handle = node.handle
+            return session.run(lambda: current().confirms_value(handle, expected))
+
+        return confirm
 
 def _chains(tree: WindowNode) -> dict[int, tuple[WindowNode, ...]]:
     """For every window in `tree`, the chain from the root down to it."""

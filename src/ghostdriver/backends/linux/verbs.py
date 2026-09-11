@@ -47,8 +47,20 @@ def click(handle: int, *, button: str = "left", modifiers=(), at=None,
 
 def set_text(handle: int, text: str, *,
              cadence: Cadence = ROBOT,
-             allow_pattern: bool = True) -> list[Attempt]:
+             allow_pattern: bool = True,
+             live_window: int = 0) -> list[Attempt]:
     """Replace a control's text, through `EditableText`.
+
+    **`live_window` chooses the ladder, because the commit differs by
+    toolkit.** With no live window (the default and the safe case) this is
+    the tier-1 `EditableText` write only: on GTK4 that commits (D#10), and
+    on a toolkit where it does not -- wxGTK3 -- it changes the display and
+    the caller learns from the postcondition that nothing was accepted. With
+    a live window consented (D#111), the ladder is a single **tier-4** rung
+    that writes the value and presses a real Enter to commit it, guarded so
+    any movement of the operator's desktop aborts it. The write alone is not
+    offered there, because on wxGTK3 it never commits and would report a
+    display-only success that stops before the Enter.
 
     **`allow_pattern` is accepted and deliberately ignored, and that is the
     decision.** On Windows the flag exists because the API-level write is the
@@ -76,6 +88,14 @@ def set_text(handle: int, text: str, *,
     value appear without keystrokes.
     """
     del cadence, allow_pattern  # accepted for contract shape; see the docstring
+    if live_window:
+        from . import live
+
+        return [
+            Attempt(Tier.SYNTHETIC_INPUT,
+                    lambda: live.commit_value(handle, text, live_window=live_window),
+                    name="live-commit"),
+        ]
     return [
         Attempt(Tier.UIA_PATTERN,
                 lambda: linux_input.set_text_via_editable(handle, text),
@@ -131,22 +151,19 @@ def unblocked(handle: int) -> Condition:
 
 def set_text_element(element: AccessibleElement, text: str, *,
                      cadence: Cadence = ROBOT,
-                     allow_pattern: bool = True) -> list[Attempt]:
+                     allow_pattern: bool = True,
+                     live_window: int = 0) -> list[Attempt]:
     """The element form of `set_text`.
 
     On Windows an element is something inside a web document, reached
     through a host window, and the two forms differ because the host is
     driven differently from the control. Here every control *is* an
     accessible already -- the tree is AT-SPI all the way down -- so an
-    element and a window control take the same route, and the split exists
-    only to keep the contract's shape.
+    element and a window control take the same route (D#104), including the
+    live-commit ladder.
     """
-    del cadence, allow_pattern
-    return [
-        Attempt(Tier.UIA_PATTERN,
-                lambda: linux_input.set_text_via_editable(element.handle, text),
-                name="editable"),
-    ]
+    return set_text(element.handle, text, cadence=cadence,
+                    allow_pattern=allow_pattern, live_window=live_window)
 
 
 def click_element(element: AccessibleElement, *, button: str = "left",

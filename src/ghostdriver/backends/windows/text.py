@@ -13,6 +13,22 @@ them changes anything, which is what lets them run at the read-only tier.
 from . import winapi
 
 
+def confirms_value(hwnd: int, expected: str) -> bool | None:
+    """Whether the control currently shows `expected`, without disclosing it.
+
+    The contract's shared shape (D#105). Windows never withholds -- the OS
+    refuses a cross-process read of a password field, so there is nothing to
+    protect in software -- so this is a plain compare of the read text, and
+    `None` means the control did not answer (a hung control, D4), which is
+    neither a match nor a mismatch. A password field reads as not-answering
+    cross-process, so it confirms nothing, which is the safe direction.
+    """
+    seen = read_window_text(hwnd)
+    if seen is None:
+        return None
+    return seen == expected
+
+
 def read_window_text(hwnd: int, timeout_ms: int = 200, *,
                      disclose: bool = False) -> str | None:
     """Return the control's text.

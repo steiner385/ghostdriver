@@ -7,6 +7,14 @@ from . import winapi
 from .text import read_window_text
 
 
+def application_name(pid: int) -> str | None:
+    """Windows names a process by its own executable, and that is the
+    application, so there is no better name to offer: always None. The
+    contract carries this for Linux, where a sandboxed target's a11y pid is
+    its D-Bus proxy's and the bus name differs (D#101, D#110)."""
+    return None
+
+
 def top_level_windows(pid: int) -> list[int]:
     """Every top-level window belonging to `pid`, in Z-order."""
     found: list[int] = []

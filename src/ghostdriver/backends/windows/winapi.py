@@ -152,6 +152,18 @@ def foreground_window() -> int:
     return user32.GetForegroundWindow() or 0
 
 
+def resolve_live_window(pid: int) -> int:
+    """The window to drive live, if the target is the foreground now (D#111).
+
+    Windows does not *need* a live path -- posted messages reach a background
+    window without taking the operator's focus -- so this exists for contract
+    symmetry and answers honestly: the foreground window when it belongs to
+    `pid`, else 0. A caller that never opens a live session never reaches it.
+    """
+    hwnd = foreground_window()
+    return hwnd if hwnd and window_pid(hwnd) == pid else 0
+
+
 def show_no_activate(hwnd: int) -> None:
     """Restore `hwnd` from minimized without giving it the foreground."""
     user32.ShowWindow(wintypes.HWND(hwnd), SW_SHOWNOACTIVATE)

@@ -30,6 +30,7 @@ from .batch import BatchTools
 from .core import MAX_ELEMENTS, SENSITIVE_HINT, _element, _error
 from .discovery import DiscoveryTools
 from .human import HumanTools
+from .launch import LaunchTools
 from .learning import LearningTools
 from .lifecycle import LifecycleTools
 from .macro import MacroTools
@@ -37,13 +38,15 @@ from .pace import PaceTools
 from .recording import capture_step
 from .screen import ScreenTools
 from .seek import SeekTools
+from .set_value import SetValueTools
 from .status import StatusTools
 
 __all__ = ["MAX_ELEMENTS", "SENSITIVE_HINT", "Toolbox", "_element", "_error"]
 
 
-class Toolbox(LifecycleTools, DiscoveryTools, StatusTools, ActuationTools,
-              HumanTools, LearningTools, SeekTools, ScreenTools, BatchTools, PaceTools, MacroTools):
+class Toolbox(LifecycleTools, LaunchTools, DiscoveryTools, StatusTools, ActuationTools,
+              SetValueTools, HumanTools, LearningTools, SeekTools, ScreenTools,
+              BatchTools, PaceTools, MacroTools):
     """Every tool, over one session manager.
 
     One class, so a caller holds one object; one module per family, so a

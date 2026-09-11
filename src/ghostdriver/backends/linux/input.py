@@ -31,6 +31,67 @@ from typing import Any
 from .deadline import call_with_deadline
 from .tree import _accessible
 
+#: Named keys a caller can send, mapped to X keysym names (`XK.string_to_
+#: keysym`). Deliberately small and the same set the Windows table names, so
+#: the contract reads identically: every one is a key whose *effect* the
+#: toolkit implements, which is what makes it worth sending as a key rather
+#: than a character. There is no tier-3 posted-key path here (D#11), so
+#: these travel XTest -- tier 4, inside a live session only (D#111).
+NAMED_KEYS: dict[str, str] = {
+    "enter": "Return", "return": "Return", "tab": "Tab",
+    "escape": "Escape", "esc": "Escape",
+    "backspace": "BackSpace", "delete": "Delete",
+    "home": "Home", "end": "End", "left": "Left", "up": "Up",
+    "right": "Right", "down": "Down", "pageup": "Prior", "pagedown": "Next",
+    "insert": "Insert",
+}
+
+#: Editing actions a control performs on a keystroke, named so `send_keys`
+#: can offer them where a raw modifier chord cannot be posted. On X these
+#: are real Ctrl-chords through XTest, unlike Windows' edit messages, so the
+#: mapping is to the keysym pair; the value is the letter pressed with Ctrl.
+EDIT_ACTIONS: dict[str, str] = {
+    "paste": "v", "copy": "c", "cut": "x", "undo": "z", "select-all": "a",
+}
+
+
+def button_pair(button: str = "left", modifiers=()) -> tuple[int, ...]:
+    """Validate a click's button and modifiers, refusing what cannot be sent.
+
+    The Windows counterpart returns the four message/flag values a posted
+    pair needs; here there is nothing to post -- a click is `Action.do_action`
+    (D#40e), which takes no button or modifier -- so this exists only to
+    refuse `button=right` or a modifier *by name*, the way the Windows one
+    does, rather than let a caller believe a right-click was sent. The
+    return value is unused; raising is the whole job.
+    """
+    if button not in ("left",):
+        raise ValueError(
+            f"only a plain left click is available on this platform: an "
+            f"AT-SPI action takes no button, and there is no tier-3 posted "
+            f"pair to carry {button!r} (D#11, D#40e)")
+    if modifiers:
+        raise ValueError(
+            f"a modifier click cannot be sent: an AT-SPI action carries no "
+            f"modifier state, and there is no posted pair to put {list(modifiers)} "
+            f"on (D#11)")
+    return ()
+
+
+def deepest_child_at(handle: int, x: int, y: int) -> tuple[int, int, int]:
+    """The counterpart of the Win32 hit test, and it does not apply here.
+
+    On Windows a posted click can be dropped by a parent over a windowed
+    child, so the innermost window under the point is found first (D66).
+    Here a control is an accessible, not a window, and actuation is a direct
+    `do_action` on the node the locator already resolved -- there is no point
+    to hit-test and no child window to miss. `AccessibleElement` also cannot
+    supply a screen position through AT-SPI reliably for this purpose (D#40d
+    found position unusable). So this returns the handle unchanged, which is
+    the Windows contract's "nothing else is under the point" answer.
+    """
+    return handle, x, y
+
 
 def _atspi() -> Any:
     import gi

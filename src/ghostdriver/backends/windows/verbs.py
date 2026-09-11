@@ -73,8 +73,16 @@ def click_element(element: AccessibleElement, *, button: str = "left",
 
 def set_text(hwnd: int, text: str, *,
              cadence: Cadence = ROBOT,
-             allow_pattern: bool = True) -> list[Attempt]:
+             allow_pattern: bool = True,
+             live_window: int = 0) -> list[Attempt]:
     """Replace a control's text.
+
+    **`live_window` is accepted and ignored here.** It is the Linux
+    live-actuation gate (D#111), where a value only commits through a real
+    keystroke on the operator's own display. Windows never needs it -- a
+    posted message reaches a background control without taking the
+    operator's focus -- so the parameter exists for the shared contract's
+    shape and changes nothing on this platform.
 
     **Typing is the only way this sets text, and the ladder is short.** The
     spec left this open; the fixture settled it. A programmatic write --
@@ -173,12 +181,17 @@ def unblocked(hwnd: int) -> Condition:
 
 def set_text_element(element: AccessibleElement, text: str, *,
                      cadence: Cadence = ROBOT,
-                     allow_pattern: bool = True) -> list[Attempt]:
+                     allow_pattern: bool = True,
+                     live_window: int = 0) -> list[Attempt]:
     """Replace an element's value: the same ladder and the same rule as
     `set_text`. Typing through the host is what runs the page's own input
     handling; the Value pattern is offered first only when a commit
     expectation would catch it not committing (D30). On Chromium it does
-    commit -- measured -- but the rule does not depend on that."""
+    commit -- measured -- but the rule does not depend on that.
+
+    `live_window` is accepted and ignored, as in `set_text`: it is the Linux
+    live gate (D#111) and Windows has no need of it."""
+    del live_window
     typed = Attempt(
         Tier.WINDOW_MESSAGE,
         lambda: elements.replace_value(element, text, cadence=cadence),
