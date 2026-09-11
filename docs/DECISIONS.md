@@ -5027,6 +5027,48 @@ bound args, so it fails the way the sandbox did.
 the shakedown held: record, save, `dry_run`, and a real replay that re-ran and
 re-verified both switches against the live target, with a report written.
 
+### D#112. A macro result says what held *now*; a recording keeps only what was asked
+
+**Context.** Two readability findings from the live shakedowns against the VendorApp
+sandbox, both about the same thing: a recorded or replayed macro should show a
+reader what matters and nothing that obscures it.
+
+- A hand-authored `for_each` replayed with every step `ok` and no failures --
+  its `expect` held on the live target -- yet each step read `verified: false`.
+  Correct by the format's definition (`verified` means *held when recorded*,
+  D#84/D#88; an authored step is never recorded) and still misleading: a reader
+  scanning for "did it verify?" sees `false`.
+- After the #108 fix a recorded click's args were correct but still carried the
+  wire's non-null defaults (`all_windows: false`, `button: "left"`, `count: 1`,
+  `frame: "logical"`, `require_active: false`) beside the two args actually
+  asked for. A None-strip cannot tell `button: "left"` from a deliberate choice.
+
+**Decision, in two parts.**
+
+- **`held`, the runtime verdict, as its own field.** Each replayed step now
+  carries `held: true` when its own postcondition held on *this* run (the
+  tool's `effect`/`committed`/`display` verdict; a wait that returned ok held by
+  construction; a read has no postcondition and never claims to), beside the
+  unchanged static `verified` and `delivery_only`. A result answers both
+  questions -- "confirmed when recorded?" and "confirmed just now?" -- without
+  conflating them. `dry_run` shows only the static flags, since nothing ran.
+  The verdict logic is one function, `held_on_this_run`, shared by the
+  recorder (where it sets `verified`) and the runner (where it sets `held`), so
+  the two cannot drift.
+- **A recording drops an arg equal to the tool's own default.** The wrapper
+  already holds each tool's signature; its defaults are handed to the capture,
+  which keeps exactly what was asked. Replay is unaffected -- an omitted arg
+  takes the same default at run time -- so this is purely the readability a
+  macro exists for. A non-default value is always kept, and a real `at` is
+  kept and still flags `delivery_only`. Callers that pass no defaults get the
+  #108 behaviour unchanged.
+
+**Evidence.** `tests/test_macro_record.py`: only `locator` and `expect`
+survive a wire-shaped click; a non-default value is kept; a real offset is kept
+and flagged; no-defaults callers unchanged. `tests/test_macro_runner.py`: an
+authored step is `held` but not `verified`; a delivered-only step did not hold;
+a successful wait held; a read never claims to. `env: any`, fakes.
+
 ## Iteration 4 — the first real Linux target: Bambu Studio (wxGTK3, Flatpak)
 
 *Measured on linux-host-a against Bambu Studio 02.08.02.61 (`com.bambulab.BambuStudio`,

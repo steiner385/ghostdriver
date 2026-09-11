@@ -386,3 +386,45 @@ def test_a_handler_step_goes_through_the_allowlist():
     out = run_macro_body(box, "s", wf.steps, {}, handlers=wf.handlers)
 
     assert not out["ok"] and "cannot run in a macro" in out["refused"]
+
+
+# --- #112: the runtime verdict, distinct from the static flag -------------
+
+def test_a_step_that_verifies_on_this_run_is_held_even_if_never_recorded_verified():
+    """A hand-authored step is never `verified` in the file, but its expect can
+    hold every time it runs. `held` says so; `verified` does not lie about the
+    file (#112)."""
+    body = [{"tool": "click", "args": {"locator": "x", "expect": {"locator": "y"}}}]
+    box = FakeBox({"click": {"ok": True, "verified": "effect"}})
+
+    out = run_macro_body(box, "s", macro(body).steps, {})
+
+    step = out["steps"][0]
+    assert step["held"] is True and step["verified"] is False
+
+
+def test_a_delivered_only_step_did_not_hold():
+    body = [{"tool": "click", "args": {"locator": "x"}}]
+    box = FakeBox({"click": {"ok": True, "verified": "delivery_only"}})
+
+    out = run_macro_body(box, "s", macro(body).steps, {})
+
+    assert out["steps"][0]["held"] is False and out["steps"][0]["ok"] is True
+
+
+def test_a_successful_wait_held_by_construction():
+    body = [{"tool": "wait_for", "args": {"locator": "class=Ready"}}]
+    box = FakeBox({"wait_for": {"ok": True}})
+
+    out = run_macro_body(box, "s", macro(body).steps, {})
+
+    assert out["steps"][0]["held"] is True
+
+
+def test_a_read_never_claims_to_have_held():
+    body = [{"tool": "find", "args": {"locator": "x"}}]
+    box = FakeBox({"find": {"ok": True, "match_count": 1}})
+
+    out = run_macro_body(box, "s", macro(body).steps, {})
+
+    assert out["steps"][0]["ok"] is True and out["steps"][0]["held"] is False

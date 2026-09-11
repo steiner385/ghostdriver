@@ -71,6 +71,10 @@ def _traced_and_reporting(fn, *, session_tool: bool):
     have to know which tool to ask; `release` reports its own.
     """
     signature = inspect.signature(fn)
+    # The tool's own defaults, so a recording can drop an arg the wire passed
+    # explicitly but nobody asked for (#112).
+    defaults = {p.name: p.default for p in signature.parameters.values()
+                if p.default is not p.empty}
 
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -104,7 +108,8 @@ def _traced_and_reporting(fn, *, session_tool: bool):
                 if self._recordings:
                     recording = self._recordings.get(session_id)
                     if recording is not None:
-                        step = capture_step(fn.__name__, bound, result)
+                        step = capture_step(fn.__name__, bound, result,
+                                            defaults=defaults)
                         if step is not None:
                             recording["steps"].append(step)
             return result

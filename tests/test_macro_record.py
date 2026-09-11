@@ -209,3 +209,57 @@ def test_a_verified_click_over_the_wire_is_not_flagged_an_offset_click():
         "a None arg is not given, and must not be recorded"
     assert step["args"]["locator"] == "type=TabItem name=Parts"
     assert step["args"]["expect"]["selected"] is True, "the real expect is kept"
+
+
+# --- #112: a recording keeps only what was asked --------------------------
+
+CLICK_DEFAULTS = {"all_windows": False, "expect": None, "button": "left",
+                  "modifiers": None, "at": None, "count": 1, "frame": "logical",
+                  "require_active": False}
+
+
+def test_args_equal_to_the_tool_default_are_not_recorded():
+    """The wire passes every parameter explicitly; only `locator` and `expect`
+    were asked for here, so only they should survive (#112)."""
+    wire_shaped = {"session_id": "s", "locator": "type=TabItem name=Parts",
+                   "all_windows": False,
+                   "expect": {"locator": "type=TabItem name=Parts", "selected": True},
+                   "button": "left", "modifiers": None, "at": None, "count": 1,
+                   "frame": "logical", "require_active": False}
+
+    step = capture_step("click", wire_shaped, {"ok": True, "verified": "effect"},
+                        defaults=CLICK_DEFAULTS)
+
+    assert set(step["args"]) == {"locator", "expect"}, step["args"]
+    assert step["verified"] is True and step["delivery_only"] is False
+
+
+def test_a_non_default_value_is_always_kept():
+    wire_shaped = {"session_id": "s", "locator": "class=Grid", "all_windows": True,
+                   "button": "right", "count": 2, "frame": "logical",
+                   "require_active": False}
+
+    step = capture_step("click", wire_shaped, {"ok": True, "verified": "delivery_only"},
+                        defaults=CLICK_DEFAULTS)
+
+    assert step["args"] == {"locator": "class=Grid", "all_windows": True,
+                            "button": "right", "count": 2}, "the asked-for values stay"
+
+
+def test_a_real_offset_is_kept_and_still_flags_delivery_only():
+    wire_shaped = {"session_id": "s", "locator": "class=Grid", "at": {"x": 5, "y": 9},
+                   "button": "left", "count": 1}
+
+    step = capture_step("click", wire_shaped, {"ok": True, "verified": "effect"},
+                        defaults=CLICK_DEFAULTS)
+
+    assert step["args"]["at"] == {"x": 5, "y": 9}
+    assert step["delivery_only"] is True, "a real offset is the least replayable step"
+
+
+def test_without_defaults_only_none_values_are_dropped():
+    """Callers that do not pass defaults get the #108 behaviour unchanged."""
+    step = capture_step("click", {"session_id": "s", "locator": "x", "button": "left",
+                                  "at": None},
+                        {"ok": True, "verified": "effect"})
+    assert step["args"] == {"locator": "x", "button": "left"}

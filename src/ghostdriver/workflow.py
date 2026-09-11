@@ -590,13 +590,20 @@ class MacroStep:
     tool: str
     ok: bool
     failures: list[str]
+    #: Static flags, copied from the macro file: whether the step's expect
+    #: held *when recorded*, and whether it is an offset click (D#84).
     verified: bool = False
     delivery_only: bool = False
+    #: The runtime verdict: did this step's own postcondition hold on *this*
+    #: run? Distinct from `verified` so a reader can tell "confirmed when
+    #: recorded" from "confirmed just now" -- a hand-authored step is never
+    #: `verified` in the file but can still hold every time it runs (#112).
+    held: bool = False
 
     def to_dict(self) -> dict:
         return {"path": self.path, "tool": self.tool, "ok": self.ok,
                 "failures": self.failures, "verified": self.verified,
-                "delivery_only": self.delivery_only}
+                "delivery_only": self.delivery_only, "held": self.held}
 
 
 def run_macro_body(
@@ -620,6 +627,7 @@ def run_macro_body(
     when `stop_on_failure`. This is the evaluation core; `macro_replay` (#87)
     wraps it with attach, the interference watch, and the report.
     """
+    from .tools.recording import held_on_this_run
     from .tools.stepper import call_tool, step_refusal
 
     records: list[MacroStep] = []
@@ -702,7 +710,8 @@ def run_macro_body(
                 result = call_tool(box, session_id, node.tool, bound_args)
                 failures = check(node, result)
                 records.append(MacroStep(step_path, node.tool, not failures,
-                                         failures, node.verified, node.delivery_only))
+                                         failures, node.verified, node.delivery_only,
+                                         held=held_on_this_run(node.tool, result)))
                 if failures and stop_on_failure:
                     state["stopped"] = True
                     return
