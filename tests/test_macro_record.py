@@ -189,3 +189,23 @@ def test_recording_captures_a_real_click_and_replays_it(tmp_path, monkeypatch):
     finally:
         proc.terminate()
         proc.wait(timeout=5)
+
+
+def test_a_verified_click_over_the_wire_is_not_flagged_an_offset_click():
+    """The MCP layer passes every parameter explicitly, so a click arrives
+    with at=None as a *present* key. Found on the first live shakedown against
+    the VendorApp sandbox (#108): a verified tab switch was recorded delivery_only,
+    and its args carried every default the wire sent. A None is "not given"."""
+    wire_shaped = {"session_id": "s", "locator": "type=TabItem name=Parts",
+                   "all_windows": False,
+                   "expect": {"locator": "type=TabItem name=Parts", "selected": True},
+                   "button": "left", "modifiers": None, "at": None, "count": 1,
+                   "frame": "logical", "require_active": False}
+
+    step = capture_step("click", wire_shaped, {"ok": True, "verified": "effect"})
+
+    assert step["verified"] is True and step["delivery_only"] is False
+    assert "at" not in step["args"] and "modifiers" not in step["args"], \
+        "a None arg is not given, and must not be recorded"
+    assert step["args"]["locator"] == "type=TabItem name=Parts"
+    assert step["args"]["expect"]["selected"] is True, "the real expect is kept"
