@@ -143,6 +143,9 @@ class ActuationTools(_ActingCore):
                if hover_on else {}),
             **delivered,
         )
+        note = prepared.session.profile.note_for(node_class)
+        if note:
+            reported["note"] = note
         acted = any(d.get("change") in ("window_appeared", "window_disappeared")
                     for d in result.disturbances)
         if inactive and after is None and result.ok and not acted:

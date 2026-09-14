@@ -10,7 +10,8 @@ import base64
 from ..backends import current
 from ..model.element import AccessibleElement
 from ..model.result import ErrorKind, GhostdriverError
-from .core import _error, _physical, _ToolboxCore, _top_level_holding, _top_level_overlapping
+from .core import _error, _physical, _ToolboxCore
+from .geometry import _top_level_holding, _top_level_overlapping
 
 
 class ScreenTools(_ToolboxCore):

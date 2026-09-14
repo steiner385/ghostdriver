@@ -122,6 +122,9 @@ class DiscoveryTools(_VisibilityCore):
             obscured = self._obscured(session, node, vis_cache)
             if obscured is not None:
                 described["obscured"] = obscured
+            note = session.profile.note_for(getattr(node, "class_name", None))
+            if note:
+                described["note"] = note
             elements.append(described)
         result = {
             "ok": True,

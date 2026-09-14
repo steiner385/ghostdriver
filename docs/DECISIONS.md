@@ -5752,3 +5752,95 @@ refused when malformed. `tests/test_actuation_tools.py`: a click asked
 for with hover names the route and still verifies; the profile decides
 when the call does not; nothing is added otherwise. `tests/test_actuate.py`:
 a declining rung's reason is kept. Issue #133; D#124; D#130; D9; D35.
+
+**Outcome (2026-09-14, later that day).** Tried on the bar with `hover:
+true`, window inactive and then active: ignored both times. Hover was not
+the gate. The fallback question was the right one: a right-click on the
+bar opens a context menu reading *Start block edit -- Enter* and *End
+block edit -- Esc*. `send_keys ["escape"]` and `send_keys ["enter"]` to
+the hypertext edit box end and start block edit; the palette docks on
+the latter. The bar is a mouse affordance for two keys the editor already
+binds, and posted keystrokes reach it inside the contract. The hover
+route stays -- cheap, general, and harmless where not needed -- with no
+class listed for it yet. The operator's profile carries the note (D#137).
+
+### D#135. A popup-menu item is chosen the way the menu chooses it
+
+**The field report.** `click type=MenuItem index=2` on an owner-drawn
+`#32768` item closed the menu, and on re-opening it the item's effect
+had not happened. `find` reads these menus perfectly; acting on them did
+not.
+
+**What was measured.** The fixture's plain Win32 popup answers the
+posted pair at an item's rectangle. The target's menu loop does not: a
+menu's modal loop hit-tests the *real* pointer position rather than the
+message's coordinates, so on a menu that is not under the pointer the
+posted click lands outside the menu and ends it with nothing chosen.
+Posting the pair to a menu that is not under the pointer is therefore
+the one thing guaranteed not to work, and it destroys the state the
+caller wanted to act on.
+
+**Decision.** For an item of a `#32768` window, the first rung is the
+menu's own keyboard route: highlight the item by position
+(`MN_SELECTITEM`, undocumented but answered for decades) and post Return
+to the menu window. The menu then does exactly what it does for a person
+-- ends, and hands the command to its owner the way the application set
+it up, `WM_COMMAND` or a return value alike -- so nothing here needs to
+know how the application listens. The route is named `menu_keys`. A
+greyed item is refused by name, not pressed; a submenu is declined so the
+posted pair, second on the ladder, can open it. Tier 3 throughout: no
+pointer, no foreground.
+
+**Not chosen.** Posting `WM_COMMAND` with the item's id to the menu's
+owner would fire the handler on a VCL `TPopupMenu` and on nothing that
+uses `TPM_RETURNCMD`; it presumes how the application listens. The
+keyboard route presumes only that the menu is a menu.
+
+**Evidence.** `tests/test_windows_menus.py`: a captioned item and an
+owner-drawn item are chosen through `menu_keys`, `tiers_attempted [3]`,
+the owner's handler runs (`env: windows`, the fixture's real popup).
+Issue #135; D65; D66.
+
+### D#136. `capture region` renders the window a person sees at the rect
+
+**The field report.** A `region` capture over an open context menu
+rendered the form beneath it, black where the menu was; the same menu
+captured by locator rendered fine.
+
+**What was wrong.** The picker chose by overlap area, then by the smaller
+window. A menu and the form under it overlap a region inside the menu
+equally, and the all-windows list is sorted by size, so z-order had been
+lost before the choice was made; which one won was an accident of the
+enumeration.
+
+**Decision.** The top-level window under the region's centre in the
+desktop's current z-order wins when it is one of the candidates, because
+that is what a person sees there. A backend that cannot answer the
+question, or an answer that is not a candidate, falls back to the old
+rule. A read of the z-order; nothing moves. The helpers moved from
+`tools/core.py` to `tools/geometry.py` on the way, since the change put
+`core.py` over the 400-line guard and the fix is to move code (D60).
+
+**Evidence.** `tests/test_capture_region_pick.py`: the window under the
+point wins; one that does not overlap the region is ignored; no answer
+and no query both fall back (`env: any`, the desktop's answer stood in
+for). Issue #136; D73.
+
+### D#137. A profile carries the operator's notes per control class
+
+**Context.** Having learned that the Toggle Block Edit bar is only a
+mouse affordance for keys the editor binds, the operator wanted the next
+session to read that before spending another hour clicking it. The
+tool has no place for such a thing: everything in a profile is a policy
+or a measurement.
+
+**Decision.** `notes`: `{class pattern: text}`, declared (D35). A `find`
+match and a `click` result for a matching class carry `note`. The
+mechanism is generic and lives in the repo; what the notes say about a
+target stays in the operator's profile (D60's boundary, and the rule
+that no target knowledge enters any repository).
+
+**Evidence.** `tests/test_profile_posted_click_only.py`: notes matched by
+pattern, malformed notes an error (`env: any`).
+`tests/test_actuation_tools.py`: the note rides on `find` and on `click`
+for the fixture's class, and no key appears without one. Issue #137.

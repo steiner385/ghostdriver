@@ -63,3 +63,26 @@ def test_a_bad_hover_before_click_is_an_error_not_a_default(tmp_path, bad):
     path.write_text(json.dumps({"hover_before_click": bad}))
     with pytest.raises(GhostdriverError, match="hover_before_click"):
         Profile.load(path)
+
+
+# --- notes (#137) --------------------------------------------------------------
+
+def test_notes_are_matched_by_class_pattern(tmp_path):
+    path = tmp_path / "p.json"
+    path.write_text(json.dumps({"notes": {"THtLeftPanel": "use send_keys enter/escape on the edit box",
+                                           "Tsf*Grid": "paints its own rows; capture it"}}))
+
+    profile = Profile.load(path)
+
+    assert profile.note_for("THtLeftPanel") == "use send_keys enter/escape on the edit box"
+    assert profile.note_for("TsfDataGrid") == "paints its own rows; capture it"
+    assert profile.note_for("TEdit") is None and profile.note_for(None) is None
+    assert Profile().note_for("THtLeftPanel") is None
+
+
+@pytest.mark.parametrize("bad", [["THtLeftPanel"], {"": "x"}, {"THtLeftPanel": 1}])
+def test_bad_notes_are_an_error_not_a_default(tmp_path, bad):
+    path = tmp_path / "p.json"
+    path.write_text(json.dumps({"notes": bad}))
+    with pytest.raises(GhostdriverError, match="notes"):
+        Profile.load(path)

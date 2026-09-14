@@ -429,3 +429,41 @@ def set_value_via_pattern(element: AccessibleElement, text: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def menu_choose(element: AccessibleElement) -> bool:
+    """Tier 3 for a popup-menu item: the menu selects it and Enter runs it.
+
+    A button pair posted at an item's rectangle is handled by the menu's
+    modal loop, which hit-tests the *real* cursor position rather than the
+    message's, so on a menu that is not under the pointer the click lands
+    outside and the menu closes with nothing chosen (#135). The route the
+    menu itself provides is the keyboard: highlight the item by position
+    (`MN_SELECTITEM`) and post Return to the menu window. The menu then
+    does exactly what it does for a person -- ends, and hands the command
+    to its owner the way it was set up to, WM_COMMAND or a return value
+    alike -- so nothing here needs to know how the application listens.
+
+    A greyed item is refused by name rather than pressed; a submenu is
+    declined so the posted route can open it.
+    """
+    from . import input as win_input
+
+    hwnd = element.host_handle
+    index = element.runtime_id[1]
+    state = winapi.popup_menu_item_state(hwnd, index)
+    if state is None:
+        raise LookupError("the menu is no longer showing; open it again before choosing")
+    if not state["enabled"]:
+        raise LookupError(f"menu item {element.sibling_index} is greyed out; the "
+                          "application is not offering it right now")
+    if state["submenu"]:
+        return False
+    winapi.popup_menu_select(hwnd, index)
+    scan = win_input.user32.MapVirtualKeyW(win_input.VK_RETURN, win_input.MAPVK_VK_TO_VSC)
+    down = 1 | (scan << 16)
+    up = down | (1 << 30) | (1 << 31)
+    target = wintypes.HWND(hwnd)
+    ok = bool(win_input.user32.PostMessageW(target, win_input.WM_KEYDOWN, win_input.VK_RETURN, down))
+    ok &= bool(win_input.user32.PostMessageW(target, win_input.WM_KEYUP, win_input.VK_RETURN, up))
+    return ok

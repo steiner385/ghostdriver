@@ -320,9 +320,14 @@ def display_scale() -> float:
 
 #: Asked of a `#32768` window: the HMENU it is showing.
 MN_GETHMENU = 0x01E1
+#: Told to a `#32768` window: highlight item N, as the keyboard would. Not
+#: in the SDK headers, but the menu code has answered it for decades and
+#: every driver that selects a menu item by position relies on it (#135).
+MN_SELECTITEM = 0x01E5
 MF_BYPOSITION = 0x0400
 MF_SEPARATOR = 0x0800
 MF_OWNERDRAW = 0x0100
+MF_POPUP = 0x0010
 MF_DISABLED_OR_GRAYED = 0x0003
 POPUP_MENU_CLASS = "#32768"
 
@@ -462,3 +467,24 @@ def to_physical_rect(rect: tuple[int, int, int, int]) -> dict:
     return {"left": round(left * scale), "top": round(top * scale),
             "right": round(right * scale), "bottom": round(bottom * scale),
             "scale": scale}
+
+
+def popup_menu_item_state(hwnd: int, index: int, *, timeout_ms: int = 500) -> dict | None:
+    """One item's state from the menu a `#32768` window shows: whether it
+    is greyed, and whether it opens a submenu. None when the window no
+    longer shows a menu."""
+    handle = send_message_timeout(hwnd, MN_GETHMENU, 0, 0, timeout_ms=timeout_ms)
+    if not handle:
+        return None
+    state = user32.GetMenuState(wintypes.HMENU(handle), index, MF_BYPOSITION)
+    if state == 0xFFFFFFFF:
+        return None
+    return {"enabled": not (state & MF_DISABLED_OR_GRAYED),
+            "submenu": bool(state & MF_POPUP)}
+
+
+def popup_menu_select(hwnd: int, index: int, *, timeout_ms: int = 500) -> bool:
+    """Highlight item `index` of the popup menu window, the way the arrow
+    keys would; the menu's own selection state, not a pointer."""
+    send_message_timeout(hwnd, MN_SELECTITEM, index, 0, timeout_ms=timeout_ms)
+    return True
