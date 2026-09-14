@@ -5698,3 +5698,57 @@ abort, a declined rung is, the click point is unconverted (`env: any`).
 `tests/test_profile_posted_click_only.py` and `tests/test_actuation_tools.py`:
 the profile confinement, refused before any input. Issue #130; D#124;
 D#111; D9.
+
+### D#133. `real_input` is removed; a control gated on hover state is told the mouse is over it
+
+**The operator's ruling.** "If the user moving the mouse interrupts our
+ghostdriver activities, that is a failure. Period." The premise is that
+this tool drives a target without conflicting with what the person is
+doing in parallel. A real click (D#124, D#130) uses the one physical
+pointer: it either fights the operator or waits for them to stop, and
+both are the failure the project exists to prevent. The last run made it
+plain -- the click warped the operator's pointer while they were working
+on another monitor, and the guards, working as designed, could only
+report that. The rung is removed: the Windows `live.py`, the `real_input`
+argument, the tier-4 click routes, the `real_input_only_for` key. D#124
+and D#130 stand as the record of what was tried and why it cannot fit.
+What stays from them: a rung that raised says why (`declined`), now on
+every actuation result, and the post-consent re-attach keeping its
+options.
+
+**What the bar needs instead, and why a posted click could not give it.**
+The Toggle Block Edit bar (`THtLeftPanel`) answered `delivered_to` right
+and did nothing, in both directions, on every posted click. The likely
+gate is not a cursor hit-test in the click handler but the control's
+*hover state*: in Delphi's VCL, whether a control believes the mouse is
+over it is set by the application on idle from the real cursor position
+and handed to the control as a private notification, `CM_MOUSEENTER`
+(`CM_BASE + 19`, `0xB013`). Mouse messages never set it. A control that
+acts on a click only while in that state can never be satisfied by the
+posted pair alone -- and it can be told, with one more posted message.
+
+**Decision.** A posted click may be preceded by `CM_MOUSEENTER`, posted
+to the same window before the move-down-up sequence. It is asked for two
+ways: the profile key `hover_before_click` (fnmatch class patterns, the
+declared form, D35) and a per-call `hover: true` on `click`, for trying
+it on a control before listing its class. The click result says `hover`
+and why, and the route is named `posted+hover`. Never automatic: the
+value is in the `WM_APP` range and another toolkit could mean something
+else by it. Still entirely a posted route -- no pointer, no foreground,
+nothing the operator notices. Toolkit knowledge, not target knowledge,
+so it lives in the repo.
+
+**Not yet verified on the bar.** The message order is proven at the
+posting layer, and the route is proven end to end on the fixture, whose
+button needs no hover and is unaffected. Whether the bar's gate is the
+VCL hover state is the hypothesis this exists to test; the first click
+with `hover: true` after a restart is that test. If it does not answer,
+the next question is whether the toggle has a keyboard or menu route.
+
+**Evidence.** `tests/test_windows_input_hover.py`: the notification goes
+out first, with no flags, and only when asked; the value is the VCL's.
+`tests/test_profile_posted_click_only.py`: the key is read, matched, and
+refused when malformed. `tests/test_actuation_tools.py`: a click asked
+for with hover names the route and still verifies; the profile decides
+when the call does not; nothing is added otherwise. `tests/test_actuate.py`:
+a declining rung's reason is kept. Issue #133; D#124; D#130; D9; D35.

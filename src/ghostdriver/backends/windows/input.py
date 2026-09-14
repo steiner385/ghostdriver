@@ -70,6 +70,30 @@ from . import winapi
 user32 = winapi.user32
 
 WM_MOUSEMOVE = 0x0200
+#: The VCL's private "the mouse entered you" notification (CM_BASE + 19).
+#: A VCL control's belief that the mouse is over it is set by the
+#: application on idle from the real cursor, not from mouse messages, and
+#: delivered as this; a control that acts on a click only in that state
+#: has to be told first (#133). Only posted where asked for -- the value
+#: is in the WM_APP range, and another toolkit could mean something else
+#: by it.
+CM_MOUSEENTER = 0xB013
+#: The VCL's private "the mouse entered you" notification (CM_BASE + 19).
+#: A VCL control's belief that the mouse is over it is set by the
+#: application on idle from the real cursor, not from mouse messages, and
+#: delivered as this; a control that acts on a click only in that state
+#: has to be told first (#133). Only posted where asked for -- the value
+#: is in the WM_APP range, and another toolkit could mean something else
+#: by it.
+CM_MOUSEENTER = 0xB013
+#: The VCL's private "the mouse entered you" notification (CM_BASE + 19).
+#: A VCL control's belief that the mouse is over it is set by the
+#: application on idle from the real cursor, not from mouse messages, and
+#: delivered as this; a control that acts on a click only in that state
+#: has to be told first (#133). Only posted where asked for -- the value
+#: is in the WM_APP range, and another toolkit could mean something else
+#: by it.
+CM_MOUSEENTER = 0xB013
 WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
 WM_RBUTTONDOWN = 0x0204
@@ -233,7 +257,7 @@ def client_size(hwnd: int) -> tuple[int, int]:
 
 
 def post_click(hwnd: int, x: int, y: int, *, button: str = "left", modifiers=(),
-               count: int = 1) -> bool:
+               count: int = 1, hover: bool = False) -> bool:
     """A mouse-move to client point (x, y), then the button pair there,
     `count` times.
 
@@ -251,7 +275,12 @@ def post_click(hwnd: int, x: int, y: int, *, button: str = "left", modifiers=(),
     down_msg, up_msg, down_flags, up_flags = button_pair(button, modifiers)
     point = _lparam_for_point(x, y)
     target = wintypes.HWND(hwnd)
-    ok = bool(user32.PostMessageW(target, WM_MOUSEMOVE, up_flags, point))
+    ok = True
+    if hover:
+        # Before the move: the control must already believe the mouse is
+        # over it when the pair arrives (#133).
+        ok = bool(user32.PostMessageW(target, CM_MOUSEENTER, 0, 0))
+    ok &= bool(user32.PostMessageW(target, WM_MOUSEMOVE, up_flags, point))
     ok &= bool(user32.PostMessageW(target, down_msg, down_flags, point))
     ok &= bool(user32.PostMessageW(target, up_msg, up_flags, point))
     if count >= 2:
@@ -261,7 +290,7 @@ def post_click(hwnd: int, x: int, y: int, *, button: str = "left", modifiers=(),
 
 
 def click(hwnd: int, *, button: str = "left", modifiers=(), at=None,
-          count: int = 1) -> bool:
+          count: int = 1, hover: bool = False) -> bool:
     """Press and release a button over `hwnd`: at its middle, or at `at`.
 
     The pair, not just the down: a toolkit decides a click happened on the
@@ -273,7 +302,8 @@ def click(hwnd: int, *, button: str = "left", modifiers=(), at=None,
     """
     x, y = client_centre(hwnd) if at is None else (int(at[0]), int(at[1]))
     target, tx, ty = deepest_child_at(hwnd, x, y)
-    return post_click(target, tx, ty, button=button, modifiers=modifiers, count=count)
+    return post_click(target, tx, ty, button=button, modifiers=modifiers, count=count,
+                      hover=hover)
 
 
 #: `ChildWindowFromPointEx` flags: skip children that are hidden, or that

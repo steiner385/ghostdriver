@@ -74,20 +74,19 @@ class Profile:
     #: delivery of a click the posted message already made. A declared
     #: route beats a learned one (D35).
     posted_click_only: tuple[str, ...] = ()
-    #: Control classes (fnmatch patterns) a real click may be asked for. Empty
-    #: means any. On a target where the exception is needed for two controls
-    #: and nothing else, listing them keeps the rung from being tried
-    #: elsewhere by an agent that reaches for it too readily (#130).
-    real_input_only_for: tuple[str, ...] = ()
+    #: Control classes (fnmatch patterns) whose posted click is preceded by
+    #: the VCL mouse-enter notification (#133): a control that acts on a
+    #: click only while it believes the mouse is over it, a belief the
+    #: application sets from the real cursor on idle and no posted pair can
+    #: create. Declared, because the message is private to one toolkit.
+    hover_before_click: tuple[str, ...] = ()
 
-    def allows_real_input(self, class_name: str | None) -> bool:
-        """Whether `real_input_only_for` permits a real click on this class."""
+    def wants_hover(self, class_name: str | None) -> bool:
+        """Whether `hover_before_click` names this class."""
         import fnmatch
 
-        if not self.real_input_only_for:
-            return True
         name = class_name or ""
-        return any(fnmatch.fnmatchcase(name, p) for p in self.real_input_only_for)
+        return any(fnmatch.fnmatchcase(name, p) for p in self.hover_before_click)
 
     def pins_to_posted(self, class_name: str | None) -> str | None:
         """The `posted_click_only` pattern that pins `class_name`, or None."""
@@ -149,12 +148,12 @@ class Profile:
                 f"profile {location} has an unreadable posted_click_only: a list of "
                 f"window-class patterns, e.g. [\"TsfCommandButton\"]; got {pinned!r}",
             )
-        real_only = document.get("real_input_only_for") or []
-        if not isinstance(real_only, list) or not all(isinstance(c, str) and c for c in real_only):
+        hovered = document.get("hover_before_click") or []
+        if not isinstance(hovered, list) or not all(isinstance(c, str) and c for c in hovered):
             raise GhostdriverError(
                 ErrorKind.DENIED_BY_POLICY,
-                f"profile {location} has an unreadable real_input_only_for: a list of "
-                f"window-class patterns, e.g. [\"THtLeftPanel\"]; got {real_only!r}",
+                f"profile {location} has an unreadable hover_before_click: a list of "
+                f"window-class patterns, e.g. [\"THtLeftPanel\"]; got {hovered!r}",
             )
         return cls(
             path=location,
@@ -166,7 +165,7 @@ class Profile:
             safe_controls=tuple(document.get("safe_controls") or ()),
             busy_indicator=document.get("busy_indicator") or None,
             posted_click_only=tuple(pinned),
-            real_input_only_for=tuple(real_only),
+            hover_before_click=tuple(hovered),
         )
 
     @classmethod
@@ -235,9 +234,8 @@ class Session:
         if self.live_window:
             described["live_actuation"] = (
                 f"granted for window {self.live_window:#x}: a value this "
-                "session commits, or a click asked for with real_input, may "
-                "take the real keyboard or pointer for an instant, aborting if "
-                "the operator's foreground or pointer moves (D#111, #124)"
+                "session commits may take the real keyboard for an instant, "
+                "aborting if the operator's foreground or pointer moves (D#111)"
             )
         return described
 

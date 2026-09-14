@@ -25,8 +25,7 @@ from . import modality
 
 
 def click(handle: int, *, button: str = "left", modifiers=(), at=None,
-          live_window: int = 0, real_input: tuple[int, int] | None = None,
-          count: int = 1) -> list[Attempt]:
+          count: int = 1, hover: bool = False) -> list[Attempt]:
     """Actuate a control through its Action interface.
 
     Anything but a plain left click returns an **empty** ladder. On Windows
@@ -168,8 +167,8 @@ def set_text_element(element: AccessibleElement, text: str, *,
 
 
 def click_element(element: AccessibleElement, *, button: str = "left",
-                  live_window: int = 0, real_input: tuple[int, int] | None = None,
-                  modifiers=(), at=None, count: int = 1) -> list[Attempt]:
+                  modifiers=(), at=None, count: int = 1,
+                  hover: bool = False) -> list[Attempt]:
     """The element form of `click`, and the same refusal for the variants."""
     return click(element.handle, button=button, modifiers=modifiers,
                  at=at, count=count)

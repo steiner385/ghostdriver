@@ -3,7 +3,7 @@
 
 from ..actuate import Tier
 from ..model.element import AccessibleElement
-from ..model.result import ErrorKind, GhostdriverError
+from ..model.result import ErrorKind
 from .acting import _ActingCore
 from .core import (
     _error,
@@ -27,7 +27,7 @@ class ActuationTools(_ActingCore):
         count: int = 1,
         frame: str = "logical",
         require_active: bool = False,
-        real_input: bool = False,
+        hover: bool | None = None,
     ) -> dict:
         """Actuate one control.
 
@@ -39,15 +39,10 @@ class ActuationTools(_ActingCore):
         is a new top-level, all_windows=true reaches it); `modifiers` (ctrl,
         shift) ride the message flags -- `expect` tells whether they landed.
         `require_active` refuses when the window is not active (D67).
-        `real_input` sends a person's click -- the pointer placed, the button
-        pressed through the real input queue -- for a control that hit-tests
-        the cursor and ignores every posted click; allowed only in a live
-        session, on the window the operator consented to (#124, D#111).
+        `hover` posts the VCL mouse-enter notification before the pair, for
+        a control that acts on a click only while it believes the mouse is
+        over it; None lets the profile's `hover_before_click` decide (#133).
         """
-        if real_input:
-            refusal = self._real_input_refusal(session_id, locator, modifiers)
-            if refusal is not None:
-                return refusal
         prepared, failure = self._prepared(
             session_id, "click", locator, all_windows, None
         )
@@ -91,28 +86,15 @@ class ActuationTools(_ActingCore):
                     ErrorKind.NOT_ACTIONABLE,
                     f"at={point} is outside the element, which is {width}x{height}",
                     locator=locator)
-        live_kw: dict = {}
-        tiers = None
-        if real_input:
-            profile = prepared.session.profile
-            node_class = getattr(prepared.node, "class_name", None)
-            if not profile.allows_real_input(node_class):
-                return _error(
-                    ErrorKind.DENIED_BY_POLICY,
-                    f"real_input is confined by this profile to {list(profile.real_input_only_for)}; "
-                    f"{node_class!r} is not among them. A posted click is the contract; "
-                    "add the class to real_input_only_for only after a posted click has been "
-                    "shown to be ignored.", locator=locator)
-            live_kw = {"live_window": prepared.session.live_window,
-                       "real_input": _click_point(prepared.node, point)}
-            tiers = (Tier.SYNTHETIC_INPUT,)
+        node_class = getattr(prepared.node, "class_name", None)
+        hover_on = (bool(hover) if hover is not None
+                    else prepared.session.profile.wants_hover(node_class))
         attempts = (verbs.click_element(prepared.node, button=button, modifiers=held,
-                                        at=point, count=count, **live_kw)
+                                        at=point, count=count, hover=hover_on)
                     if isinstance(prepared.node, AccessibleElement)
                     else verbs.click(prepared.node.handle, button=button, modifiers=held,
-                                     at=point, count=count, **live_kw))
-        pinned = None if real_input else prepared.session.profile.pins_to_posted(
-            getattr(prepared.node, "class_name", None))
+                                     at=point, count=count, hover=hover_on))
+        pinned = prepared.session.profile.pins_to_posted(node_class)
         if pinned is not None:
             # The profile says this class answers the posted click and
             # nothing else (#122): the pattern rung is not tried, so it
@@ -134,25 +116,12 @@ class ActuationTools(_ActingCore):
         # control) can take longer than a control appearing -- a palette
         # docks a few seconds after the click (D77) -- so it gets a longer
         # verify window, the caller's timeout_s or six seconds.
-        watch = None
-        if real_input:
-            # Armed around the real click, so a foreground or pointer move
-            # the synchronous guard misses is still reported (D28, D#111).
-            watch = current().InterferenceWatch(
-                prepared.session.pid,
-                family=lambda: self._tree_pids(prepared.session))
-            prepared.session.run(watch.start)
-        try:
-            result = self._perform(prepared.session,
-                attempts,
-                expect_before=verbs.unblocked(prepared.node.handle),
-                expect_after=after,
-                verify_timeout_s=verify_window(expect),
-                tiers=tiers,
-            )
-        finally:
-            if watch is not None:
-                watch.stop()
+        result = self._perform(prepared.session,
+            attempts,
+            expect_before=verbs.unblocked(prepared.node.handle),
+            expect_after=after,
+            verify_timeout_s=verify_window(expect),
+        )
         self._remember(session_id, "click", locator, prepared, result)
         focus = self._focus_report(prepared)
         inactive = focus.get("target_window_active") is False
@@ -167,17 +136,13 @@ class ActuationTools(_ActingCore):
             focus=focus,
             **({"route_pinned": f"posted only: profile posted_click_only matches {pinned!r}"}
                if pinned is not None else {}),
+            **({"hover": ("CM_MOUSEENTER posted before the click, "
+                          + ("as asked" if hover is not None
+                             else "because the profile's hover_before_click names "
+                                  f"{node_class!r}"))}
+               if hover_on else {}),
             **delivered,
         )
-        if watch is not None:
-            events = watch.events()
-            if events:
-                reported["disturbances"] = list(reported.get("disturbances") or []) + events
-            if result.declined:
-                reported["declined"] = result.declined
-            aborted = _live_abort_note(result)
-            if aborted is not None:
-                reported["live_aborted"] = aborted
         acted = any(d.get("change") in ("window_appeared", "window_disappeared")
                     for d in result.disturbances)
         if inactive and after is None and result.ok and not acted:
@@ -193,30 +158,6 @@ class ActuationTools(_ActingCore):
                 "await_human or a tool that activates windows."
             )
         return reported
-
-    def _real_input_refusal(self, session_id: str, locator: str, modifiers) -> dict | None:
-        """Why a real click may not be sent at all, before anything is resolved."""
-        try:
-            session = self.sessions.authorize(session_id, "click")
-        except GhostdriverError as exc:
-            return _error(exc.kind, exc.message)
-        if not session.live_window:
-            return _error(
-                ErrorKind.DENIED_BY_POLICY,
-                "real_input leaves the posted-message contract for this one click: it "
-                "moves the operator's pointer, and may press a real button with their "
-                "window in front, so the operator must be away from the mouse and "
-                "keyboard while it runs. It is allowed only in a live session: bring "
-                "the target's window to the front, attach again with live=true, then "
-                "click with real_input.",
-                locator=locator)
-        if modifiers:
-            return _error(ErrorKind.NOT_ACTIONABLE,
-                          "real_input sends a plain click; modifiers are not held on "
-                          "the real keyboard. Drop modifiers or drop real_input.",
-                          locator=locator)
-        return None
-
 
     def type_text(
         self,
@@ -348,27 +289,3 @@ def current_edit_actions() -> dict:
     from ..backends import current
 
     return dict(current().EDIT_ACTIONS)
-
-
-def _click_point(node, point) -> tuple[int, int]:
-    """The screen pixel a real click lands on -- the element's centre, or
-    `point` inside it -- in the frame this process sees, which is the frame
-    every rect it reports and the cursor calls it makes are in. It was
-    converted to physical pixels once; at 125% that put every real click
-    1.25x off and clamped one at the screen edge (#130)."""
-    left, top, right, bottom = node.rect
-    if point is None:
-        return ((left + right) // 2, (top + bottom) // 2)
-    return (left + point[0], top + point[1])
-
-
-def _live_abort_note(result) -> str | None:
-    """What to tell a caller whose real click did not go through, or None
-    when it did go through and only its postcondition did not hold -- which
-    is not an abort, and was reported as one once (#130)."""
-    if result.ok or not result.declined:
-        return None
-    reasons = "; ".join(f"{route}: {why}" for route, why in result.declined.items())
-    return (f"the real click was stopped before it was sent -- {reasons}. Nothing "
-            "was forced onto the operator's desktop; retry when they are away from "
-            "the mouse and keyboard, or ask them to click.")

@@ -274,11 +274,9 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "Operator-present live actuation (D#111): allowed only when a "
             "window of the target is the foreground right now -- the one the "
             "person is watching -- and recorded for the session. It lets "
-            "set_value commit with a real keystroke where a toolkit needs one, "
-            "and click send a real pointer click (real_input=true) into a "
-            "control that ignores posted clicks. Every such action aborts if "
-            "the foreground or pointer moves. Off by default; needs tier "
-            "interactive or full."
+            "set_value commit with a real keystroke where a toolkit needs one "
+            "(wxGTK3 on Linux); the keystroke aborts if the foreground or "
+            "pointer moves. Off by default; needs tier interactive or full."
         ))] = False,
     ) -> dict[str, Any]:
         result = box.attach(pid, tier=tier, profile_path=profile_path,
@@ -839,26 +837,20 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         count: Annotated[int, Field(description=(
             "1 for a click, 2 for a double-click (how most grids open a row)."
         ))] = 1,
-        real_input: Annotated[bool, Field(description=(
-            "Leaves the posted-message contract for this one click: the "
-            "operator's pointer is placed on the control and, if a posted "
-            "pair with the pointer there does not verify, a real button is "
-            "pressed with their window in front. Only for a control that "
-            "hit-tests the cursor and ignores every posted click "
-            "(delivered_to right, no effect, twice); the operator must be "
-            "away from the mouse and keyboard while it runs. Needs a session "
-            "attached with live=true while the target's window was the "
-            "foreground; the control must be in that window; the window is "
-            "brought back to the front if the go-ahead moved it; any pointer "
-            "move aborts and the reason is named. The pointer is put back "
-            "afterwards. Never automatic; a profile can confine it to named "
-            "classes."
-        ))] = False,
+        hover: Annotated[bool | None, Field(description=(
+            "Post the VCL mouse-enter notification before the click. For a "
+            "Delphi/VCL control that acts on a click only while it believes "
+            "the mouse is over it -- delivered_to right, no effect, every "
+            "time -- because that belief is set from the real cursor on idle, "
+            "never from mouse messages. Still posted: no pointer, no "
+            "foreground. Default (null) lets the profile's hover_before_click "
+            "decide; true to try it on a control before listing its class."
+        ))] = None,
     ) -> dict[str, Any]:
         return box.click(session_ref, locator, all_windows=all_windows,
                          expect=expect, button=button, modifiers=modifiers,
                          at=at, count=count, frame=frame, require_active=require_active,
-                         real_input=real_input)
+                         hover=hover)
 
     @server.tool(annotations=ACTUATES, description=(
         "Replace a field's contents by typing them. Always reads the field "

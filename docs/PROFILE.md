@@ -97,38 +97,65 @@ result says so (`route_pinned`). A declared route beats a learned one
 (D35): list a class after seeing `tiers_attempted: [1, 3]` and a slow
 click, not before.
 
-## `posted_click_only` (D#122)
+## `hover_before_click` (D#133)
 
-Window classes whose click is the posted message and nothing else:
-
-```json
-"posted_click_only": ["TsfCommandButton", "TsfSpeedButton*"]
-```
-
-`fnmatch` patterns against the control's window class. For a plain HWND
-control the ladder tries the UIA Invoke pattern first and the posted click
-second; a toolkit that answers Invoke slowly, or not at all, costs that
-rung's timeout and then a second delivery of a click the posted message
-already made. A class listed here skips the pattern rung, and the click
-result says so (`route_pinned`). A declared route beats a learned one
-(D35): list a class after seeing `tiers_attempted: [1, 3]` and a slow
-click, not before.
-
-## `real_input_only_for` (D#130)
-
-Window classes a real click (`click real_input=true`, D#124) may be asked
-for:
+Window classes whose posted click is preceded by the VCL mouse-enter
+notification:
 
 ```json
-"real_input_only_for": ["THtLeftPanel"]
+"hover_before_click": ["THtLeftPanel"]
 ```
 
-`fnmatch` patterns against the control's window class; absent or empty
-means any class. `real_input` is the one deliberate exception to the
-posted-message contract -- it moves the operator's pointer and needs them
-away from the desk -- and on a target where only one or two controls need
-it, listing them keeps the rung from being reached for anywhere else. A
-real click on a class not listed is refused by name.
+`fnmatch` patterns against the control's window class. A VCL control's
+belief that the mouse is over it is set by the application on idle from
+the real cursor, not from mouse messages, and handed to the control as a
+private notification (`CM_MOUSEENTER`). A control that acts on a click only
+in that state never answers the posted pair alone -- `delivered_to` right,
+no effect, every time. Listed here, the notification is posted first, and
+the click result says so (`hover`). Still a posted route: no pointer, no
+foreground, nothing the operator notices. Declared rather than automatic
+because the message is private to one toolkit; `click` also takes a
+per-call `hover` to try it before listing a class.
+
+## `hover_before_click` (D#133)
+
+Window classes whose posted click is preceded by the VCL mouse-enter
+notification:
+
+```json
+"hover_before_click": ["THtLeftPanel"]
+```
+
+`fnmatch` patterns against the control's window class. A VCL control's
+belief that the mouse is over it is set by the application on idle from
+the real cursor, not from mouse messages, and handed to the control as a
+private notification (`CM_MOUSEENTER`). A control that acts on a click only
+in that state never answers the posted pair alone -- `delivered_to` right,
+no effect, every time. Listed here, the notification is posted first, and
+the click result says so (`hover`). Still a posted route: no pointer, no
+foreground, nothing the operator notices. Declared rather than automatic
+because the message is private to one toolkit; `click` also takes a
+per-call `hover` to try it before listing a class.
+
+## `hover_before_click` (D#133)
+
+Window classes whose posted click is preceded by the VCL mouse-enter
+notification:
+
+```json
+"hover_before_click": ["THtLeftPanel"]
+```
+
+`fnmatch` patterns against the control's window class. A VCL control's
+belief that the mouse is over it is set by the application on idle from
+the real cursor, not from mouse messages, and handed to the control as a
+private notification (`CM_MOUSEENTER`). A control that acts on a click only
+in that state never answers the posted pair alone -- `delivered_to` right,
+no effect, every time. Listed here, the notification is posted first, and
+the click result says so (`hover`). Still a posted route: no pointer, no
+foreground, nothing the operator notices. Declared rather than automatic
+because the message is private to one toolkit; `click` also takes a
+per-call `hover` to try it before listing a class.
 
 ## `safe_controls`
 
