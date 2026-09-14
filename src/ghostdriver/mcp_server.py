@@ -427,9 +427,15 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "The frame `region` is in: logical (default) or physical (pixels "
             "of a DPI-aware screenshot)."
         ))] = "logical",
+        scale: Annotated[float, Field(description=(
+            "Return the picture at this fraction of its size (above 0, at most "
+            "1; default 1). 0.5 is a quarter of the pixels -- enough to read a "
+            "layout, and far cheaper to hold. The result's width and height are "
+            "the image's own; every rect stays full size."
+        ))] = 1.0,
     ) -> CallToolResult:
         result = box.capture(session_ref, locator=locator, region=region, save_as=save_as,
-                             frame=frame)
+                             frame=frame, scale=scale)
         if not result.get("ok"):
             return CallToolResult(
                 content=[TextContent(
@@ -555,7 +561,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "Each step is {tool, args}: `tool` is a session-scoped read-or-act "
         "tool (click, set_value, type_text, send_keys, find, read, "
         "read_clipboard, capture, describe, modals, surfaces, hit_targets, "
-        "wait_for, wait_idle, grid_seek) and `args` its arguments WITHOUT "
+        "wait_for, wait_idle, grid_seek, pace) and `args` its arguments WITHOUT "
         "the session, which the batch supplies. Give each acting step its own "
         "`expect` -- a batch verifies exactly what a standalone call does, so "
         "a step without one claims only that it was delivered. Stops on the "
@@ -1091,7 +1097,35 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         return box.launch_isolated(command, tier=tier,
                                    announces_pid=announces_pid)
 
+    _refuse_unknown_arguments(server)
     return server
+
+
+def _refuse_unknown_arguments(server: Any) -> None:
+    """An argument no tool takes is refused by name, never dropped.
+
+    The argument model the MCP library builds for each tool ignores an
+    unknown key by default, so `capture(scale=0.5)` "worked" before `scale`
+    existed -- by returning the full-size picture as if the request had
+    been honored. The same call inside a batch failed, because there it
+    reaches the Python signature. An ignored parameter reads exactly like an
+    honored one (the D#71 defect, at the wire); refusing it names the
+    mistake, and the published schema says `additionalProperties: false` so
+    a client can see it too (#120). Reaches into the tool manager because
+    the library offers no switch; guarded so a library that renames it
+    degrades to the old behaviour rather than failing to start.
+    """
+    manager = getattr(server, "_tool_manager", None)
+    tools = manager.list_tools() if manager is not None else []
+    for tool in tools:
+        model = getattr(getattr(tool, "fn_metadata", None), "arg_model", None)
+        if model is None:
+            continue
+        model.model_config["extra"] = "forbid"
+        model.model_rebuild(force=True)
+        # The published schema was derived at registration; re-derive it the
+        # way the library does, so it carries additionalProperties: false.
+        tool.parameters = model.model_json_schema(by_alias=True)
 
 
 def main() -> int:

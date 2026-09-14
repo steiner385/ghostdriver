@@ -6,7 +6,7 @@ end-to-end proof that `batch` still behaves is `tests/test_batch.py` against
 the real fixture; here the core's own logic is exercised directly.
 """
 
-from ghostdriver.tools.stepper import RUNNABLE_TOOLS, run_steps
+from ghostdriver.tools.stepper import RUNNABLE_TOOLS, run_steps, step_summary
 
 
 class FakeBox:
@@ -122,6 +122,36 @@ def test_the_allowlist_is_the_documented_set():
     """A guard: the set of runnable tools is deliberate, so a change to it is
     a change someone has to make on purpose."""
     assert "click" in RUNNABLE_TOOLS and "find" in RUNNABLE_TOOLS
+    assert "pace" in RUNNABLE_TOOLS, "a settle between steps rides in a batch (#119)"
     for withheld in ("attach", "release", "grant_targets", "launch_isolated",
-                     "foreground", "await_human", "batch", "pace"):
+                     "foreground", "await_human", "batch"):
         assert withheld not in RUNNABLE_TOOLS, withheld
+
+
+# --- a step line names what changed around it (#117) ------------------------
+
+def test_a_step_line_keeps_the_disturbances_by_name():
+    """A typed value dismissed its dialog; the step used to say only
+    "2 other change(s)" because the list was not a kept field."""
+    result = {
+        "ok": False,
+        "error": {"kind": "postcondition_failed",
+                  "message": "not verified; 2 other change(s) happened -- see disturbances"},
+        "disturbances": [
+            {"change": "window_disappeared", "detail": "Start Order Alteration"},
+            {"change": "unblocked", "detail": "no longer held by: Start Order Alteration"},
+        ],
+        "live_aborted": "the operator's pointer moved while committing",
+    }
+
+    line = step_summary(3, "type_text", result)
+
+    assert [d["change"] for d in line["disturbances"]] == ["window_disappeared", "unblocked"]
+    assert line["disturbances"][0]["detail"] == "Start Order Alteration"
+    assert "live_aborted" in line
+    assert "base64" not in line
+
+
+def test_a_step_line_without_disturbances_carries_no_empty_key():
+    line = step_summary(0, "find", {"ok": True, "match_count": 1})
+    assert "disturbances" not in line

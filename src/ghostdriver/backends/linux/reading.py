@@ -148,9 +148,15 @@ def read_window_text(handle: int, timeout_ms: int = 200, *,
 
 
 def capture_window(
-    handle: int, *, region: tuple[int, int, int, int] | None = None
+    handle: int, *, region: tuple[int, int, int, int] | None = None,
+    scale: float = 1.0,
 ) -> tuple[bytes, int, int]:
     """PNG bytes for the window this handle sits in, with its width and height.
+
+    `scale` is the contract's (#120); a value below 1 is refused here rather
+    than ignored, because a caller asking for a smaller picture and getting
+    the full one has been told the wrong size (D#71). Downscaling on this
+    backend is `env: linux` work, not done from a Windows box.
 
     Only toplevels have an X id, and only an X id can be captured -- a
     control is an accessible with no drawable of its own (D#8). So a handle
@@ -162,6 +168,8 @@ def capture_window(
     here, and is a property of the compositor rather than of X11.
     """
 
+    if scale < 1.0:
+        raise CaptureError("scale below 1 is not implemented on the Linux backend yet")
     xid = _toplevel_xid(_accessible(handle))
     if xid is None:
         raise CaptureError(

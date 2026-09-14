@@ -1,7 +1,5 @@
 """Discovery and reading: describe, find, read, capture, wait_for."""
 
-import base64
-
 from .. import disclosure as disclosure_report
 from ..backends import current
 from ..model.element import AccessibleElement
@@ -9,14 +7,7 @@ from ..model.locator import Locator
 from ..model.result import ErrorKind, GhostdriverError
 from ..summarize import summarize
 from ..wait import Condition, wait_for
-from .core import (
-    MAX_ELEMENTS,
-    _element,
-    _error,
-    _physical,
-    _top_level_holding,
-    _top_level_overlapping,
-)
+from .core import MAX_ELEMENTS, _element, _error
 from .guidance import BLOCKED_HINT, HUNG_HINT
 from .visibility import _VisibilityCore
 
@@ -232,123 +223,6 @@ class DiscoveryTools(_VisibilityCore):
             "values": values,
             "unanswered": sum(1 for v in values if not v["answered"]),
         }
-
-    def capture(
-        self,
-        session_id: str,
-        *,
-        locator: str | None = None,
-        region: dict | None = None,
-        save_as: str | None = None,
-        frame: str = "logical",
-    ) -> dict:
-        """A PNG of the target's window, or of one region of it."""
-        try:
-            session = self.sessions.authorize(session_id, "capture")
-        except GhostdriverError as exc:
-            return _error(exc.kind, exc.message)
-        if frame == "physical" and region is not None:
-            scale = current().winapi.display_scale()
-            region = {k: round(v / scale) for k, v in region.items()}
-
-        CaptureError = current().CaptureError
-        capture_window = current().capture_window
-
-        # Every top-level window of the target and its tree, because the
-        # window to *render* is the one that holds the match -- a modal is
-        # its own top-level window, and rendering the main window cropped
-        # to the modal's rectangle gives the pixels underneath the modal,
-        # confidently and wrongly. Measured in the field before this.
-        trees = self._trees(session, all_windows=True)
-        if not trees:
-            return _error(ErrorKind.NOT_FOUND,
-                          f"pid {session.pid} has no windows on this desktop")
-        main = self._trees(session, all_windows=False)
-        target, crop = (main[0] if main else trees[0]), None
-
-        if locator:
-            try:
-                matches = self._resolve(session, locator, True)
-            except ValueError as exc:
-                return _error(ErrorKind.NOT_FOUND, str(exc), locator=locator)
-            if not matches:
-                return _error(ErrorKind.NOT_FOUND,
-                              f"nothing matched {locator!r}", locator=locator)
-            if len(matches) > 1:
-                return _error(
-                    ErrorKind.AMBIGUOUS,
-                    f"{len(matches)} elements matched {locator!r}; capture "
-                    "needs exactly one. Add within= or index=.",
-                    locator=locator,
-                )
-            match = matches[0]
-            holder = _top_level_holding(trees, match.handle)
-            if holder is None:
-                return _error(ErrorKind.NOT_FOUND,
-                              f"{locator!r} matched a window no top-level window holds")
-            # A region alongside a locator crops within the located window,
-            # rather than being silently dropped (D67). Screen coordinates,
-            # like every region, so a rect from find() is used as-is.
-            if region:
-                target, crop = holder, (region["left"], region["top"],
-                                        region["right"], region["bottom"])
-            else:
-                target, crop = holder, match.rect
-        elif region:
-            crop = (region["left"], region["top"],
-                    region["right"], region["bottom"])
-            # The window the region lies in, by overlap: a region a caller
-            # copied from find() is in screen coordinates, and only the
-            # window it overlaps most can render it.
-            holder = _top_level_overlapping(trees, crop)
-            if holder is None:
-                return _error(
-                    ErrorKind.NOT_FOUND,
-                    f"region {crop} (screen coordinates) overlaps no window of "
-                    "the target; rects from find() and describe() are in screen "
-                    "coordinates, so pass one of those")
-            target = holder
-
-        try:
-            png, width, height = session.run(
-                lambda: capture_window(target.handle, region=crop))
-        except CaptureError as exc:
-            return _error(ErrorKind.NOT_ACTIONABLE, str(exc))
-
-        left, top, right, bottom = target.rect
-        result = {
-            "ok": True,
-            "width": width,
-            "height": height,
-            "mime_type": "image/png",
-            # The frame every rectangle in this tool uses, said so a region
-            # copied out of one result is known to be valid in another.
-            "frame": "screen",
-            "rendered": {
-                "class": target.class_name,
-                "text": target.text,
-                "pid": target.pid,
-                "handle_ephemeral": f"0x{target.handle:08X}",
-                "rect": {"left": left, "top": top, "right": right, "bottom": bottom},
-                **_physical(target.rect),
-            },
-            "base64": base64.b64encode(png).decode("ascii"),
-        }
-        if crop is not None:
-            inside = (max(crop[0], left), max(crop[1], top),
-                      min(crop[2], right), min(crop[3], bottom))
-            if inside != tuple(crop):
-                result["clipped_to_window"] = True
-        result.update(self._frame_note())
-        if save_as is not None:
-            from ..operator import save_capture
-
-            try:
-                result["saved_to"] = str(save_capture(save_as, png))
-            except (OSError, ValueError) as exc:
-                result["saved_to"] = None
-                result["save_error"] = str(exc)
-        return result
 
     def wait_for(
         self,
