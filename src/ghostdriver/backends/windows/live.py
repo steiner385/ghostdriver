@@ -28,9 +28,11 @@ cursor or touches the foreground"); everything that does is in this file.
 from __future__ import annotations
 
 import ctypes
+import time
 from collections.abc import Callable
 from ctypes import wintypes
 
+from . import input as win_input
 from . import winapi
 
 user32 = winapi.user32
@@ -85,8 +87,27 @@ def cursor() -> tuple[int, int]:
 
 
 def place_cursor(x: int, y: int) -> bool:
-    """Move the real pointer to physical screen (x, y)."""
+    """Move the real pointer to screen (x, y), in the frame this process
+    sees. This server is not DPI-aware, so that frame is the logical one
+    every rect it reports is in -- the same frame `GetCursorPos` answers in.
+    Converting to physical pixels first put every click 1.25x off at 125%
+    and clamped one at the screen edge (#130)."""
     return bool(user32.SetCursorPos(int(x), int(y)))
+
+
+def post_at(hwnd: int, point: tuple[int, int], button: str, count: int) -> bool:
+    """The ordinary message pair, posted to `hwnd` at screen `point`, while
+    the pointer is already there: a control that hit-tests `GetCursorPos`
+    while handling the message sees the cursor where the message says."""
+    client = winapi.screen_to_client(hwnd, point)
+    return bool(win_input.click(hwnd, button=button, at=client, count=count))
+
+
+#: How far the pointer may read back from where it was placed before that
+#: counts as "could not place it" rather than the operator moving it.
+PLACEMENT_TOLERANCE = 2
+#: How long a raised window is given to become the foreground.
+FOREGROUND_SETTLE_S = 0.15
 
 
 def press_button(button: str, count: int = 1) -> bool:
@@ -137,17 +158,29 @@ def _guard(live_window: int, expected_cursor: tuple[int, int],
 
 
 def click_real(hwnd: int, point: tuple[int, int], *, live_window: int,
-               button: str = "left", count: int = 1,
+               button: str = "left", count: int = 1, via: str = "input",
                foreground: Callable[[], int] = winapi.foreground_window,
                cursor_now: Callable[[], tuple[int, int]] = cursor,
                root: Callable[[int], int] = winapi.root_window,
+               raise_window: Callable[[int], bool] = winapi.bring_foreground,
+               settle: Callable[[float], None] = time.sleep,
                place: Callable[[int, int], bool] = place_cursor,
-               press: Callable[[str, int], bool] = press_button) -> bool:
-    """A real click at physical screen `point`, on a control of the live window.
+               press: Callable[[str, int], bool] = press_button,
+               post: Callable[[int, tuple[int, int], str, int], bool] = post_at) -> bool:
+    """A click at screen `point` with the real pointer there, on a control of
+    the live window.
 
-    Returns True when the button pair was sent, False when a step declined,
-    and raises `LiveActuationAborted` when the operator's desktop moved or
-    the control is not in the window the operator consented to.
+    `via` is the route: "posted" places the pointer and posts the ordinary
+    message pair to the control -- enough for a hit-test on `GetCursorPos`,
+    no button event through the input queue, no foreground needed; "input"
+    presses a real button through `SendInput`, which does need the window
+    frontmost. Either way the pointer is put back afterwards.
+
+    Returns True when the click was sent, and raises `LiveActuationAborted`
+    when the operator's desktop moved, the pointer could not be placed, or
+    the control is not in the window the operator consented to. Every
+    refusal names its reason: a rung that declined silently reads as "the
+    target ignored the click" (#130).
     """
     if live_window == 0:
         raise LiveActuationAborted(
@@ -155,21 +188,57 @@ def click_real(hwnd: int, point: tuple[int, int], *, live_window: int,
             "sent on the operator's display")
     if button not in REAL_BUTTONS:
         raise LiveActuationAborted(f"real input has no {button!r} button")
+    if via not in ("posted", "input"):
+        raise LiveActuationAborted(f"no real-input route named {via!r}")
     owner = root(hwnd)
     if owner != live_window:
         raise LiveActuationAborted(
             f"the control belongs to window {owner:#x}, not the live window "
             f"{live_window:#x} the operator consented to; nothing was clicked")
 
+    if via == "input":
+        # The window the operator consented to may have lost the foreground
+        # to the chat they typed the go-ahead in (#130). It is the window
+        # they named, so it is brought back rather than refused -- and if it
+        # cannot be, that is said.
+        now = foreground()
+        if now != live_window:
+            raise_window(live_window)
+            settle(FOREGROUND_SETTLE_S)
+            now = foreground()
+            if now != live_window:
+                raise LiveActuationAborted(
+                    f"the live window {live_window:#x} could not be brought to the "
+                    f"front (the foreground is {now:#x}); a real button press needs "
+                    "it frontmost, so nothing was clicked")
+
     baseline = cursor_now()
-    _guard(live_window, baseline, foreground, cursor_now)
+    if cursor_now() != baseline:
+        raise LiveActuationAborted(
+            "the pointer is moving; the operator is at the desk, so nothing was "
+            "sent")
 
     x, y = int(point[0]), int(point[1])
     if not place(x, y):
-        return False
-    # The pointer is now ours, at the point: a further move is the person's.
-    _guard(live_window, (x, y), foreground, cursor_now)
-
-    sent = bool(press(button, count))
+        raise LiveActuationAborted(f"SetCursorPos refused to place the pointer at {(x, y)}")
+    placed = cursor_now()
+    if max(abs(placed[0] - x), abs(placed[1] - y)) > PLACEMENT_TOLERANCE:
+        place(*baseline)
+        raise LiveActuationAborted(
+            f"the pointer could not be placed at {(x, y)}: it read back at {placed} "
+            "-- a screen edge clamped it, or the point is in another frame; nothing "
+            "was clicked")
+    # The pointer is now ours, where it read back: a further move is the
+    # person's. Only the real button press needs the foreground.
+    if via == "input":
+        _guard(live_window, placed, foreground, cursor_now)
+        sent = bool(press(button, count))
+    else:
+        if cursor_now() != placed:
+            place(*baseline)
+            raise LiveActuationAborted(
+                "the pointer moved while acting; the operator is at the desk, so "
+                "the action was stopped before it could interfere")
+        sent = bool(post(hwnd, (x, y), button, count))
     place(*baseline)  # the click was the tool's; the pointer is the person's
     return sent

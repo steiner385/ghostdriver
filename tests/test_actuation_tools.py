@@ -46,7 +46,8 @@ def box():
     return Toolbox(SessionManager())
 
 
-def interactive(box, pid, *, denylist=(), sensitivity=None, posted_click_only=()):
+def interactive(box, pid, *, denylist=(), sensitivity=None, posted_click_only=(),
+                real_input_only_for=()):
     """A session allowed to act, with an optional curated profile."""
     from ghostdriver.policy import ConsentSource, Tier
     from ghostdriver.sensitivity import Sensitivity
@@ -59,6 +60,7 @@ def interactive(box, pid, *, denylist=(), sensitivity=None, posted_click_only=()
         denylist=tuple(denylist),
         sensitivity=sensitivity or Sensitivity(),
         posted_click_only=tuple(posted_click_only),
+        real_input_only_for=tuple(real_input_only_for),
     )
     session = box.sessions.attach(pid, command_line=["fixtureapp"],
                                   tier=Tier.INTERACTIVE, profile=profile)
@@ -637,3 +639,18 @@ def test_an_unpinned_class_still_walks_the_ladder(box, app):
     assert result["ok"], result
     assert result["tiers_attempted"][0] == 1, "the pattern rung is tried first"
     assert "route_pinned" not in result
+
+
+# --- real_input is confined by the profile (#130) ---------------------------------
+
+def test_a_real_click_on_a_class_the_profile_does_not_list_is_refused_before_any_input(box, app):
+    session = interactive(box, app["pid"], real_input_only_for=("THtLeftPanel",))
+    live = box.sessions.get(session)
+    object.__setattr__(live, "live_window", 0x1234)  # a grant, without any real desktop
+
+    result = box.click(session, EXPAND, real_input=True)
+
+    assert not result["ok"], result
+    assert result["error"]["kind"] == "denied_by_policy"
+    assert "real_input_only_for" in result["error"]["message"]
+    assert "tier_used" not in result, "nothing was attempted"

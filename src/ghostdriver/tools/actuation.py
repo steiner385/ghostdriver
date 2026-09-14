@@ -94,8 +94,17 @@ class ActuationTools(_ActingCore):
         live_kw: dict = {}
         tiers = None
         if real_input:
+            profile = prepared.session.profile
+            node_class = getattr(prepared.node, "class_name", None)
+            if not profile.allows_real_input(node_class):
+                return _error(
+                    ErrorKind.DENIED_BY_POLICY,
+                    f"real_input is confined by this profile to {list(profile.real_input_only_for)}; "
+                    f"{node_class!r} is not among them. A posted click is the contract; "
+                    "add the class to real_input_only_for only after a posted click has been "
+                    "shown to be ignored.", locator=locator)
             live_kw = {"live_window": prepared.session.live_window,
-                       "real_input": self._physical_point(prepared.node, point)}
+                       "real_input": _click_point(prepared.node, point)}
             tiers = (Tier.SYNTHETIC_INPUT,)
         attempts = (verbs.click_element(prepared.node, button=button, modifiers=held,
                                         at=point, count=count, **live_kw)
@@ -166,12 +175,9 @@ class ActuationTools(_ActingCore):
                 reported["disturbances"] = list(reported.get("disturbances") or []) + events
             if result.declined:
                 reported["declined"] = result.declined
-            if not result.ok:
-                reported["live_aborted"] = (
-                    "the real click was stopped before or while it was sent -- see "
-                    "declined and disturbances for why (D#111). Nothing was forced "
-                    "onto the operator's desktop; retry when the target is settled "
-                    "in front, or ask them to click.")
+            aborted = _live_abort_note(result)
+            if aborted is not None:
+                reported["live_aborted"] = aborted
         acted = any(d.get("change") in ("window_appeared", "window_disappeared")
                     for d in result.disturbances)
         if inactive and after is None and result.ok and not acted:
@@ -197,10 +203,12 @@ class ActuationTools(_ActingCore):
         if not session.live_window:
             return _error(
                 ErrorKind.DENIED_BY_POLICY,
-                "real_input needs a live session: it moves the operator's pointer "
-                "and presses a real button, so it is allowed only into the window "
-                "they consented to. Bring the target's window to the front and "
-                "attach again with live=true (D#111), then click with real_input.",
+                "real_input leaves the posted-message contract for this one click: it "
+                "moves the operator's pointer, and may press a real button with their "
+                "window in front, so the operator must be away from the mouse and "
+                "keyboard while it runs. It is allowed only in a live session: bring "
+                "the target's window to the front, attach again with live=true, then "
+                "click with real_input.",
                 locator=locator)
         if modifiers:
             return _error(ErrorKind.NOT_ACTIONABLE,
@@ -209,21 +217,6 @@ class ActuationTools(_ActingCore):
                           locator=locator)
         return None
 
-    def _physical_point(self, node, point) -> tuple[int, int]:
-        """The physical-screen pixel a real click lands on: the element's
-        centre, or `point` inside it, converted from the logical frame."""
-        from ..backends import current
-
-        left, top, right, bottom = node.rect
-        x, y = ((left + right) // 2, (top + bottom) // 2) if point is None else (
-            left + point[0], top + point[1])
-        # The same conversion `physical_rect` in every element uses (D73); a
-        # backend with no scaled frame answers in its own pixels.
-        winapi = getattr(current(), "winapi", None)
-        if winapi is None or not hasattr(winapi, "to_physical_rect"):
-            return (x, y)
-        physical = winapi.to_physical_rect((x, y, x, y))
-        return (physical["left"], physical["top"])
 
     def type_text(
         self,
@@ -355,3 +348,27 @@ def current_edit_actions() -> dict:
     from ..backends import current
 
     return dict(current().EDIT_ACTIONS)
+
+
+def _click_point(node, point) -> tuple[int, int]:
+    """The screen pixel a real click lands on -- the element's centre, or
+    `point` inside it -- in the frame this process sees, which is the frame
+    every rect it reports and the cursor calls it makes are in. It was
+    converted to physical pixels once; at 125% that put every real click
+    1.25x off and clamped one at the screen edge (#130)."""
+    left, top, right, bottom = node.rect
+    if point is None:
+        return ((left + right) // 2, (top + bottom) // 2)
+    return (left + point[0], top + point[1])
+
+
+def _live_abort_note(result) -> str | None:
+    """What to tell a caller whose real click did not go through, or None
+    when it did go through and only its postcondition did not hold -- which
+    is not an abort, and was reported as one once (#130)."""
+    if result.ok or not result.declined:
+        return None
+    reasons = "; ".join(f"{route}: {why}" for route, why in result.declined.items())
+    return (f"the real click was stopped before it was sent -- {reasons}. Nothing "
+            "was forced onto the operator's desktop; retry when they are away from "
+            "the mouse and keyboard, or ask them to click.")
