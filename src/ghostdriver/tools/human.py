@@ -99,6 +99,7 @@ class HumanTools(_ToolboxCore):
         *,
         until: dict | str | None = None,
         until_change: bool = False,
+        settle_s: float = 0.0,
         timeout_s: float = 120.0,
         poll_s: float = 0.5,
         all_windows: bool = False,
@@ -137,6 +138,22 @@ class HumanTools(_ToolboxCore):
         will appear. `until_change` watches the target's surface shape (the
         same digest `surfaces` reports) and returns when it moves.
 
+        Both together, when you can: `until_change` with `until` ends the
+        wait only when the surface has moved *and* the named control is
+        there (or gone, with `absent`). A splash screen is a change; the
+        login window behind it is the one you meant (#123). `settle_s`
+        asks a changed surface to hold still that long before it counts,
+        which is what stops the first flicker of a long transition from
+        ending the wait.
+
+        Both together, when you can: `until_change` with `until` ends the
+        wait only when the surface has moved *and* the named control is
+        there (or gone, with `absent`). A splash screen is a change; the
+        login window behind it is the one you meant (#123). `settle_s`
+        asks a changed surface to hold still that long before it counts,
+        which is what stops the first flicker of a long transition from
+        ending the wait.
+
         Bounded, and reports a timeout as a timeout. A person may be away
         from the machine, and a tool that waited indefinitely would take the
         session with them.
@@ -171,14 +188,28 @@ class HumanTools(_ToolboxCore):
                 "this can watch for nothing, and a hand-off that watches for "
                 "nothing does nothing -- ask in chat instead.")
 
+        if settle_s and not until_change:
+            return _error(ErrorKind.NOT_ACTIONABLE,
+                          "settle_s goes with until_change: it is how long a changed "
+                          "surface must hold still before the change counts")
+        if settle_s < 0:
+            return _error(ErrorKind.NOT_ACTIONABLE, f"settle_s must be >= 0; got {settle_s!r}")
+
+        checks: list = []
+        parts: list[str] = []
+        where = None
+        absent = False
+        wanted = None
         if until_change:
             surfaces = self.surfaces  # type: ignore[attr-defined]
-            baseline = surfaces(session_id, all_windows=all_windows).get("shape_digest")
-            described = "the target's surface shape changed"
 
-            def satisfied() -> bool:
-                return surfaces(session_id, all_windows=all_windows).get("shape_digest") != baseline
-        else:
+            def digest():
+                return surfaces(session_id, all_windows=all_windows).get("shape_digest")
+
+            checks.append(_SettledChange(digest, settle_s))
+            parts.append("the target's surface shape changed"
+                         + (f" and held still for {settle_s:g}s" if settle_s else ""))
+        if until is not None:
             assert isinstance(until, dict)
             where = until.get("locator")
             if not where:
@@ -197,7 +228,7 @@ class HumanTools(_ToolboxCore):
             # closing is how you know someone signed in.
             absent = bool(until.get("absent", False))
 
-            def satisfied() -> bool:
+            def control() -> bool:
                 found = self._resolve(session, where, all_windows)
                 if absent:
                     return not found
@@ -207,6 +238,20 @@ class HumanTools(_ToolboxCore):
                     return True
                 return any((read_window_text(n.handle) or "") == wanted
                            for n in found)
+
+            checks.append(control)
+            parts.append(
+                f"{where} is gone" if absent
+                else f"{where} exists" if wanted is None
+                else f"{where} reads {wanted!r}"
+            )
+        described = " and ".join(parts)
+
+        def satisfied() -> bool:
+            # Every check is read each poll, the surface first: a settle
+            # clock only runs while it is being read.
+            results = [check() for check in checks]  # every one, no short-circuit
+            return all(results)
 
         started = time.monotonic()
         deadline = started + max(0.0, timeout_s)
@@ -236,12 +281,6 @@ class HumanTools(_ToolboxCore):
                 shown.close()
 
         waited_ms = int((time.monotonic() - started) * 1000)
-        if not until_change:
-            described = (
-                f"{where} is gone" if absent
-                else f"{where} exists" if wanted is None
-                else f"{where} reads {wanted!r}"
-            )
         if met:
             return {
                 "ok": True,
@@ -289,3 +328,32 @@ class HumanTools(_ToolboxCore):
                 ),
             },
         }
+
+
+class _SettledChange:
+    """The surface has moved from where it started, and has then held still
+    for `settle_s` (#123). With no settle, the first movement counts, as it
+    always did. A surface that moves and then returns to its starting shape
+    still moved -- a dialog that opened and closed is a change that
+    happened -- so "held still" is measured from the last movement, not
+    from the baseline.
+    """
+
+    def __init__(self, read, settle_s: float, now=time.monotonic) -> None:
+        self.read, self.settle_s, self.now = read, settle_s, now
+        self.baseline = read()
+        self.last = self.baseline
+        self.moved = False
+        self.still_since: float | None = None
+
+    def __call__(self) -> bool:
+        current = self.read()
+        if current != self.last:
+            self.last = current
+            self.moved = True
+            self.still_since = self.now()
+        if not self.moved:
+            return False
+        if not self.settle_s:
+            return True
+        return self.still_since is not None and self.now() - self.still_since >= self.settle_s

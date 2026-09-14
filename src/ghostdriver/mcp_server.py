@@ -947,12 +947,20 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "What proves it is done: {locator, text?, absent?}, or a bare "
             "locator string. `absent` waits for the element to be gone, "
             "which is how a sign-in dialog closing tells you someone "
-            "signed in. Use until_change instead when you cannot name it."
+            "signed in. Use until_change instead when you cannot name it, "
+            "or both together: then the surface must have moved AND this "
+            "must hold, so a splash screen on the way does not end the wait."
         ))] = None,
         until_change: Annotated[bool, Field(description=(
             "Wait for the target's surface shape to change, for the "
-            "exploratory case where you do not yet know what will appear."
+            "exploratory case where you do not yet know what will appear. "
+            "Returns on the first movement unless settle_s asks it to hold."
         ))] = False,
+        settle_s: Annotated[float, Field(description=(
+            "With until_change: how long the changed surface must hold "
+            "still before the change counts (default 0). 2 lets a "
+            "transition finish instead of returning on its first flicker."
+        ))] = 0.0,
         timeout_s: Annotated[float, Field(description=(
             "How long to wait before giving up and saying so."
         ))] = 120.0,
@@ -974,7 +982,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
                 # which is why the condition is the part that matters.
                 confirmed = False
         return box.await_human(session_ref, ask, until=until,
-                               until_change=until_change,
+                               until_change=until_change, settle_s=settle_s,
                                timeout_s=timeout_s, all_windows=all_windows,
                                confirmed=confirmed)
 
