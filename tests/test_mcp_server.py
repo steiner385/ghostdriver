@@ -230,6 +230,20 @@ def test_an_unknown_tool_is_rejected(server):
         call(server, "delete_everything")
 
 
+def test_an_unknown_argument_is_refused_by_name_not_dropped(server):
+    """`capture(scale=0.5)` used to "work" before `scale` existed, by
+    returning the full picture as if the request had been honored; the same
+    call inside a batch failed. An ignored parameter reads exactly like an
+    honored one (D#71, at the wire), so it is refused and named (#120)."""
+    with pytest.raises(Exception, match="no_such_argument"):
+        call(server, "describe", session_ref="s", no_such_argument=1)
+
+
+def test_every_tool_schema_forbids_additional_properties(server):
+    for name, tool in listed(server).items():
+        assert tool.input_schema.get("additionalProperties") is False, name
+
+
 @on_windows
 def test_a_full_session_works_end_to_end_through_the_protocol(
     server, win32_target

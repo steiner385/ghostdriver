@@ -32,6 +32,9 @@ PW_RENDERFULLCONTENT = 0x00000002
 SRCCOPY = 0x00CC0020
 BI_RGB = 0
 DIB_RGB_COLORS = 0
+#: StretchBlt mode that averages the source pixels it drops, so a
+#: downscaled capture keeps thin text legible instead of losing rows.
+HALFTONE = 4
 
 
 class BITMAPINFOHEADER(ctypes.Structure):
@@ -80,6 +83,16 @@ gdi32.BitBlt.argtypes = [
     wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.DWORD,
 ]
 gdi32.BitBlt.restype = wintypes.BOOL
+gdi32.StretchBlt.argtypes = [
+    wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    wintypes.DWORD,
+]
+gdi32.StretchBlt.restype = wintypes.BOOL
+gdi32.SetStretchBltMode.argtypes = [wintypes.HDC, ctypes.c_int]
+gdi32.SetStretchBltMode.restype = ctypes.c_int
+gdi32.SetBrushOrgEx.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+gdi32.SetBrushOrgEx.restype = wintypes.BOOL
 
 
 def _why() -> str:
@@ -142,16 +155,24 @@ def _png(width: int, height: int, rgb: bytes) -> bytes:
 
 
 def capture_window(
-    hwnd: int, *, region: tuple[int, int, int, int] | None = None
+    hwnd: int, *, region: tuple[int, int, int, int] | None = None,
+    scale: float = 1.0,
 ) -> tuple[bytes, int, int]:
-    rgb, out_w, out_h = render_pixels(hwnd, region=region)
+    rgb, out_w, out_h = render_pixels(hwnd, region=region, scale=scale)
     return _png(out_w, out_h, rgb), out_w, out_h
 
 
 def render_pixels(
-    hwnd: int, *, region: tuple[int, int, int, int] | None = None
+    hwnd: int, *, region: tuple[int, int, int, int] | None = None,
+    scale: float = 1.0,
 ) -> tuple[bytes, int, int]:
-    """PNG bytes for `hwnd`, plus its width and height.
+    """RGB bytes for `hwnd`, plus the image's width and height.
+
+    `scale` (0 < scale <= 1) returns the picture at that fraction of its
+    size, downscaled in GDI *before* the pixels are read (#120): the
+    per-pixel loop below then runs over scale-squared as many pixels, so a
+    half-scale capture is a quarter of the work, and the PNG a caller has
+    to hold in its context shrinks the same way.
 
     `region` is a (left, top, right, bottom) rectangle in *screen*
     coordinates, cropped to the window. It is expressed that way because
@@ -205,6 +226,7 @@ def render_pixels(
         )
 
     memory_dc = bitmap = previous = None
+    scaled_dc = scaled_bitmap = scaled_previous = None
     try:
         memory_dc = gdi32.CreateCompatibleDC(window_dc)
         bitmap = gdi32.CreateCompatibleBitmap(window_dc, width, height)
@@ -229,41 +251,35 @@ def render_pixels(
                     "device-context copy" + _why()
                 )
 
-        info = BITMAPINFO()
-        info.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-        info.bmiHeader.biWidth = width
-        # Negative height requests a top-down bitmap, so rows arrive in the
-        # order PNG wants and nothing has to be reversed afterwards.
-        info.bmiHeader.biHeight = -height
-        info.bmiHeader.biPlanes = 1
-        info.bmiHeader.biBitCount = 32
-        info.bmiHeader.biCompression = BI_RGB
-
-        buffer = ctypes.create_string_buffer(width * height * 4)
-        if not gdi32.GetDIBits(
-            memory_dc, bitmap, 0, height, buffer,
-            ctypes.byref(info), DIB_RGB_COLORS,
-        ):
-            raise CaptureError(
-                "could not read the captured bitmap's pixels" + _why()
-            )
-
-        pixels = buffer.raw
         c_left, c_top, c_right, c_bottom = crop
-        out_w, out_h = c_right - c_left, c_bottom - c_top
-        rgb = bytearray(out_w * out_h * 3)
-        at = 0
-        for y in range(c_top, c_bottom):
-            row = y * width * 4
-            for x in range(c_left, c_right):
-                # GetDIBits hands back BGRA; PNG truecolour wants RGB.
-                blue, green, red = pixels[row + x * 4: row + x * 4 + 3]
-                rgb[at] = red
-                rgb[at + 1] = green
-                rgb[at + 2] = blue
-                at += 3
-        return bytes(rgb), out_w, out_h
+        src_w, src_h = c_right - c_left, c_bottom - c_top
+        if scale < 1.0:
+            out_w, out_h = max(1, round(src_w * scale)), max(1, round(src_h * scale))
+            scaled_dc = gdi32.CreateCompatibleDC(window_dc)
+            scaled_bitmap = gdi32.CreateCompatibleBitmap(window_dc, out_w, out_h)
+            if not scaled_dc or not scaled_bitmap:
+                raise CaptureError(
+                    "could not allocate a bitmap for the scaled capture"
+                    f" ({out_w}x{out_h})" + _why()
+                )
+            scaled_previous = gdi32.SelectObject(scaled_dc, scaled_bitmap)
+            gdi32.SetStretchBltMode(scaled_dc, HALFTONE)
+            gdi32.SetBrushOrgEx(scaled_dc, 0, 0, None)
+            if not gdi32.StretchBlt(
+                scaled_dc, 0, 0, out_w, out_h,
+                memory_dc, c_left, c_top, src_w, src_h, SRCCOPY,
+            ):
+                raise CaptureError("could not downscale the capture" + _why())
+            return _read_rgb(scaled_dc, scaled_bitmap, out_w, out_h,
+                             (0, 0, out_w, out_h)), out_w, out_h
+        return _read_rgb(memory_dc, bitmap, width, height, crop), src_w, src_h
     finally:
+        if scaled_previous:
+            gdi32.SelectObject(scaled_dc, scaled_previous)
+        if scaled_bitmap:
+            gdi32.DeleteObject(scaled_bitmap)
+        if scaled_dc:
+            gdi32.DeleteDC(scaled_dc)
         if previous:
             gdi32.SelectObject(memory_dc, previous)
         if bitmap:
@@ -271,6 +287,42 @@ def render_pixels(
         if memory_dc:
             gdi32.DeleteDC(memory_dc)
         user32.ReleaseDC(wintypes.HWND(hwnd), window_dc)
+
+
+def _read_rgb(dc, bitmap, width: int, height: int,
+              crop: tuple[int, int, int, int]) -> bytes:
+    """The `crop` of a `width` x `height` bitmap selected into `dc`, as RGB."""
+    info = BITMAPINFO()
+    info.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+    info.bmiHeader.biWidth = width
+    # Negative height requests a top-down bitmap, so rows arrive in the
+    # order PNG wants and nothing has to be reversed afterwards.
+    info.bmiHeader.biHeight = -height
+    info.bmiHeader.biPlanes = 1
+    info.bmiHeader.biBitCount = 32
+    info.bmiHeader.biCompression = BI_RGB
+
+    buffer = ctypes.create_string_buffer(width * height * 4)
+    if not gdi32.GetDIBits(
+        dc, bitmap, 0, height, buffer, ctypes.byref(info), DIB_RGB_COLORS,
+    ):
+        raise CaptureError("could not read the captured bitmap's pixels" + _why())
+
+    pixels = buffer.raw
+    c_left, c_top, c_right, c_bottom = crop
+    out_w, out_h = c_right - c_left, c_bottom - c_top
+    rgb = bytearray(out_w * out_h * 3)
+    at = 0
+    for y in range(c_top, c_bottom):
+        row = y * width * 4
+        for x in range(c_left, c_right):
+            # GetDIBits hands back BGRA; PNG truecolour wants RGB.
+            blue, green, red = pixels[row + x * 4: row + x * 4 + 3]
+            rgb[at] = red
+            rgb[at + 1] = green
+            rgb[at + 2] = blue
+            at += 3
+    return bytes(rgb)
 
 
 def ink_fraction(hwnd: int, *, region: tuple[int, int, int, int] | None = None,

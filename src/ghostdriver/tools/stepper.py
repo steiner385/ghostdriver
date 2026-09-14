@@ -26,6 +26,11 @@ RUNNABLE_TOOLS = frozenset({
     "find", "read", "read_clipboard", "capture", "describe",
     "modals", "surfaces", "hit_targets", "wait_for", "wait_idle",
     "grid_seek",
+    # A fixed dwell between steps (#119): click, settle, capture used to be
+    # three round trips because pace was withheld. It changes nothing on the
+    # target and names the guess it is (D#76), so it rides in a batch or a
+    # macro like any read.
+    "pace",
 })
 
 #: Fields worth keeping from a step's result. The core reports verdicts, not
@@ -38,6 +43,10 @@ _STEP_FIELDS = (
     "expected", "match_count", "found", "value", "empty", "length", "idle",
     "polls", "row_count", "reached_end", "advanced", "saved_to", "took_foreground",
     "width", "height", "total", "blocked",
+    # What changed around the step, by name -- a window that vanished, the
+    # target unblocked. Dropped once, so a typed value that dismissed its
+    # dialog reported only "2 other change(s)" and nothing to act on (#117).
+    "disturbances", "live_aborted",
 )
 
 

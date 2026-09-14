@@ -5351,3 +5351,107 @@ every successful write reported as a failure. It now asks `confirms_value`,
 which is true where the display read is blind -- the fix that lets the live
 commit (D#111) verify itself on Studio at all. Evidence: issue #105; D72;
 D#34b; D#9; D#111.
+
+### D#117. A step line names what changed around it
+
+**The field report.** Typing into a memo inside a dialog dismissed the
+dialog, twice. The result said `2 other change(s) happened around this
+action -- see disturbances` and nothing else: neither the window that
+vanished nor the blocked-to-unblocked transition was named, so the caller
+could not tell "the dialog closed" from "a validation popup appeared and
+closed".
+
+**What was wrong.** A standalone actuation result does carry the list --
+each entry a kind (`window_disappeared`, `unblocked`, ...) and a caption,
+D28 -- but a `batch` or macro step line keeps only `_STEP_FIELDS`
+(`tools/stepper.py`), and `disturbances` was not among them. The count in
+the error message survived; the names did not.
+
+**Decision.** `disturbances` and set_value's `live_aborted` note are kept
+on every step line. A disturbance is information for the caller (D28); a
+line that says there were two and withholds which is not that.
+
+**Evidence.** `tests/test_stepper.py`: a step line carries the list by
+kind and caption, and no empty key when there is nothing. `env: any`.
+
+### D#118. `absent: true` is a postcondition, and it must have something to be absent
+
+**Context.** Waiting for a dialog to close after a click had to be written
+as `expect: {changed: true}`, a surface-shape guess. `await_human`'s
+`until` already takes `absent`, and `wait_for` has `condition: absent`, so
+the vocabulary existed everywhere except on `expect`.
+
+**Decision.** `expect: {locator, absent: true}` holds once the locator no
+longer resolves in the expect's window scope. It takes a locator and
+nothing about it: a control that is not there has no text or state to
+match, so `text`, `selected` and `changed` alongside it are refused by
+name (D#71).
+
+**The guard.** The locator must resolve *before* the action. An absence is
+trivially true of something that was never there, and a postcondition
+that cannot fail is the false green D#71 exists to refuse: `verified:
+effect` on a dialog that never opened. So a locator that does not resolve
+beforehand is refused with a message saying what to name instead, rather
+than quietly satisfied. The check is the resolver and nothing else, which
+is also why it is proven without a backend.
+
+**Evidence.** `tests/test_expect_absent.py`: the parse rules; the condition
+turning true when the resolver stops finding the thing, in the expect's
+scope; the refusal when it was never there; a bad locator an error, not a
+condition. `env: any`.
+
+### D#119. `pace` rides in a batch
+
+**Context.** Click, settle, capture was three round trips, because `pace`
+was withheld from the batch allowlist. D#75 withholds the lifecycle and
+consent tools and the two that interrupt a person; `pace` is none of those.
+It changes nothing on the target and names the guess it is (D#76).
+
+**Decision.** `pace` joins `RUNNABLE_TOOLS`; a batch and a macro both gain
+it. A per-step `settle_ms` was suggested and would be sugar over the same
+thing; the allowlist is the smaller change and keeps the dwell visible as
+its own step, with its own line in the result.
+
+**Evidence.** `tests/test_stepper.py::test_the_allowlist_is_the_documented_set`
+now asserts `pace` is in and the D#75 set is still out. `env: any`.
+
+### D#120. An unknown argument is refused by name, and `capture` takes a `scale`
+
+**The field report.** `capture` inside a batch rejected `scale`; standalone
+it "accepted" it. Neither was true: `scale` was not a parameter at either
+layer.
+
+**What was measured.** The MCP library's argument model ignores an unknown
+key (pydantic's default), so the standalone call returned the full-size
+picture as if the request had been honored. Inside a batch the same call
+reaches the Python signature and fails. An ignored parameter reads exactly
+like an honored one -- the D#71 defect, at the wire.
+
+**Decision, in two parts.**
+
+- **Every tool refuses an unknown argument by name.** `build_server`
+  switches each tool's argument model to `extra="forbid"` and re-derives
+  its published schema, so `additionalProperties: false` is visible to a
+  client too. The library offers no switch, so this reaches into its tool
+  manager, guarded to degrade to the old behaviour rather than fail to
+  start if that is renamed.
+- **`capture` takes `scale` (above 0, at most 1).** Downscaled in GDI with
+  `StretchBlt` in HALFTONE mode *before* the pixels are read: the per-pixel
+  loop then runs over scale-squared as many pixels, so a half-scale capture
+  is a quarter of the work and a quarter of the PNG a caller holds in
+  context. The result says `scale` and that a pixel at (x, y) is at (x /
+  scale, y / scale) in the full-size rects everything else reports. The
+  Linux backend accepts the argument and refuses a value below 1 plainly
+  (`env: linux` work), rather than returning the wrong size.
+
+**Where `capture` lives now.** Adding it pushed `tools/discovery.py` past
+the 400-line guard; a picture is a screen matter, so `capture` moved to
+`tools/screen.py` beside `foreground`. The guard's fix is to move code, not
+to loosen it (D60).
+
+**Evidence.** `tests/test_mcp_server.py`: an unknown argument is refused
+naming it; every schema forbids additional properties. `tests/test_capture_scale.py`:
+out-of-range and non-numeric scales refused by name before any backend is
+touched (`env: any`). `tests/test_windows_capture.py`: a half-scale capture
+is the picture at half each dimension, agreed by the PNG's own header, and
+smaller; scale 1 is byte-identical to no scale (`env: windows`).

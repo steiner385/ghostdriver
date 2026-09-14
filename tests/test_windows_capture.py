@@ -113,3 +113,33 @@ def test_a_dead_handle_is_refused(win32_target):
 
     with pytest.raises(CaptureError, match="not a window"):
         capture_window(0xDEADBEEF)
+
+
+def _png_size(png: bytes) -> tuple[int, int]:
+    # IHDR is the first chunk: width and height are the two big-endian
+    # 32-bit ints after the 8-byte signature, 4-byte length and 4-byte tag.
+    return int.from_bytes(png[16:20], "big"), int.from_bytes(png[20:24], "big")
+
+
+def test_a_scaled_capture_is_the_picture_at_that_fraction(win32_target):
+    """scale=0.5 halves each dimension in GDI before the pixels are read
+    (#120); the PNG's own header agrees with the reported size."""
+    from ghostdriver.backends.windows.capture import capture_window
+    from ghostdriver.backends.windows.enumerate import top_level_windows
+
+    hwnd = top_level_windows(win32_target)[0]
+    full, width, height = capture_window(hwnd)
+    half, w2, h2 = capture_window(hwnd, scale=0.5)
+
+    assert (w2, h2) == (max(1, round(width * 0.5)), max(1, round(height * 0.5)))
+    assert _png_size(half) == (w2, h2)
+    assert _png_size(full) == (width, height)
+    assert len(half) < len(full)
+
+
+def test_scale_one_is_the_unscaled_capture(win32_target):
+    from ghostdriver.backends.windows.capture import capture_window
+    from ghostdriver.backends.windows.enumerate import top_level_windows
+
+    hwnd = top_level_windows(win32_target)[0]
+    assert capture_window(hwnd, scale=1.0) == capture_window(hwnd)

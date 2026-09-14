@@ -9,7 +9,7 @@ from .core import _ToolboxCore
 #: because the result then reads `delivery_only` exactly as if the caller
 #: had never asked (D#71).
 EXPECT_KEYS = frozenset({"locator", "text", "selected", "changed", "timeout_s",
-                         "all_windows"})
+                         "all_windows", "absent"})
 
 
 def parse_expect(expect: dict | str | None) -> dict | None:
@@ -44,8 +44,18 @@ def parse_expect(expect: dict | str | None) -> dict | None:
     if not expect.get("changed") and not expect.get("locator"):
         raise ValueError(
             "needs `locator` (a control that will be present, with optional "
-            "`text` or `selected`) or `changed: true` (the surface itself "
-            f"moves); got {sorted(expect)}")
+            "`text` or `selected`), or `changed: true` (the surface itself "
+            f"moves), or `locator` with `absent: true` (it goes away); got "
+            f"{sorted(expect)}")
+    if expect.get("absent"):
+        # "It is gone" is its own postcondition (#118): a dialog closing is
+        # how a save is known to have taken. It names a locator and nothing
+        # about it, since a control that is not there has no text or state.
+        clashing = sorted(k for k in ("text", "selected", "changed") if k in expect)
+        if not expect.get("locator") or clashing:
+            raise ValueError(
+                "`absent: true` takes a `locator` and nothing about it; "
+                f"got {sorted(expect)}")
     return expect
 
 
@@ -88,6 +98,8 @@ class _ExpectCore(_ToolboxCore):
         expect = parse_expect(expect)  # raises ValueError, caught by the caller
         if expect is None:
             return None, None
+        if expect.get("absent"):
+            return self._absence(session, expect)
 
         from ..actuate import Condition
         from ..backends import current
@@ -184,3 +196,32 @@ class _ExpectCore(_ToolboxCore):
         if wanted is not None:
             described = f"{where} reads {wanted!r}"
         return Condition(holds, described), described
+
+    def _absence(self, session, expect: dict):
+        """The postcondition "this is gone" (#118): holds once the locator no
+        longer resolves in the expect's window scope.
+
+        Checked to be *present first*. An absence is trivially true of a
+        thing that was never there, and a postcondition that cannot fail is
+        the false green D#71 refuses: it would read `verified: effect` on a
+        dialog that never opened. So a locator that does not resolve before
+        the action is refused by name, not quietly satisfied. Needs no
+        backend of its own: the resolver is the whole of it.
+        """
+        from ..actuate import Condition
+
+        where = expect["locator"]
+        Locator.parse(where)  # raises ValueError, caught by the caller
+        all_windows = bool(expect.get("all_windows", False))
+        if not self._resolve(session, where, all_windows):
+            raise ValueError(
+                f"absent: {where} does not resolve before the action, so its "
+                "absence afterwards would prove nothing. Name something that is "
+                "there now and should go away (add all_windows: true if it is "
+                "a separate top-level window)")
+
+        def gone() -> bool:
+            return not self._resolve(session, where, all_windows)
+
+        described = f"{where} is gone"
+        return Condition(gone, described), described
