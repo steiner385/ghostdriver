@@ -77,6 +77,21 @@ def session_for(pid):
                                     tier=Tier.INTERACTIVE).session_id
 
 
+def as_foreground_after_the_action(monkeypatch, *, before: int, after: int) -> None:
+    """The foreground is `before` when the expect is checked ahead of the
+    action (#128 refuses an expect that already holds) and `after` from
+    then on -- the dialog opening *because of* the click."""
+    from ghostdriver.backends.windows import winapi
+
+    reads = {"n": 0}
+
+    def foreground():
+        reads["n"] += 1
+        return before if reads["n"] == 1 else after
+
+    monkeypatch.setattr(winapi, "foreground_window", foreground)
+
+
 def as_foreground(monkeypatch, hwnd: int) -> None:
     """Make the backend read `hwnd` as the foreground window. The modal
     handle exists from startup though the window is hidden, so its class and
@@ -92,7 +107,7 @@ def test_a_target_dialog_that_is_foreground_verifies_the_expect(app, monkeypatch
     resolves against the main window only) never finds it -- yet it is the
     target's own window and it is foreground, so the click is verified."""
     box, session = session_for(app["pid"])
-    as_foreground(monkeypatch, app["modal"])
+    as_foreground_after_the_action(monkeypatch, before=app["main"], after=app["modal"])
 
     result = box.click(session, GRID, at={"x": 40, "y": 25}, expect=MODAL)
 
