@@ -94,13 +94,6 @@ class ActuationTools(_ActingCore):
             # nothing else (#122): the pattern rung is not tried, so it
             # cannot cost its timeout or deliver a second click.
             attempts = [a for a in attempts if a.tier == Tier.WINDOW_MESSAGE]
-        pinned = prepared.session.profile.pins_to_posted(
-            getattr(prepared.node, "class_name", None))
-        if pinned is not None:
-            # The profile says this class answers the posted click and
-            # nothing else (#122): the pattern rung is not tried, so it
-            # cannot cost its timeout or deliver a second click.
-            attempts = [a for a in attempts if a.tier == Tier.WINDOW_MESSAGE]
         if require_active:
             before = self._focus_report(prepared)
             if before.get("target_window_active") is False:
