@@ -5633,3 +5633,68 @@ resolver stood in for; `index=0` keeps the D#60 path out of it).
 `tests/test_expect_foreground_corroboration.py`: the D#60 test now makes
 the dialog foreground *after* the click, which is the case D#60 described.
 Issue #128; D#118; D#71; D#60.
+
+### D#130. The real click: its own frame, its own reasons, and the cheaper route first
+
+**The field report.** Round-3 verification on the dev-box VendorApp client: the
+real-input rung (D#124) fired in none of five attempts from the verifier's
+session and once from the dev session. The five attempts were the
+evidence: a correct D#111 refusal; a correct abort on the operator's own
+mouse; a decline because typing the go-ahead in chat had moved the
+foreground; a 17 s `live_aborted` with no reason; and a 46 ms "pointer
+moved while acting" with an empty disturbance list.
+
+**What was measured.**
+
+- *The frame.* The point handed to `SetCursorPos` had been converted to
+  physical pixels. This server process is not DPI-aware, so `SetCursorPos`
+  and `GetCursorPos` are in its virtualized, logical frame -- the frame
+  every rect it reports is in. At 125% every real click landed 1.25x off;
+  one near the right edge was clamped by Windows, the read-back differed
+  from the placed point, and the guard blamed the operator. The dev
+  session's click succeeded only because the bar is a tall gutter.
+- *The abort note.* `live_aborted` was set whenever the click was not
+  `ok`, including a delivered click whose postcondition simply did not
+  hold. A 17 s wait with no reason is not an abort.
+- *The go-ahead.* The operator cannot type "hands off" without the chat
+  window taking the foreground, which invalidated the live binding at
+  click time.
+
+**Decision.**
+
+- **The click point stays in the frame the process sees.** No
+  conversion. The placement is read back; a read-back farther than two
+  pixels from the point is reported as "could not be placed" with both
+  positions, never as the operator moving.
+- **Every stop names its reason, and `live_aborted` means an abort.** The
+  note is set only when a rung declined, and it repeats the declined
+  reasons; a delivered click whose postcondition did not hold is a
+  postcondition failure, as for any click.
+- **The consented window is brought back, not refused.** For the real
+  button press, a live window that lost the foreground is raised (it is
+  the window the operator named) and re-checked; if it cannot be raised,
+  that is the reason given.
+- **Two routes under tier 4, cheapest first.** `cursor_posted` places the
+  pointer and posts the ordinary message pair to the control's own hwnd:
+  enough for a `GetCursorPos` hit-test, no button event through the input
+  queue, no foreground needed. `real_input` presses a real button and
+  runs only when the first did not verify. Both are tier 4 -- both move
+  the operator's pointer (D9) -- and both need the live grant.
+- **Said as the exception it is.** The refusal and the tool text say
+  plainly that `real_input` leaves the posted-message contract for this one
+  click and that the operator must be away from the mouse and keyboard. A
+  profile may confine it: `real_input_only_for` lists the classes a real
+  click may be asked for, and any other class is refused by name. On the
+  VendorApp client that is two controls.
+
+**Evidence.** `tests/test_windows_live_click.py`: the input route places,
+presses and puts back; its own placement is not a pointer move; a
+clamped placement is named; a window that lost the foreground is raised,
+and one that cannot be is refused; a pointer move after placement aborts
+before the press; the posted route needs no foreground; no grant, wrong
+window, unknown button or route send nothing (`env: windows`, samplers
+injected). `tests/test_real_input_gate.py`: a postcondition miss is not an
+abort, a declined rung is, the click point is unconverted (`env: any`).
+`tests/test_profile_posted_click_only.py` and `tests/test_actuation_tools.py`:
+the profile confinement, refused before any input. Issue #130; D#124;
+D#111; D9.

@@ -37,3 +37,29 @@ def test_anything_but_a_list_of_class_patterns_is_an_error_not_a_default(tmp_pat
     path.write_text(json.dumps({"posted_click_only": bad}))
     with pytest.raises(GhostdriverError, match="posted_click_only"):
         Profile.load(path)
+
+
+# --- real_input_only_for (#130) --------------------------------------------------
+
+def test_real_input_only_for_confines_the_rung_to_the_listed_classes(tmp_path):
+    path = tmp_path / "p.json"
+    path.write_text(json.dumps({"real_input_only_for": ["THtLeftPanel", "TSfHypertext*"]}))
+
+    profile = Profile.load(path)
+
+    assert profile.allows_real_input("THtLeftPanel")
+    assert profile.allows_real_input("TSfHypertextEditBox")
+    assert not profile.allows_real_input("TsfCommandButton")
+    assert not profile.allows_real_input(None)
+
+
+def test_no_real_input_only_for_allows_any_class():
+    assert Profile().allows_real_input("Anything")
+
+
+@pytest.mark.parametrize("bad", ["THtLeftPanel", [1], [""]])
+def test_a_bad_real_input_only_for_is_an_error_not_a_default(tmp_path, bad):
+    path = tmp_path / "p.json"
+    path.write_text(json.dumps({"real_input_only_for": bad}))
+    with pytest.raises(GhostdriverError, match="real_input_only_for"):
+        Profile.load(path)

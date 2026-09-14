@@ -33,7 +33,7 @@ def click(hwnd: int, *, button: str = "left", modifiers=(), at=None,
     hit-tests the real cursor, and it is never offered unless asked for.
     """
     if real_input is not None:
-        return [_real_click(hwnd, real_input, live_window, button, count)]
+        return _real_click(hwnd, real_input, live_window, button, count)
     posted = Attempt(Tier.WINDOW_MESSAGE,
                      lambda: win_input.click(hwnd, button=button, modifiers=modifiers,
                                              at=at, count=count))
@@ -47,13 +47,21 @@ def click(hwnd: int, *, button: str = "left", modifiers=(), at=None,
 
 
 def _real_click(hwnd: int, point: tuple[int, int], live_window: int,
-                button: str, count: int) -> Attempt:
+                button: str, count: int) -> list[Attempt]:
+    """Tier 4, two routes, cheapest first (#130): the pointer placed and the
+    ordinary message pair posted -- what a `GetCursorPos` hit-test needs,
+    with no button event and no foreground -- and then a real button press
+    through the input queue when that did not verify."""
     from . import live
 
-    return Attempt(Tier.SYNTHETIC_INPUT,
-                   lambda: live.click_real(hwnd, point, live_window=live_window,
-                                           button=button, count=count),
-                   name="real_input")
+    def route(via: str) -> Attempt:
+        return Attempt(Tier.SYNTHETIC_INPUT,
+                       lambda: live.click_real(hwnd, point, live_window=live_window,
+                                               button=button, count=count, via=via),
+                       rank=0 if via == "posted" else 1,
+                       name="cursor_posted" if via == "posted" else "real_input")
+
+    return [route("posted"), route("input")]
 
 
 def click_element(element: AccessibleElement, *, button: str = "left",
@@ -78,7 +86,7 @@ def click_element(element: AccessibleElement, *, button: str = "left",
     real input queue -- where Invoke or Select is the surface it supports.
     """
     if real_input is not None:
-        return [_real_click(element.host_handle, real_input, live_window, button, count)]
+        return _real_click(element.host_handle, real_input, live_window, button, count)
     posted = Attempt(Tier.WINDOW_MESSAGE,
                      lambda: elements.click_posted(element, button=button,
                                                    modifiers=modifiers, at=at,

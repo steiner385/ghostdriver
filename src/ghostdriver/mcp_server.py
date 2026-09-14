@@ -840,14 +840,19 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "1 for a click, 2 for a double-click (how most grids open a row)."
         ))] = 1,
         real_input: Annotated[bool, Field(description=(
-            "Send a person's click instead of a posted one: the pointer is "
-            "placed on the control and a real button pressed. The only way "
-            "into a control that hit-tests the cursor and ignores every "
-            "posted click (delivered_to right, no effect, twice). Needs a "
-            "session attached with live=true while the target's window was "
-            "the foreground, and the control must be in that window; aborts "
-            "if the foreground or pointer moves. The pointer is put back "
-            "afterwards. Never automatic."
+            "Leaves the posted-message contract for this one click: the "
+            "operator's pointer is placed on the control and, if a posted "
+            "pair with the pointer there does not verify, a real button is "
+            "pressed with their window in front. Only for a control that "
+            "hit-tests the cursor and ignores every posted click "
+            "(delivered_to right, no effect, twice); the operator must be "
+            "away from the mouse and keyboard while it runs. Needs a session "
+            "attached with live=true while the target's window was the "
+            "foreground; the control must be in that window; the window is "
+            "brought back to the front if the go-ahead moved it; any pointer "
+            "move aborts and the reason is named. The pointer is put back "
+            "afterwards. Never automatic; a profile can confine it to named "
+            "classes."
         ))] = False,
     ) -> dict[str, Any]:
         return box.click(session_ref, locator, all_windows=all_windows,

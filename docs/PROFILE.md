@@ -114,6 +114,22 @@ result says so (`route_pinned`). A declared route beats a learned one
 (D35): list a class after seeing `tiers_attempted: [1, 3]` and a slow
 click, not before.
 
+## `real_input_only_for` (D#130)
+
+Window classes a real click (`click real_input=true`, D#124) may be asked
+for:
+
+```json
+"real_input_only_for": ["THtLeftPanel"]
+```
+
+`fnmatch` patterns against the control's window class; absent or empty
+means any class. `real_input` is the one deliberate exception to the
+posted-message contract -- it moves the operator's pointer and needs them
+away from the desk -- and on a target where only one or two controls need
+it, listing them keeps the rung from being reached for anywhere else. A
+real click on a class not listed is refused by name.
+
 ## `safe_controls`
 
 What `probe_phase2` may actuate to learn how the target's controls
