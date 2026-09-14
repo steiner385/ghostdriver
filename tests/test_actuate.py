@@ -339,3 +339,19 @@ def test_a_caller_can_widen_the_verify_window():
                                "the slow dialog exists"),
     )
     assert not missed.ok, "the 2s default really would have failed it"
+
+
+# --- a rung that raised says why (#124) -------------------------------------
+
+def test_a_declining_rung_s_reason_is_kept_and_named():
+    """A live guard's abort used to read as "no tier could act"; the reason
+    now rides in the result, by route, and in the message."""
+    def refuse():
+        raise RuntimeError("the pointer moved while acting")
+
+    result = actuator(tiers=(Tier.SYNTHETIC_INPUT,)).perform(
+        [Attempt(Tier.SYNTHETIC_INPUT, refuse, name="real_input")])
+
+    assert not result.ok
+    assert result.declined == {"real_input": "the pointer moved while acting"}
+    assert "real_input: the pointer moved" in result.error["message"]

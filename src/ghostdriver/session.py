@@ -213,8 +213,9 @@ class Session:
         if self.live_window:
             described["live_actuation"] = (
                 f"granted for window {self.live_window:#x}: a value this "
-                "session commits may take the real keyboard for an instant, "
-                "aborting if the operator's foreground or pointer moves (D#111)"
+                "session commits, or a click asked for with real_input, may "
+                "take the real keyboard or pointer for an instant, aborting if "
+                "the operator's foreground or pointer moves (D#111, #124)"
             )
         return described
 

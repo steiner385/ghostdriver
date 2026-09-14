@@ -25,6 +25,7 @@ from . import modality
 
 
 def click(handle: int, *, button: str = "left", modifiers=(), at=None,
+          live_window: int = 0, real_input: tuple[int, int] | None = None,
           count: int = 1) -> list[Attempt]:
     """Actuate a control through its Action interface.
 
@@ -167,6 +168,7 @@ def set_text_element(element: AccessibleElement, text: str, *,
 
 
 def click_element(element: AccessibleElement, *, button: str = "left",
+                  live_window: int = 0, real_input: tuple[int, int] | None = None,
                   modifiers=(), at=None, count: int = 1) -> list[Attempt]:
     """The element form of `click`, and the same refusal for the variants."""
     return click(element.handle, button=button, modifiers=modifiers,

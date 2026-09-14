@@ -189,11 +189,16 @@ class Actuator:
             )
 
         attempted: list[int] = []
+        declined: dict[str, str] = {}
         for attempt in sorted(usable, key=lambda a: (a.rank, a.tier)):
             attempted.append(int(attempt.tier))
             try:
                 delivered = attempt.run()
-            except Exception:
+            except Exception as exc:
+                # Kept by route: a rung that raised had a reason, and a
+                # live guard's abort is the one the operator most needs
+                # to read (#124).
+                declined[attempt.name or f"tier {int(attempt.tier)}"] = str(exc)
                 delivered = False
             if not delivered:
                 continue
@@ -241,6 +246,7 @@ class Actuator:
             postcondition_verified=False if failed_after else None,
             elapsed_ms=self._elapsed(started),
             disturbances=changes,
+            declined=declined,
             error={
                 "kind": (
                     ErrorKind.POSTCONDITION_FAILED.value if failed_after
@@ -253,7 +259,8 @@ class Actuator:
                     )
                     if failed_after else
                     f"no tier could act on this element (tried {attempted})"
-                ),
+                ) + ("; declined: " + "; ".join(f"{k}: {v}" for k, v in declined.items())
+                     if declined else ""),
             },
         )
 

@@ -5525,3 +5525,73 @@ right wait names the login window.
 clock; a flicker back still moved), and through the tool with the digest
 and the resolver stood in for: first movement, settle held, both halves
 needed, `absent` alongside, and the refusals. `env: any`.
+
+### D#124. A real click, on request, under the live grant
+
+**The field report.** The Toggle Block Edit bar (`THtLeftPanel`) ignores
+posted clicks: single and double, `delivered_to` names the right window,
+nothing happens -- reproduced twice, and the caret placement on an empty
+block row is the same. It was the only thing in the VendorApp client workflow
+still forcing a fall-back to a tool that takes the desktop.
+
+**What was measured.** Every click this backend sends is a posted message
+triple (D#69); nothing in the tree calls `SendInput`. A control that
+hit-tests the *real* cursor -- `GetCursorPos` rather than the message's
+coordinates -- never sees a posted click, however correctly delivered. The
+only click it answers is a person's, and that is what tier 4 is: the
+pointer moved, a real button pressed, the window frontmost. D9 excludes it
+by default because that is the exact interference this project exists to
+avoid.
+
+**Decision.** `click(real_input=true)` sends a person's click, and only
+under the consent D#111 already defined:
+
+- **Once per session, not per click.** The operator's approval is the live
+  grant: `attach(live=true)` is allowed only when a window of the target is
+  the foreground right now -- the one they are watching -- and records it.
+  The wire now exposes `live` (it was implemented for Linux and never
+  registered on the MCP layer). `real_input` on a session without the grant
+  is refused by policy, before anything is resolved, with the message
+  saying how to get one. The per-call flag is the agent choosing the
+  route; it is never a rung the ladder escalates to on its own.
+- **Only into the consented window.** The control's top-level window must
+  be the live window, or the action aborts; a live grant on the main window
+  does not license a real click on a dialog that appeared since.
+- **The guard, twice, and the watch around it.** The foreground and the
+  pointer are re-checked before the pointer is placed and again before the
+  button goes down; any change aborts and is reported, never smoothed into
+  a posted click. An `InterferenceWatch` is armed around the whole action
+  so a move between checks is still seen (D28). The pointer is put back
+  afterwards: the click was the tool's, the pointer is the person's.
+- **Plain clicks only.** No modifiers on the real keyboard; refused by
+  name.
+
+**A rung that raised now says why.** A guard's abort used to read as "no
+tier could act on this element" -- the ladder swallowed the exception. An
+`ActionResult` carries `declined`, by route, and the error message repeats
+it; the click result adds `live_aborted` so a status-skimmer sees that
+nothing was forced.
+
+**Also fixed on the way.** After an elicited consent, the re-attach
+dropped `isolation` and `clipboard`; it now attaches with exactly what was
+asked.
+
+**What it deliberately is not.** Not a default, not a ladder rung, not
+available without the operator arranging the foreground and saying so, and
+not silent: the session summary names the grant and every abort names its
+reason. `input.py` keeps its promise that nothing there moves the cursor or
+touches the foreground; everything that does is in `backends/windows/live.py`,
+beside its Linux counterpart.
+
+**Not verified live.** The guard is proven with injected samplers; the
+fixture cannot be the foreground in a test run (the focus guard forbids
+it, by design). The first real click on `THtLeftPanel` is the operator's
+shakedown, and its result carries `tier_used: 4, route: real_input`.
+
+**Evidence.** `tests/test_windows_live_click.py`: placed, pressed, put back;
+a foreground change aborts before the pointer is touched; a pointer move
+after placement aborts before the press; no live window, a control outside
+it, and an unknown button are refused with nothing sent (`env: windows`).
+`tests/test_real_input_gate.py`: refused by policy without the grant,
+refused with modifiers (`env: any`). `tests/test_actuate.py`: a declining
+rung's reason is kept and named. Issue #124; D#111; D9; D28; D#69.
