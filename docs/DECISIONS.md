@@ -5595,3 +5595,41 @@ it, and an unknown button are refused with nothing sent (`env: windows`).
 `tests/test_real_input_gate.py`: refused by policy without the grant,
 refused with modifiers (`env: any`). `tests/test_actuate.py`: a declining
 rung's reason is kept and named. Issue #124; D#111; D9; D28; D#69.
+
+### D#128. A presence expect that already holds before the action is refused
+
+**The field report.** Verifying the 2026-09-14 build on the dev-box VendorApp
+client: a click on the Toggle Block Edit bar reported `verified: effect`
+against `expect: {locator: "class=TsfDataPagesNoteBook"}`. The bottom tab
+strip is one of those. It was there before the click, and the click had
+done nothing.
+
+**What was wrong.** A presence postcondition was checked only after the
+action. One that already held before it cannot fail, so it proves nothing
+about the action -- the false green D#71 exists to refuse. D#118 had just
+made `absent` refuse a locator that does *not* resolve before the action;
+presence had the mirror-image hole.
+
+**Decision.** The presence condition is evaluated once before the action,
+and if it already holds -- the locator resolves with its `text` or
+`selected` constraint satisfied, or the D#60 foreground corroboration is
+already true -- the expect is refused by name, with the message saying what
+to name instead: a control that will appear, a `text` or `selected` it
+will change to, `absent: true` for one that will go, or `changed: true`
+for the surface moving. A refused expect is an error result before
+anything is sent, so nothing is delivered on the strength of a
+postcondition that could not have failed.
+
+**Cost.** One extra resolve per actuation that carries a presence expect,
+the same as `absent` pays. A replay whose target is already in the state
+the expect names now fails that step rather than reporting it verified;
+that is the honest reading, and `changed`/`absent` are there for a step
+that means "make sure".
+
+**Evidence.** `tests/test_expect_presence_guard.py`: already-resolving
+refused; the refusal names the alternatives; a locator that does not yet
+resolve is the postcondition and turns true when it does (`env: any`, the
+resolver stood in for; `index=0` keeps the D#60 path out of it).
+`tests/test_expect_foreground_corroboration.py`: the D#60 test now makes
+the dialog foreground *after* the click, which is the case D#60 described.
+Issue #128; D#118; D#71; D#60.

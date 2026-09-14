@@ -103,7 +103,6 @@ class _ExpectCore(_ToolboxCore):
 
         from ..actuate import Condition
         from ..backends import current
-        read_window_text = current().read_window_text
 
         if expect.get("changed"):
             # No control to name: the effect is the *surface* moving -- a
@@ -165,7 +164,7 @@ class _ExpectCore(_ToolboxCore):
             # a window's is what it answers to a text query.
             if isinstance(found, AccessibleElement):
                 return found.value if found.value is not None else found.name
-            return read_window_text(found.handle) or ""
+            return current().read_window_text(found.handle) or ""
 
         def holds() -> bool:
             # The cheap corroboration first: when it applies it settles the
@@ -195,6 +194,17 @@ class _ExpectCore(_ToolboxCore):
             described = f"{where} is {'selected' if selected else 'not selected'}"
         if wanted is not None:
             described = f"{where} reads {wanted!r}"
+        if holds():
+            # Already so, before the action: a postcondition that cannot fail
+            # proves nothing about the action, and a click that did nothing
+            # read `verified: effect` against a tab strip that was always
+            # there (#128). The mirror of the absent guard (D#118).
+            raise ValueError(
+                f"{described} already, before the action, so it cannot show that "
+                "the action worked. Name what the action will make true -- a "
+                "control that will appear, `text` or `selected` it will change "
+                "to, `absent: true` for one that will go, or `changed: true` for "
+                "the surface moving")
         return Condition(holds, described), described
 
     def _absence(self, session, expect: dict):
