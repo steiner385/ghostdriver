@@ -270,9 +270,19 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "window stays minimized after release (un-minimizing it would "
             "bring it to the front); the operator clicks the taskbar."
         ))] = "none",
+        live: Annotated[bool, Field(description=(
+            "Operator-present live actuation (D#111): allowed only when a "
+            "window of the target is the foreground right now -- the one the "
+            "person is watching -- and recorded for the session. It lets "
+            "set_value commit with a real keystroke where a toolkit needs one, "
+            "and click send a real pointer click (real_input=true) into a "
+            "control that ignores posted clicks. Every such action aborts if "
+            "the foreground or pointer moves. Off by default; needs tier "
+            "interactive or full."
+        ))] = False,
     ) -> dict[str, Any]:
         result = box.attach(pid, tier=tier, profile_path=profile_path,
-                            isolation=isolation, clipboard=clipboard)
+                            isolation=isolation, clipboard=clipboard, live=live)
         if not result.get("needs_consent"):
             return result
 
@@ -318,7 +328,10 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             )
             result["needs_consent"] = False
             return result
-        return box.attach(pid, tier=tier, profile_path=profile_path)
+        # The same attach the caller asked for, not a bare one: isolation,
+        # clipboard and live used to be dropped on the way back from consent.
+        return box.attach(pid, tier=tier, profile_path=profile_path,
+                          isolation=isolation, clipboard=clipboard, live=live)
 
     @server.tool(annotations=READS, description=(
         "Close a session and forget it. Safe to call twice; a session that "
@@ -826,10 +839,21 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         count: Annotated[int, Field(description=(
             "1 for a click, 2 for a double-click (how most grids open a row)."
         ))] = 1,
+        real_input: Annotated[bool, Field(description=(
+            "Send a person's click instead of a posted one: the pointer is "
+            "placed on the control and a real button pressed. The only way "
+            "into a control that hit-tests the cursor and ignores every "
+            "posted click (delivered_to right, no effect, twice). Needs a "
+            "session attached with live=true while the target's window was "
+            "the foreground, and the control must be in that window; aborts "
+            "if the foreground or pointer moves. The pointer is put back "
+            "afterwards. Never automatic."
+        ))] = False,
     ) -> dict[str, Any]:
         return box.click(session_ref, locator, all_windows=all_windows,
                          expect=expect, button=button, modifiers=modifiers,
-                         at=at, count=count, frame=frame, require_active=require_active)
+                         at=at, count=count, frame=frame, require_active=require_active,
+                         real_input=real_input)
 
     @server.tool(annotations=ACTUATES, description=(
         "Replace a field's contents by typing them. Always reads the field "

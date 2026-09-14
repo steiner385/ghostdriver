@@ -17,7 +17,8 @@ from . import input as win_input
 
 
 def click(hwnd: int, *, button: str = "left", modifiers=(), at=None,
-          count: int = 1) -> list[Attempt]:
+          count: int = 1, live_window: int = 0,
+          real_input: tuple[int, int] | None = None) -> list[Attempt]:
     """Actuate a control.
 
     Tier 1 first because a target that publishes an Invoke pattern should be
@@ -25,7 +26,14 @@ def click(hwnd: int, *, button: str = "left", modifiers=(), at=None,
     control moving or resizing. Tier 3 is where a Profile L1 target is
     actually reached. A pattern has no notion of a right button or a held
     modifier, so anything but a plain left click is tier 3 alone.
+
+    `real_input`, a physical screen point, replaces the ladder with the one
+    tier-4 rung: a real click there, under the live grant `live_window`
+    records (#124, D#111). It is the only route into a control that
+    hit-tests the real cursor, and it is never offered unless asked for.
     """
+    if real_input is not None:
+        return [_real_click(hwnd, real_input, live_window, button, count)]
     posted = Attempt(Tier.WINDOW_MESSAGE,
                      lambda: win_input.click(hwnd, button=button, modifiers=modifiers,
                                              at=at, count=count))
@@ -38,8 +46,19 @@ def click(hwnd: int, *, button: str = "left", modifiers=(), at=None,
     ]
 
 
+def _real_click(hwnd: int, point: tuple[int, int], live_window: int,
+                button: str, count: int) -> Attempt:
+    from . import live
+
+    return Attempt(Tier.SYNTHETIC_INPUT,
+                   lambda: live.click_real(hwnd, point, live_window=live_window,
+                                           button=button, count=count),
+                   name="real_input")
+
+
 def click_element(element: AccessibleElement, *, button: str = "left",
-                  modifiers=(), at=None, count: int = 1) -> list[Attempt]:
+                  modifiers=(), at=None, count: int = 1, live_window: int = 0,
+                  real_input: tuple[int, int] | None = None) -> list[Attempt]:
     """Actuate an element that is not a window.
 
     **The posted click goes first, and the pattern is the fallback.** That
@@ -58,6 +77,8 @@ def click_element(element: AccessibleElement, *, button: str = "left",
     posted click -- a provider that draws its elements itself and reads the
     real input queue -- where Invoke or Select is the surface it supports.
     """
+    if real_input is not None:
+        return [_real_click(element.host_handle, real_input, live_window, button, count)]
     posted = Attempt(Tier.WINDOW_MESSAGE,
                      lambda: elements.click_posted(element, button=button,
                                                    modifiers=modifiers, at=at,

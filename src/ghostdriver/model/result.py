@@ -60,6 +60,9 @@ class ActionResult:
     #: worked, and this says what the postcondition was never going to
     #: mention. Empty when nothing was watched or nothing changed.
     disturbances: list[dict] = field(default_factory=list)
+    #: Why a rung that raised declined, by route or tier -- a live guard's
+    #: abort reads as "the target ignored the click" without it (#124).
+    declined: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.postcondition_verified is False:
