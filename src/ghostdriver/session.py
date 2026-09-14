@@ -80,6 +80,22 @@ class Profile:
     #: application sets from the real cursor on idle and no posted pair can
     #: create. Declared, because the message is private to one toolkit.
     hover_before_click: tuple[str, ...] = ()
+    #: What the operator knows about a control class that a session cannot
+    #: measure: {class pattern: note}. Surfaced on every find match and
+    #: click result for a matching class (#137). Declared knowledge (D35):
+    #: "this bar is a mouse affordance for keys the editor binds; use
+    #: send_keys on the edit box" is worth more than another hour of clicks.
+    notes: dict[str, str] = field(default_factory=dict)
+
+    def note_for(self, class_name: str | None) -> str | None:
+        """The operator's note for this class, or None."""
+        import fnmatch
+
+        name = class_name or ""
+        for pattern, note in self.notes.items():
+            if fnmatch.fnmatchcase(name, pattern):
+                return note
+        return None
 
     def wants_hover(self, class_name: str | None) -> bool:
         """Whether `hover_before_click` names this class."""
@@ -148,6 +164,14 @@ class Profile:
                 f"profile {location} has an unreadable posted_click_only: a list of "
                 f"window-class patterns, e.g. [\"TsfCommandButton\"]; got {pinned!r}",
             )
+        notes = document.get("notes") or {}
+        if (not isinstance(notes, dict)
+                or not all(isinstance(k, str) and k and isinstance(n, str) for k, n in notes.items())):
+            raise GhostdriverError(
+                ErrorKind.DENIED_BY_POLICY,
+                f"profile {location} has an unreadable notes: an object of "
+                f"{{\"<class pattern>\": \"<note>\"}}; got {notes!r}",
+            )
         hovered = document.get("hover_before_click") or []
         if not isinstance(hovered, list) or not all(isinstance(c, str) and c for c in hovered):
             raise GhostdriverError(
@@ -166,6 +190,7 @@ class Profile:
             busy_indicator=document.get("busy_indicator") or None,
             posted_click_only=tuple(pinned),
             hover_before_click=tuple(hovered),
+            notes=dict(notes),
         )
 
     @classmethod

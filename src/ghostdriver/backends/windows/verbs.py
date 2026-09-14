@@ -12,7 +12,7 @@ the cadence asked for.
 from ...actuate import Attempt, Condition, Tier
 from ...cadence import ROBOT, Cadence
 from ...model.element import AccessibleElement
-from . import elements, modality
+from . import elements, modality, winapi
 from . import input as win_input
 
 
@@ -73,6 +73,14 @@ def click_element(element: AccessibleElement, *, button: str = "left",
                      name="posted+hover" if hover else "")
     if button != "left" or modifiers or at is not None or count != 1:
         return [posted]
+    if element.class_name == winapi.POPUP_MENU_CLASS:
+        # A menu chooses its own item (#135): the posted pair is hit-tested
+        # against the real pointer by the menu loop and closes the menu
+        # instead. The menu's keyboard route first; the pair only for what
+        # it declines (a submenu).
+        return [Attempt(Tier.WINDOW_MESSAGE, lambda: elements.menu_choose(element),
+                        name="menu_keys"),
+                Attempt(Tier.WINDOW_MESSAGE, posted.run, rank=1, name="posted")]
     return [
         posted,
         Attempt(Tier.UIA_PATTERN, lambda: elements.act_via_pattern(element),

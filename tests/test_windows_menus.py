@@ -100,3 +100,32 @@ def test_an_owner_drawn_item_is_clicked_by_position(app):
                        expect={"locator": 'class=Static text="/last=menu=owner-drawn/"'})
 
     assert chosen["ok"], chosen
+
+
+# --- the menu chooses its own item (#135) --------------------------------------
+
+def test_an_item_is_chosen_through_the_menu_s_own_keyboard_route(app):
+    """The posted pair at an item's rectangle is hit-tested by the menu loop
+    against the real pointer and closes the menu instead. The menu's
+    keyboard route -- select by position, Return -- ends the menu and hands
+    the command to the owner exactly as a person's choice would."""
+    box, session = session_for(app["pid"])
+    open_menu(box, session)
+
+    result = box.click(session, 'type=MenuItem name="Copy row values"', all_windows=True,
+                       expect={"locator": 'class=Static text="/last=menu=Copy row values/"'})
+
+    assert result["ok"] and result["verified"] == "effect", result
+    assert result["route"] == "menu_keys" and result["tiers_attempted"] == [3]
+
+
+def test_an_owner_drawn_item_is_chosen_by_position_the_same_way(app):
+    box, session = session_for(app["pid"])
+    open_menu(box, session)
+
+    result = box.click(session, f"type=MenuItem index=1 within=({MENU})",
+                       all_windows=True,
+                       expect={"locator": 'class=Static text="/last=menu=owner-drawn/"'})
+
+    assert result["ok"], result
+    assert result["route"] == "menu_keys"

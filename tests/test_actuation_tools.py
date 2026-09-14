@@ -47,7 +47,7 @@ def box():
 
 
 def interactive(box, pid, *, denylist=(), sensitivity=None, posted_click_only=(),
-                hover_before_click=()):
+                hover_before_click=(), notes=None):
     """A session allowed to act, with an optional curated profile."""
     from ghostdriver.policy import ConsentSource, Tier
     from ghostdriver.sensitivity import Sensitivity
@@ -61,6 +61,7 @@ def interactive(box, pid, *, denylist=(), sensitivity=None, posted_click_only=()
         sensitivity=sensitivity or Sensitivity(),
         posted_click_only=tuple(posted_click_only),
         hover_before_click=tuple(hover_before_click),
+        notes=dict(notes or {}),
     )
     session = box.sessions.attach(pid, command_line=["fixtureapp"],
                                   tier=Tier.INTERACTIVE, profile=profile)
@@ -670,3 +671,21 @@ def test_without_hover_nothing_is_added(box, app):
     session = interactive(box, app["pid"])
     result = box.click(session, EXPAND, at={"x": 5, "y": 5}, expect=EXPANDED)
     assert result["ok"] and "hover" not in result and result.get("route") in (None, "")
+
+
+# --- the operator's note rides on find and click (#137) -----------------------------
+
+def test_a_profile_note_for_the_class_rides_on_find_and_click(box, app):
+    session = interactive(box, app["pid"],
+                          notes={"GhostFixtureCommand*": "a note the operator left"})
+
+    found = box.find(session, EXPAND)
+    clicked = box.click(session, EXPAND, expect=EXPANDED)
+
+    assert found["elements"][0]["note"] == "a note the operator left"
+    assert clicked["ok"] and clicked["note"] == "a note the operator left"
+
+
+def test_no_note_no_key(box, app):
+    session = interactive(box, app["pid"])
+    assert "note" not in box.find(session, EXPAND)["elements"][0]

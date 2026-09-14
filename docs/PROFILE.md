@@ -157,6 +157,19 @@ foreground, nothing the operator notices. Declared rather than automatic
 because the message is private to one toolkit; `click` also takes a
 per-call `hover` to try it before listing a class.
 
+## `notes` (D#137)
+
+What the operator knows about a control class that a session cannot
+measure:
+
+```json
+"notes": {"THtLeftPanel": "a mouse affordance for keys the editor binds: send_keys enter / escape to the edit box instead"}
+```
+
+`fnmatch` class patterns to plain text. The note rides on every `find`
+match and every `click` result for a matching class, so the next session
+reads it before repeating the experiment that produced it.
+
 ## `safe_controls`
 
 What `probe_phase2` may actuate to learn how the target's controls

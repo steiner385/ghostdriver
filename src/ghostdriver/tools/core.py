@@ -17,6 +17,7 @@ from ..model.result import ErrorKind
 from ..model.window import WindowNode, select_main_tree
 from ..resolve import resolve, resolve_elements
 from ..session import SessionManager
+from .geometry import _top_level_overlapping
 
 #: How long a session's descendant list is trusted before it is re-read.
 TREE_CACHE_S = 0.5
@@ -360,34 +361,3 @@ def _pick(matches: list, index: int | None) -> list:
     if index is None:
         return matches
     return [matches[index]] if 0 <= index < len(matches) else []
-
-
-def _top_level_holding(trees, handle: int):
-    """The top-level window whose tree contains `handle`."""
-    for tree in trees:
-        for node in tree.walk():
-            if node.handle == handle:
-                return tree
-    return None
-
-
-def _top_level_overlapping(trees, region):
-    """The top-level window whose pixels the region shows, or None.
-
-    Most overlap first; among equals, the *smaller* window. A modal lies
-    entirely inside its owner's rectangle, so both overlap a region copied
-    from the modal completely -- and the modal, being smaller and on top,
-    is the one a person sees there.
-    """
-    best, best_key = None, None
-    for tree in trees:
-        left, top, right, bottom = tree.rect
-        w = min(right, region[2]) - max(left, region[0])
-        h = min(bottom, region[3]) - max(top, region[1])
-        area = w * h if w > 0 and h > 0 else 0
-        if area <= 0:
-            continue
-        key = (area, -((right - left) * (bottom - top)))
-        if best_key is None or key > best_key:
-            best, best_key = tree, key
-    return best
