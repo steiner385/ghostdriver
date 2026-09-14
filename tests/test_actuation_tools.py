@@ -47,7 +47,7 @@ def box():
 
 
 def interactive(box, pid, *, denylist=(), sensitivity=None, posted_click_only=(),
-                real_input_only_for=()):
+                hover_before_click=()):
     """A session allowed to act, with an optional curated profile."""
     from ghostdriver.policy import ConsentSource, Tier
     from ghostdriver.sensitivity import Sensitivity
@@ -60,7 +60,7 @@ def interactive(box, pid, *, denylist=(), sensitivity=None, posted_click_only=()
         denylist=tuple(denylist),
         sensitivity=sensitivity or Sensitivity(),
         posted_click_only=tuple(posted_click_only),
-        real_input_only_for=tuple(real_input_only_for),
+        hover_before_click=tuple(hover_before_click),
     )
     session = box.sessions.attach(pid, command_line=["fixtureapp"],
                                   tier=Tier.INTERACTIVE, profile=profile)
@@ -641,16 +641,32 @@ def test_an_unpinned_class_still_walks_the_ladder(box, app):
     assert "route_pinned" not in result
 
 
-# --- real_input is confined by the profile (#130) ---------------------------------
+# --- the posted hover route (#133) --------------------------------------------------
 
-def test_a_real_click_on_a_class_the_profile_does_not_list_is_refused_before_any_input(box, app):
-    session = interactive(box, app["pid"], real_input_only_for=("THtLeftPanel",))
-    live = box.sessions.get(session)
-    object.__setattr__(live, "live_window", 0x1234)  # a grant, without any real desktop
+def test_a_click_asked_for_with_hover_says_so_and_still_verifies(box, app):
+    """The notification rides ahead of the pair on the posted route; a
+    control that does not need it is unaffected, and the result names the
+    route so a reader can see what was sent."""
+    session = interactive(box, app["pid"])
 
-    result = box.click(session, EXPAND, real_input=True)
+    result = box.click(session, EXPAND, at={"x": 5, "y": 5}, hover=True, expect=EXPANDED)
 
-    assert not result["ok"], result
-    assert result["error"]["kind"] == "denied_by_policy"
-    assert "real_input_only_for" in result["error"]["message"]
-    assert "tier_used" not in result, "nothing was attempted"
+    assert result["ok"] and result["verified"] == "effect", result
+    assert result["route"] == "posted+hover"
+    assert "as asked" in result["hover"]
+
+
+def test_the_profile_decides_hover_when_the_call_does_not(box, app):
+    session = interactive(box, app["pid"], hover_before_click=("GhostFixture*",))
+
+    result = box.click(session, EXPAND, at={"x": 5, "y": 5}, expect=EXPANDED)
+
+    assert result["ok"], result
+    assert "hover_before_click" in result["hover"]
+    assert result["route"] == "posted+hover"
+
+
+def test_without_hover_nothing_is_added(box, app):
+    session = interactive(box, app["pid"])
+    result = box.click(session, EXPAND, at={"x": 5, "y": 5}, expect=EXPANDED)
+    assert result["ok"] and "hover" not in result and result.get("route") in (None, "")

@@ -272,7 +272,7 @@ def act_via_pattern(element: AccessibleElement) -> bool:
 
 
 def click_posted(element: AccessibleElement, *, button: str = "left",
-                 modifiers=(), at=None, count: int = 1) -> bool:
+                 modifiers=(), at=None, count: int = 1, hover: bool = False) -> bool:
     """Tier 3: the button pair, posted to the host window at the element.
 
     The element's rectangle is in screen coordinates; the host wants
@@ -294,7 +294,8 @@ def click_posted(element: AccessibleElement, *, button: str = "left",
     # The window under the point, not the host as such: an element drawn on
     # a windowed child of its host is reached through that child (D66).
     target, tx, ty = deepest_child_at(element.host_handle, point.x, point.y)
-    return post_click(target, tx, ty, button=button, modifiers=modifiers, count=count)
+    return post_click(target, tx, ty, button=button, modifiers=modifiers, count=count,
+                      hover=hover)
 
 
 def is_selected(element: AccessibleElement) -> bool | None:

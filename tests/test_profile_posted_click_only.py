@@ -39,27 +39,27 @@ def test_anything_but_a_list_of_class_patterns_is_an_error_not_a_default(tmp_pat
         Profile.load(path)
 
 
-# --- real_input_only_for (#130) --------------------------------------------------
+# --- hover_before_click (#133) -----------------------------------------------------
 
-def test_real_input_only_for_confines_the_rung_to_the_listed_classes(tmp_path):
+def test_hover_before_click_names_the_classes_told_the_mouse_is_over_them(tmp_path):
     path = tmp_path / "p.json"
-    path.write_text(json.dumps({"real_input_only_for": ["THtLeftPanel", "TSfHypertext*"]}))
+    path.write_text(json.dumps({"hover_before_click": ["THtLeftPanel", "THt*Bar"]}))
 
     profile = Profile.load(path)
 
-    assert profile.allows_real_input("THtLeftPanel")
-    assert profile.allows_real_input("TSfHypertextEditBox")
-    assert not profile.allows_real_input("TsfCommandButton")
-    assert not profile.allows_real_input(None)
+    assert profile.hover_before_click == ("THtLeftPanel", "THt*Bar")
+    assert profile.wants_hover("THtLeftPanel") and profile.wants_hover("THtTopBar")
+    assert not profile.wants_hover("TsfCommandButton")
+    assert not profile.wants_hover(None)
 
 
-def test_no_real_input_only_for_allows_any_class():
-    assert Profile().allows_real_input("Anything")
+def test_no_hover_before_click_hovers_nothing():
+    assert not Profile().wants_hover("THtLeftPanel")
 
 
 @pytest.mark.parametrize("bad", ["THtLeftPanel", [1], [""]])
-def test_a_bad_real_input_only_for_is_an_error_not_a_default(tmp_path, bad):
+def test_a_bad_hover_before_click_is_an_error_not_a_default(tmp_path, bad):
     path = tmp_path / "p.json"
-    path.write_text(json.dumps({"real_input_only_for": bad}))
-    with pytest.raises(GhostdriverError, match="real_input_only_for"):
+    path.write_text(json.dumps({"hover_before_click": bad}))
+    with pytest.raises(GhostdriverError, match="hover_before_click"):
         Profile.load(path)

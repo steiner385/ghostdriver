@@ -350,8 +350,8 @@ def test_a_declining_rung_s_reason_is_kept_and_named():
         raise RuntimeError("the pointer moved while acting")
 
     result = actuator(tiers=(Tier.SYNTHETIC_INPUT,)).perform(
-        [Attempt(Tier.SYNTHETIC_INPUT, refuse, name="real_input")])
+        [Attempt(Tier.SYNTHETIC_INPUT, refuse, name="live_commit")])
 
     assert not result.ok
-    assert result.declined == {"real_input": "the pointer moved while acting"}
-    assert "real_input: the pointer moved" in result.error["message"]
+    assert result.declined == {"live_commit": "the pointer moved while acting"}
+    assert "live_commit: the pointer moved" in result.error["message"]
