@@ -46,7 +46,7 @@ def box():
     return Toolbox(SessionManager())
 
 
-def interactive(box, pid, *, denylist=(), sensitivity=None):
+def interactive(box, pid, *, denylist=(), sensitivity=None, posted_click_only=()):
     """A session allowed to act, with an optional curated profile."""
     from ghostdriver.policy import ConsentSource, Tier
     from ghostdriver.sensitivity import Sensitivity
@@ -58,6 +58,7 @@ def interactive(box, pid, *, denylist=(), sensitivity=None):
     profile = Profile(
         denylist=tuple(denylist),
         sensitivity=sensitivity or Sensitivity(),
+        posted_click_only=tuple(posted_click_only),
     )
     session = box.sessions.attach(pid, command_line=["fixtureapp"],
                                   tier=Tier.INTERACTIVE, profile=profile)
@@ -606,3 +607,33 @@ def test_verify_window_reads_timeout_s_from_any_expect():
     assert verify_window({"changed": True}) == 6.0, "a surface docks slowly"
     assert verify_window({"changed": True, "timeout_s": 3}) == 3.0
     assert verify_window({"nonsense": 1}) is None, "malformed: _expectation reports it"
+
+
+# --- a profile pins a class to the posted click (#122) ---------------------
+
+EXPAND = 'class=GhostFixtureCommandButton text="Expand All"'
+EXPANDED = {"locator": 'class=Static text="/last=Expand All$/"'}
+
+
+def test_a_pinned_class_never_tries_the_pattern_rung(box, app):
+    """A plain HWND control's ladder is Invoke first, posted second; on a
+    toolkit that answers Invoke slowly or not at all that is the rung's
+    timeout and then a second click. Listed in posted_click_only, the
+    class gets the posted message only, and the result says so."""
+    session = interactive(box, app["pid"], posted_click_only=("GhostFixture*",))
+
+    result = box.click(session, EXPAND, expect=EXPANDED)
+
+    assert result["ok"], result
+    assert result["tiers_attempted"] == [3], "only the posted rung"
+    assert "posted_click_only" in result["route_pinned"]
+
+
+def test_an_unpinned_class_still_walks_the_ladder(box, app):
+    session = interactive(box, app["pid"])
+
+    result = box.click(session, EXPAND, expect=EXPANDED)
+
+    assert result["ok"], result
+    assert result["tiers_attempted"][0] == 1, "the pattern rung is tried first"
+    assert "route_pinned" not in result

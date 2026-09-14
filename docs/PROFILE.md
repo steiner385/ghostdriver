@@ -80,6 +80,40 @@ non-background pixels -- for a status strip that paints its progress bars
 rather than making them windows. Set the threshold from two captures, one
 idle and one busy.
 
+## `posted_click_only` (D#122)
+
+Window classes whose click is the posted message and nothing else:
+
+```json
+"posted_click_only": ["TsfCommandButton", "TsfSpeedButton*"]
+```
+
+`fnmatch` patterns against the control's window class. For a plain HWND
+control the ladder tries the UIA Invoke pattern first and the posted click
+second; a toolkit that answers Invoke slowly, or not at all, costs that
+rung's timeout and then a second delivery of a click the posted message
+already made. A class listed here skips the pattern rung, and the click
+result says so (`route_pinned`). A declared route beats a learned one
+(D35): list a class after seeing `tiers_attempted: [1, 3]` and a slow
+click, not before.
+
+## `posted_click_only` (D#122)
+
+Window classes whose click is the posted message and nothing else:
+
+```json
+"posted_click_only": ["TsfCommandButton", "TsfSpeedButton*"]
+```
+
+`fnmatch` patterns against the control's window class. For a plain HWND
+control the ladder tries the UIA Invoke pattern first and the posted click
+second; a toolkit that answers Invoke slowly, or not at all, costs that
+rung's timeout and then a second delivery of a click the posted message
+already made. A class listed here skips the pattern rung, and the click
+result says so (`route_pinned`). A declared route beats a learned one
+(D35): list a class after seeing `tiers_attempted: [1, 3]` and a slow
+click, not before.
+
 ## `safe_controls`
 
 What `probe_phase2` may actuate to learn how the target's controls

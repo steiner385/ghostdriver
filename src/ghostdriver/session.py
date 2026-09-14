@@ -67,6 +67,23 @@ class Profile:
     #: "ink_above": 0.02}). On a target whose grids fill seconds after the
     #: click that asked for them, an action's result is not the screen's.
     busy_indicator: dict | None = None
+    #: Control classes (fnmatch patterns) whose click is the posted message
+    #: only, never the UIA Invoke pattern (#122). For a plain HWND control
+    #: the pattern rung is tried first; on a toolkit that answers Invoke
+    #: slowly or not at all, that is seconds of waiting and then a second
+    #: delivery of a click the posted message already made. A declared
+    #: route beats a learned one (D35).
+    posted_click_only: tuple[str, ...] = ()
+
+    def pins_to_posted(self, class_name: str | None) -> str | None:
+        """The `posted_click_only` pattern that pins `class_name`, or None."""
+        import fnmatch
+
+        name = class_name or ""
+        for pattern in self.posted_click_only:
+            if fnmatch.fnmatchcase(name, pattern):
+                return pattern
+        return None
 
     @classmethod
     def load(cls, path: str | Path) -> "Profile":
@@ -111,6 +128,13 @@ class Profile:
                     "{left, top, right, bottom}, \"note\"?}",
                 )
             regions.append(entry)
+        pinned = document.get("posted_click_only") or []
+        if not isinstance(pinned, list) or not all(isinstance(c, str) and c for c in pinned):
+            raise GhostdriverError(
+                ErrorKind.DENIED_BY_POLICY,
+                f"profile {location} has an unreadable posted_click_only: a list of "
+                f"window-class patterns, e.g. [\"TsfCommandButton\"]; got {pinned!r}",
+            )
         return cls(
             path=location,
             matched_profile=document.get("matched_profile", "unknown"),
@@ -120,6 +144,7 @@ class Profile:
             sensitivity=sensitivity,
             safe_controls=tuple(document.get("safe_controls") or ()),
             busy_indicator=document.get("busy_indicator") or None,
+            posted_click_only=tuple(pinned),
         )
 
     @classmethod

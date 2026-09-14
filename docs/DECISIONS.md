@@ -5455,3 +5455,73 @@ out-of-range and non-numeric scales refused by name before any backend is
 touched (`env: any`). `tests/test_windows_capture.py`: a half-scale capture
 is the picture at half each dimension, agreed by the PNG's own header, and
 smaller; scale 1 is byte-identical to no scale (`env: windows`).
+
+### D#122. A profile can pin a control class to the posted click
+
+**The field report.** A click on a `TsfCommandButton` took 5 to 10 seconds,
+with `tiers_attempted` showing the pattern rung and then the posted one.
+
+**What was measured.** For a plain HWND control the ladder is Invoke first,
+posted second (`verbs.click`): a target that publishes an Invoke pattern
+should be driven through it. This toolkit answers Invoke slowly or not at
+all, so the rung costs its wait, and when nothing verifiable changes the
+ladder escalates to the posted message -- which then works. Two costs: the
+seconds, and on a control where Invoke *did* land but its effect was slow,
+a second delivery of the same click.
+
+**Decision.** A profile document may list `posted_click_only`: fnmatch
+patterns against a control's window class. A class that matches gets the
+posted message and nothing else, and the click result says so
+(`route_pinned`). A declared route beats a learned one (D35), and this is
+declared: the operator lists a class after seeing `tiers_attempted: [1, 3]`
+and a slow click, not before. The pin is in the profile and not on the
+call, because it is a fact about the target's toolkit, the same kind of
+fact as its cadence (D26), and it should not have to be rediscovered by
+every session.
+
+**Not done.** The ladder still escalates on a verification timeout for
+every other class. That is deliberate (D9, a tier the target ignores looks
+exactly like this); the pin is the narrow, declared exception. A longer
+`timeout_s` on the expect avoids the escalation on any class today.
+
+**Evidence.** `tests/test_profile_posted_click_only.py`: the key is read as
+patterns, matched by class, absent means nothing pinned, and anything but
+a list of class patterns is an error rather than a default (`env: any`).
+`tests/test_actuation_tools.py`: a pinned class attempts only tier 3 and
+says `route_pinned`; an unpinned one still tries the pattern rung first
+(`env: windows`). `docs/PROFILE.md` documents the key; `check-profile`
+knows it.
+
+### D#123. `await_human` can wait for a change to settle, and for a control alongside it
+
+**The field report.** `await_human` returned after 41 s on `until_change`
+while the operator's logout and login were still under way: the splash
+screen was the change.
+
+**What was wrong.** `until_change` returned on the first movement of the
+surface digest, and `until` and `until_change` were exclusive, so there
+was no way to say "the surface moved *and* the login window is there".
+
+**Decision, in two parts.**
+
+- **`settle_s`.** With `until_change`, a changed surface must hold still
+  that long before the change counts. "Still" is measured from the last
+  movement, not from the baseline, and a surface that moves and returns
+  to its starting shape still moved -- a dialog that opened and closed is
+  a change that happened. `settle_s` without `until_change` is refused by
+  name, since it would mean nothing.
+- **`until` alongside `until_change`.** Both must hold: the surface has
+  moved (and settled, if asked) and the named control is present, reads
+  the text, or is gone with `absent`. Every check is read on every poll,
+  the surface first, so the settle clock runs while the control is being
+  looked for. The result's `expected` names both halves.
+
+The settle alone does not solve the field case -- a splash can hold still
+longer than any sensible settle -- which is why the second part exists: the
+right wait names the login window.
+
+**Evidence.** `tests/test_await_human_settle.py`: the settle clock on its own
+(first movement counts with no settle; a second movement restarts the
+clock; a flicker back still moved), and through the tool with the digest
+and the resolver stood in for: first movement, settle held, both halves
+needed, `absent` alongside, and the refusals. `env: any`.
