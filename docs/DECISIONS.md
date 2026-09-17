@@ -5844,3 +5844,88 @@ that no target knowledge enters any repository).
 pattern, malformed notes an error (`env: any`).
 `tests/test_actuation_tools.py`: the note rides on `find` and on `click`
 for the fixture's class, and no key appears without one. Issue #137.
+
+### D#1. The three unprobed routes, run against a real owner-drawn grid: all three come back negative
+
+**The target.** Windows' own Character Map (`charmap.exe`), on a real
+Windows 11 Home box (build 26200), not the fixture. Chosen because it is a
+textbook owner-drawn grid -- `CharGridWClass` paints every glyph cell
+itself -- and because it ships with Windows: no license, no customer data,
+no install footprint, reachable by anyone with a Windows box, which matters
+for a repository that otherwise never names a real target (`docs/VALIDATION.md`'s
+convention is to withhold product names; this one is Microsoft's own OS
+component, so naming it costs nothing and buys reproducibility).
+
+**Session.** Driven headlessly through the account documented in
+[[ghostdriver-windows-host-win-host]] (`gdrunner`, an interactive autologon
+session with nobody at the console at the time), rather than a person's own
+session -- consistent with the project's premise of not taking the desktop
+from whoever is using it. This was a narrower session than issue #3's six
+gates; it answers #1's question only. #3 remains open.
+
+**What was measured.**
+
+The grid enumerates as one control with real content and no children:
+
+```
+class=CharGridWClass text='Character Grid' rect=(46, 145, 469, 398)
+```
+
+Calling the shipped tool first, the way an operator would:
+
+```
+probe_grid(session, "class=CharGridWClass")
+-> not_actionable: "'class=CharGridWClass' already answers with text
+   ('Character Grid'); it is not a painted region. Use `read`"
+```
+
+It refuses before trying anything. `node.text` is genuinely non-empty --
+`WM_GETTEXT` really does return `"Character Grid"` -- so the guard that
+exists to stop a probe from spending a side effect on a control `read`
+already answers (D46's own reasoning, exercised for the fixture in
+`tests/test_windows_grid.py::test_the_tool_refuses_a_region_that_read_already_answers`)
+fires here too. The difference: for this control, that text is a static
+accessible label the class sets once, not its content -- `read` on the same
+locator returns the identical `"Character Grid"` regardless of which glyphs
+are on screen or selected. A caller who follows the tool's own advice gets
+back a plausible, wrong answer with no way to tell it is wrong. Filed as
+**issue #141** rather than fixed here: it is its own measurement question
+(what distinguishes a decorative label from real content), the fixture
+cannot reproduce it (its buttons all answer with their real caption, D46's
+case), and this session's job was the three routes, not this guard.
+
+Bypassing the guard to run the two routes it would have tried:
+
+```
+grid_strategy: unknown
+accessible_on_focus: tried=true worked=false (0 accessible elements before WM_SETFOCUS, 0 after)
+clipboard_copy:      tried=true worked=false ("the control did not change the clipboard")
+```
+
+The clipboard route was tried twice: once against the grid's default state,
+and once after a posted `click(at=(15, 15))` meant to select a glyph first --
+the "Selected Character" status line read the same value before and after,
+so the posted click did not move the selection (a further data point for
+whoever measures #133-style posted-click gaps against this class; not
+pursued further here, out of scope for this issue). Neither attempt moved
+the clipboard sequence number.
+
+The third route, an export command, has nothing to probe: the dialog's full
+control set (`&Select`, `&Copy`, `Ad&vanced view`, `&Help`, `Sea&rch`, plus
+combo boxes and edits for font/search/group) has no export or save
+affordance at all. Absence, not failure -- recorded because the issue asks
+for it either way.
+
+**Decision.** `grid_strategy` for this target is `unknown`, and nothing is
+wired: `probe_grid` already is the seam D46 asked for, and an `unknown`
+verdict changes no code, per `_unknown_meaning`'s own reasoning. All three
+routes come back negative against a real target for the first time, which is
+the condition the issue named for reopening the OCR question deferred to
+issue #20 -- stated here as evidence for whoever picks #20 up, not decided
+by this session. The scorecard entry this issue names moves from "unprobed"
+to "probed, none work (this target)"; a second real target would strengthen
+that from one data point to a pattern.
+
+**Evidence.** Commands and output above, run interactively against
+`charmap.exe`'s live `CharGridWClass`; `docs/DECISIONS.md`'s own D46; issue
+#1; issue #20; issue #141 (the refusal-guard defect this session found).
