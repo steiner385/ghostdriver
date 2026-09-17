@@ -152,6 +152,21 @@ def _bound_entry(mirror):
     return entry
 
 
+def _opt_in():
+    """A control that actually carries `CHECKED`, for `is_selected` (#104).
+
+    Nothing in this fixture did before: no checkbox, no radio, and a
+    GtkNotebook's page tabs measured with **no `SELECTED` state at all** --
+    so the element view's `SelectionItem` pattern was unmeasured against a
+    real target. This is the plain case the pattern exists for.
+    """
+    check = Gtk.CheckButton(label="opt in")
+    _label(check, "opt in")
+    check.connect("toggled",
+                  lambda b: _event(event="opt_in", checked=b.get_active()))
+    return check
+
+
 def _grid(status):
     """An owner-drawn grid: a DrawingArea with no children, so it enumerates
     as one node however many rows it paints. Ctrl+C is the only route to its
@@ -280,6 +295,20 @@ def _hang(seconds):
     return False
 
 
+def _check_opt_in(check):
+    """Flip the checkbox on a timer, the way `_raise_modal` flips a dialog.
+
+    Not driven through AT-SPI: measured for #104, a `Gtk.CheckButton` here
+    claims the `Action` interface but reports zero actions, so there is
+    nothing to click it *through* on this stack (the same shape D#10 found
+    for the owner-drawn button, on a native widget this time). That is an
+    acting-ladder question, not this one -- `is_selected` only needs the
+    state to change, and this is the toolkit's own path to changing it.
+    """
+    check.set_active(True)
+    return False
+
+
 def _grab_foreground(main, status):
     """The one place present() is called. This is what a foreground grab *is*,
     and it is here so L6 can measure a real one rather than assume."""
@@ -317,6 +346,7 @@ def build(options):
     _label(secret2, "password widget")
 
     bound = _bound_entry(mirror)
+    opt_in = _opt_in()
     drawn = _drawn_button(status)
     grid = _grid(status)
     stack, page_buttons = _pages(status)
@@ -324,8 +354,8 @@ def build(options):
     toolbar = _toolbar()
 
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-    for child in (toolbar, plain, secret, secret2, bound, mirror, drawn, grid,
-                  stack, tabs, status):
+    for child in (toolbar, plain, secret, secret2, bound, mirror, opt_in, drawn,
+                  grid, stack, tabs, status):
         box.append(child)
     main.set_child(box)
 
@@ -339,6 +369,8 @@ def build(options):
         GLib.timeout_add(options.modal_after, _raise_modal, main, status)
     if options.present_after:
         GLib.timeout_add(options.present_after, _grab_foreground, main, status)
+    if options.check_opt_in_after:
+        GLib.timeout_add(options.check_opt_in_after, _check_opt_in, opt_in)
     if options.hang_after:
         GLib.timeout_add(options.hang_after, _hang, options.hang_for)
 
@@ -350,7 +382,7 @@ def build(options):
                  mirror=mirror, page_buttons=page_buttons,
                  widgets={"drawn_button": drawn, "grid": grid, "plain_edit": plain,
                           "password": secret, "password_widget": secret2, "bound_edit": bound,
-                          "bound_mirror": mirror, "status": status,
+                          "bound_mirror": mirror, "status": status, "opt_in": opt_in,
                           "tabs": tabs, "toolbar": toolbar, "pages": stack})
     return main
 
@@ -389,6 +421,7 @@ def announce(main):
             "password_widget": "password widget",
             "bound_edit": "bound entry",
             "bound_mirror": "bound mirror",
+            "opt_in": "opt in",
             "drawn_button": "Recalculate",
             "grid": "results grid",
             "pages": "pages",
@@ -412,6 +445,9 @@ def main(argv=None):
     parser.add_argument("--grid-no-copy", dest="grid_copies", action="store_false",
                         help="make the grid ignore Ctrl+C, so an honest "
                              "'no route works' verdict can be tested")
+    parser.add_argument("--check-opt-in-after", type=int, default=0, metavar="MS",
+                        help="tick the 'opt in' checkbox this long after start; "
+                             "0 disables")
     parser.add_argument("--hang-after", type=int, default=0, metavar="MS",
                         help="stop servicing the main loop this long after start; "
                              "0 disables. The application stops answering the bus, "
