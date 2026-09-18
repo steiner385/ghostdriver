@@ -83,6 +83,8 @@ This doc carries no `labels:` field on purpose, and the two facts above are why 
 
 **It recurs rather than self-correcting because nothing mechanical routes this cluster here.** This doc carries no `labels:` on purpose (above), #115 and #116 carry no GitHub labels at all, and the only thing tying the seven driving items to this slug is the Evidence list below, maintained by hand. A rename moves the doc; it does not move anything that points at the doc. So expect the old name from anything holding a copy of the map taken before 2026-09-18, and expect to answer it by hand — cheaply, because the answer is this paragraph.
 
+**It has recurred once already, after PR #152 landed this rule.** On 2026-09-18 a second triage run proposed `bambu-studio-linux-integration` again for the same seven items (#101, #102, #103, #110, #111, #115, #116), with the same result: the mapping was checked against this doc, found to be the same cluster, and answered by editing here — no `bambu-studio-linux-integration.md` was created, and the PR was labelled `hold:human` because the proposal's own premise (a new capability) is wrong. The cheapest durable fix is on the triage side, not this doc: refresh its copy of the feature map from `main`.
+
 ## Evidence
 
 - #101 — Flatpak a11y proxy pid vs. real pid vs. X window identity; corrects the "Sandboxed applications" paragraph in `docs/LINUX.md`. Decided as D#101 (`docs/DECISIONS.md`).
