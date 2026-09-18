@@ -6094,3 +6094,75 @@ that the awkwardness of the current strategy is not theirs.
 **Evidence.** Issue #16; spec §12 and §2.3 (profile W1);
 `docs/product/features/deferred-scope-tracking.md`; D1; D33; D58; D59; R4;
 `tests/test_mcp_server.py::EXPECTED_TOOLS`.
+
+### D#157. The test bed's autologon is removed, and Session 0 is refused as its replacement
+
+**Context.** The Windows test bed signed `gdrunner` into the physical console
+at every boot -- `AutoAdminLogon = 1`, `DefaultUserName = gdrunner`. The
+operator then signed in on top of it and found the runner account already
+holding session 1. A tool whose whole premise is that it does not take the
+desktop from the person using it was, at rest, taking the desktop from that
+person before they had logged in.
+
+**The password was not absent, only somewhere else.** There was no
+`DefaultPassword` value in the registry, which reads as reassuring and is
+not: `netplwiz` and `Autologon.exe` store it as an **LSA private secret**,
+readable only by SYSTEM. Clearing `AutoAdminLogon` alone leaves that secret
+live, so the autologon re-arms with a working credential for anyone who sets
+the flag back to `1`, and nothing on the surface says it was ever there. It
+was cleared with `LsaStorePrivateData(..., NULL)`, which reported `cleared` --
+so the secret was real, and a registry-only fix would have missed it.
+
+**Both runner accounts are hidden from the sign-in screen**, via
+`Winlogon\SpecialAccounts\UserList`. This is tidiness and nothing more: they
+remain in `net user`, in `C:\Users`, and usable by scheduled tasks and
+`runas`. Recorded because the opposite is easy to assume -- an account you
+cannot see looks like an account that cannot be used, and these can.
+
+**The consequence is that `gd-pytest` has nowhere to run.** It is
+`Interactive only`, running as `gdrunner`, and the autologon was what kept a
+session waiting for it. The obvious repair is to run the suite as a service in
+Session 0. That repair is refused.
+
+Measured with the runner's own probe, unchanged, in both contexts:
+
+| | interactive | Session 0 (SYSTEM) |
+|---|---|---|
+| `winsta` | `WinSta0` | `Service-0x0-3e7$` |
+| `input_desktop_reachable` | `True` | `False` |
+| `foreground` | `65796` | `0` |
+
+**`GetForegroundWindow` returns NULL in Session 0, and `ForegroundWatch`
+polls exactly that value.** `watch.taken` could never be populated, so
+`test_zz_focus_guard` -- the test this project calls the promise the whole
+tool is built on -- would pass because its subject cannot occur, not because
+nothing took the foreground. That is D#39's lesson arriving from the other
+direction: not a guard that skips, but a guard that runs where its failure is
+impossible. The rule is the same either way -- put the test where the failure
+is *possible*.
+
+A session-less run would not weaken the focus guard. It would retire it while
+leaving it in the report, green.
+
+**The host closes the usual alternative.** `win-host` is Windows 11 Home: no
+RDP host (`fDenyTSConnections = 1`, `TermService` stopped, and Home ships no
+server to enable), no Windows Sandbox, one interactive session at a time. The
+CI convention of parking a disconnected RDP session and running the suite
+inside it is not available here, so the choice is narrower than it would be
+on Pro.
+
+**What is left is deliberate, not automatic.** The platform-neutral majority
+of the suite needs no desktop and can run anywhere; the Win32 remainder needs
+a session someone chose to create. How to split it, and whether a VM that
+keeps its autologon off the host desktop earns its weight, is not decided
+here: it needs a Windows box, and this was reached from Linux over SSH.
+
+**Disagreeing with this** means arguing that the focus guard is worth keeping
+in a context where it cannot fail. That argument is available -- the rest of
+the suite still exercises real behaviour in Session 0 -- but it has to be
+made out loud, because the price is a green run that has stopped checking the
+one thing the project exists to check.
+
+**Evidence.** Issue #157; the two probe lines above, from
+`C:\gd-run\out\pytest.log` and a SYSTEM-scheduled run of the same
+`where.py`; `tests/focusguard.py`; `tests/test_zz_focus_guard.py`; D#39.
