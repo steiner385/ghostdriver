@@ -17,12 +17,14 @@ On Linux, Bambu Studio runs sandboxed (Flatpak, wxGTK3) and breaks several assum
 
 ## Desired outcome
 
-`list-targets` and `attach` resolve Bambu Studio to one consistent identity despite its Flatpak identity split (real pid vs. a11y proxy pid vs. X window). Reading through the a11y bus works unconditionally. Committing a value change — which requires a real Enter on this target — is possible only under an explicit, narrowly scoped "operator-present live actuation" consent grant that aborts the moment the foreground or pointer changes. The backend's documented contract matches what the bus can actually reach: `EditableText` fields only, located by position and current value; owner-drawn controls are screenshot-only and out of scope for the bus.
+`list-targets` and `attach` resolve Bambu Studio to one consistent identity despite its Flatpak identity split (real pid vs. a11y proxy pid vs. X window). Reading through the a11y bus works unconditionally. Committing a value change — which requires a real Enter on this target — is possible only under an explicit, narrowly scoped "operator-present live actuation" consent grant that aborts the moment the foreground or pointer changes. A write to an unnamed field is addressed by place *and* by what it shows, and confirmed by comparison rather than by reading the value back (D#105), so a wrong-field write is impossible rather than merely unlikely and nothing Studio displays reaches a result, a trace or a model's context. The backend's documented contract matches what the bus can actually reach: `EditableText` fields only, located by position and current value; owner-drawn controls are screenshot-only and out of scope for the bus.
 
 ## Success metrics
 
 - `list-targets` / `attach` resolve Bambu Studio to one identity across the a11y bus, XRes, and psutil, with no manual pid lookup by the operator.
 - A tier-4 commit against Studio proceeds only when the named window is already the operator's live foreground window; any pointer or focus change during the action aborts it and is reported as a disturbance (D28), never silently falling back to a display-only write.
+- A `set_value` against one of Studio's unnamed, withheld setting fields reports success when the write landed and failure when it did not — confirmed through `confirms_value`, without the field's contents appearing anywhere (D#105, D#34b). Before this, every successful write on a withheld field reported as a failure.
+- Reading the element view of a ~2,300-node Studio tree costs no bus traffic beyond the enumeration that already happened (D#104).
 - `docs/LINUX.md` and `docs/linux-backend-scope.md` describe the actual reachable/unreachable surface — no promise that the bus can locate an owner-drawn control.
 
 ## Non-goals
@@ -33,7 +35,13 @@ On Linux, Bambu Studio runs sandboxed (Flatpak, wxGTK3) and breaks several assum
 
 ## Notes
 
-Two decisions in this cluster already landed in code before this doc existed: D#101/D#110 (Flatpak pid identity — XRes-resolved real pid, a11y proxy pid, and `application_name` aliasing, in `src/ghostdriver/backends/linux/tree.py` and `src/ghostdriver/backends/linux/display.py`) and D#102/D#111 (the operator-present live actuation gate, in `src/ghostdriver/tools/live.py`, which folds #103). What has not landed: the `EditableText`-only scope decision (#115) is still an unmerged draft, PR #116 (`claude/linux-backend-scope`, adds `docs/linux-backend-scope.md`).
+**Most of this cluster has landed.** PR #113 merged the live wxGTK3 slice in one piece, which is why the driving issues read as unbuilt while the code is present: D#101/D#110 (Flatpak pid identity — XRes-resolved real pid, a11y proxy pid, and `application_name` aliasing, in `backends/linux/tree.py` and `backends/linux/display.py`), D#102/D#111 (the operator-present live actuation gate — the tool-layer half in `tools/live.py`, the tier-4 commit and its abort conditions in `backends/linux/live.py`, folding #103), and the two that arrived with it, D#104 (the element view as a read of the enumeration registry, `backends/linux/elements.py`) and D#105 (the place-plus-value locator and `confirms_value`, in `model/locator.py` and `resolve.py`).
+
+**Issues #101, #102, #103, #110 and #111 are still open even though their decisions are recorded and implemented** — treat the decision record, not the issue state, as the signal here, and check `docs/DECISIONS.md` before scheduling any of them as work.
+
+**What is genuinely outstanding**, as of 2026-09-18: the `EditableText`-only scope decision (#115) remains an unmerged *draft* PR #116 (`claude/linux-backend-scope`, adds `docs/linux-backend-scope.md`, last touched 2026-09-11) — so the metric above that names that file is not yet met. Issue #105 also stays open on its Windows half: `confirms_value` is an `env: both` contract name, and the Windows implementation needs re-verification on a Windows host before the pair is done.
+
+This doc carries no `labels:` field on purpose. The only GitHub label these issues share is `env: linux`, which also covers unrelated Linux work (#6, #15, #40); routing every `env: linux` issue here would be wrong more often than right. New issues in this cluster need adding to Evidence by hand.
 
 ## Evidence
 
@@ -41,6 +49,12 @@ Two decisions in this cluster already landed in code before this doc existed: D#
 - #102 — wxGTK3 commit needs a real Enter (tier 4); `grab_focus` both works and steals the X foreground. Decided as D#102.
 - #103 — operator-present live actuation consent class; folded into D#111.
 - #110 — canonical pid is the a11y application pid; `application_name` aliasing. Decided as D#110; implemented in `src/ghostdriver/backends/linux/tree.py` (`application_name`) and `src/ghostdriver/backends/linux/display.py` (XRes `query_client_ids`).
-- #111 — gate the commit path behind operator-present live actuation. Decided as D#111; implemented in `src/ghostdriver/tools/live.py`.
-- #115, #116 (PR, draft, unmerged, branch `claude/linux-backend-scope`) — `EditableText`-only write scope, owner-drawn controls are screenshot-only; adds `docs/linux-backend-scope.md`.
+- #111 — gate the commit path behind operator-present live actuation. Decided as D#111; implemented in `src/ghostdriver/tools/live.py` (the gate and the sandbox-aware naming) and `src/ghostdriver/backends/linux/live.py` (the tier-4 commit, its foreground/pointer re-checks, and the abort-as-disturbance path).
+- #115, #116 (PR, **still draft and unmerged** as of 2026-09-18, branch `claude/linux-backend-scope`) — `EditableText`-only write scope, owner-drawn controls are screenshot-only; adds `docs/linux-backend-scope.md`. No corresponding `D#115`/`D#116` exists in `docs/DECISIONS.md` yet.
+
+Supporting items, not in the original cluster but load-bearing for it:
+
+- PR #113 (merged) — *"Linux backend: drive a live wxGTK3 target (Bambu Studio)"*. The change that delivered the code behind D#101, D#102, D#104, D#105, D#110 and D#111 together, across `src/ghostdriver/backends/linux/`, `src/ghostdriver/resolve.py`, `src/ghostdriver/model/locator.py` and `src/ghostdriver/session.py`.
+- #104 (closed) — the element view is a read of the enumeration registry, not a second bus walk; measured on Studio's ~2,300 nodes. Decided as D#104; implemented in `src/ghostdriver/backends/linux/elements.py`. Measured against a real AT-SPI target in commit `2c4246c`.
+- #105 (open, `env: both`) — `region=` plus `value=` locator and the `confirms_value` contract name; the fix that lets the live commit verify itself on a target whose fields are withheld. Decided as D#105. The Windows half awaits re-verification on a Windows host.
 - Related test fixture: `tests/test_linux_studio_scratch.py`.
