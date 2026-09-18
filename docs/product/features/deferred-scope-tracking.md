@@ -9,7 +9,7 @@ Every issue the project has deliberately put out of scope stays visible in the f
 
 ## Problem
 
-Issues #16, #17, #18, #19, #20 are not backlog — each one is explicitly deferred by design, per spec §12 of `docs/superpowers/specs/2026-09-01-desktop-automation-mcp-design.md`, with a named reason or trigger condition recorded in the issue body itself (e.g. #19's "contingency with a named trigger: `hidden_desktop` proving insufficient"; #20's "only if clipboard and export routes both fail," gated on issue #1). None of them fit the existing feature map: `docs/FEATURES.md` and the one entry so far under `docs/product/features/` (`bambu-studio-linux-integration.md`) both describe work that is proposed or in progress, and a deferred-by-design item filed there would misread as scheduled. Without a place that claims them, triage keeps re-raising "where does this belong" for the same five issues.
+Issues #16, #17, #18, #19, #20 are not backlog — each one is explicitly deferred by design, per spec §12 of `docs/superpowers/specs/2026-09-01-desktop-automation-mcp-design.md`, with a named reason or trigger condition recorded in the issue body itself (e.g. #19's "contingency with a named trigger: `hidden_desktop` proving insufficient"; #20's "only if clipboard and export routes both fail," gated on issue #1). None of them fit the existing feature map: `docs/FEATURES.md` and the one entry so far under `docs/product/features/` (`linux-sandboxed-gtk-targets.md`) both describe work that is proposed or in progress, and a deferred-by-design item filed there would misread as scheduled. Without a place that claims them, triage keeps re-raising "where does this belong" for the same five issues.
 
 ## Target users
 
