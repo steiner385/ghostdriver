@@ -133,9 +133,10 @@ class _LinuxBackend:
             "the interference watch and the nested-display strategy "
             "(HiddenDesktop, OperatorNotice) are wired; this is not part of "
             "them. What is left is assessment -- region_evidence, "
-            "resolve_hosted_app, assess_uia, assess_msaa -- which needs an "
-            "embedded document measured (#15). docs/LINUX.md tracks what has "
-            "been measured and what has not."
+            "resolve_hosted_app, assess_uia, assess_msaa -- against an "
+            "embedded document, now measured (D#15) but not yet wired up "
+            "here. docs/LINUX.md tracks what has been measured and what "
+            "has not."
         )
 
 

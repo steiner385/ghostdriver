@@ -180,14 +180,15 @@ def test_snapshot_names_what_is_holding_the_target(slice3):
     }
 
 
-def test_surface_of_says_native_because_no_linux_role_is_known_yet(slice3):
-    """A known gap, asserted so it is visible rather than assumed.
+def test_surface_of_says_native_because_this_control_is_not_a_document(slice3):
+    """The negative half of the web-role check, on a real native control.
 
-    `WEB_HOST_CLASSES` holds Win32 window classes and no AT-SPI role can
-    match one, so this answers "native" for everything. What an embedded
-    document actually reports is L8 (#15), unmeasured. When that lands and
-    the role joins the list, this test should start failing for the web
-    case -- which is the point of writing it down now.
+    L8 (#15, D#15) measured what an embedded document reports (`document
+    web`) and added it to `WEB_HOST_CLASSES`; see `test_surface.py` for the
+    positive case. This fixture entry is a plain GTK control, not a
+    document, so it should still answer "native" -- which is what this
+    pins, now that the role it could have matched against is measured
+    rather than absent.
     """
     if slice3["entry"] is None:
         pytest.skip("no entry control found in the fixture tree to ask about")

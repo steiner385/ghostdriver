@@ -38,7 +38,7 @@ decision holds the measurement the Linux one must repeat.
 | `top_level_state`, `blocking_ancestor` | `IsWindowEnabled` per window, owner chain | `_NET_WM_STATE_MODAL`, `WM_TRANSIENT_FOR`; AT-SPI `STATE_MODAL` on dialogs | D38, D48 (link vs victim) |
 | `snapshot`, `surface_of` | window set + foreground + blocked-by | `_NET_ACTIVE_WINDOW`, `_NET_CLIENT_LIST`; surface by toolkit and AT-SPI role | D34 |
 | `restore_process` | `SW_SHOWNOACTIVATE` (activates; D55) | `_NET_WM_STATE` remove `HIDDEN` via client message with source indication 1 (application), never 2 (pager) -- **measure whether the window manager focuses it anyway** | D55 |
-| `walk_elements_awake`, `is_selected`, `_current_value` | UIA control view; wake by first query | **built (D#104)**: the element view is assembled from the enumeration registry (`tree._Entry`) rather than a second bus walk -- an element carries the node's own handle and its screen extents, so an unnamed field is addressed by position plus value (D#101); `is_selected` re-reads the live state; `_current_value` withholds an editable field (D#34b). No wake step -- the embedded-document case (#15) is unmeasured | D56, D58, D#104 |
+| `walk_elements_awake`, `is_selected`, `_current_value` | UIA control view; wake by first query | **built (D#104)**: the element view is assembled from the enumeration registry (`tree._Entry`) rather than a second bus walk -- an element carries the node's own handle and its screen extents, so an unnamed field is addressed by position plus value (D#101); `is_selected` re-reads the live state; `_current_value` withholds an editable field (D#34b). **Still no wake step, measured rather than assumed (D#15)**: the working engine's document was complete on the first ask every time, so there was nothing to wake; the other engine never published one at all, which a wake loop would not have fixed | D56, D58, D#104, D#15 |
 | `region_evidence`, `resolve_hosted_app` | UIA count under a window; frame-host resolution | AT-SPI subtree count; embedded documents are `ROLE_DOCUMENT_WEB` | D41 |
 | `assess_uia`, `assess_msaa` | pattern richness | AT-SPI interface richness (`Action`, `Value`, `Text`, `Selection` counts) | D5 |
 | `verbs` | posted `WM_LBUTTONDOWN/UP`, posted `WM_CHAR`, UIA patterns | tier 1: AT-SPI `Action.DoAction` and `EditableText`; there is **no tier 3** (D#11 measured GTK discarding sent events). `set_text` takes a `live_window`: without one it is the tier-1 write alone (display only on wxGTK3, which does not commit; D#102), with one it is a single **tier-4** rung that writes and presses a real Enter, guarded by the live-actuation gate (D#111) | D21, D30, D44, D56, D#11, D#102, D#111 |
@@ -208,6 +208,21 @@ a foreground grab *is*).
    accidental un-hide is an accidental focus steal.
 8. **An embedded document.** A Chromium engine on the nested display, the
    wake, the click, the typing -- D58 again.
+   **Done (D#15), and the answer splits by WebKitGTK binding.** No
+   Chromium engine was available to measure; WebKitGTK stood in, and its
+   two GTK bindings disagreed. The GTK4 one (`WebKit` 6.0) never published
+   a document over AT-SPI at all -- not once, across a dozen runs and
+   sixty-second waits, load-complete or not. The GTK3 one (`webkit2gtk-4.1`)
+   did, immediately: the document was already complete the first time
+   anything asked, every time, so `walk_elements_awake` needed no wake
+   step to add. The click and the password-field detection needed no
+   web-specific code either -- `Action.DoAction` and role-based state
+   reads already worked. The one real gap: a web `<input>` carries no
+   `EditableText` and no `Value` at all, unlike a native GTK entry (D#10),
+   so there is no tier-1 write route to one; typing would need tier 4.
+   D75's "GTK 3 is not available from PyGObject here" does not hold on
+   this host -- it is available -- so that was a measurement of one
+   machine, not a fixed platform constraint.
 
 Each measurement is a test in `tests/test_linux_*.py`, skipped where
 `sys.platform != "linux"`, and each records its number in the decision

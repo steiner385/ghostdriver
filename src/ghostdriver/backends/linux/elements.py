@@ -95,10 +95,21 @@ def walk_elements_awake(node: WindowNode, **_kw) -> list[
     """Every accessible under `node`'s window, each with its ancestors.
 
     The window's own node is the root and is not returned -- it is the
-    window, which the window tree already names. No wake step: the
-    embedded-document case (L8, #15) is unmeasured on Linux, so there is no
-    dormant engine to nudge; the name keeps the contract's shape for when
-    one is measured, as on Windows.
+    window, which the window tree already names.
+
+    **Still no wake step, and that is now measured rather than assumed
+    (L8, #15, D#15).** Windows needs one because Chromium keeps its tree
+    dormant until the first `WM_GETOBJECT` asks for it (D58). AT-SPI has
+    no equivalent of that message to send, and against the one engine
+    measured here that answered on AT-SPI at all -- WebKitGTK's GTK3
+    binding (`webkit2gtk-4.1`) -- none was needed: the document was
+    already complete the first time anything asked, every time, with no
+    retry. WebKitGTK's GTK4 binding (`WebKit` 6.0) never published a
+    document over AT-SPI at all in the same measurement, on this host,
+    however long the wait -- not a dormancy a poll loop would clear, so
+    adding one here would not fit that engine either. `is_web_host` now
+    matches the role the working engine reports (`document web`, added to
+    `WEB_HOST_CLASSES`); nothing else changed.
     """
     out: list[tuple[AccessibleElement, tuple[AccessibleElement, ...]]] = []
 

@@ -180,13 +180,15 @@ TESTS = Path(__file__).resolve().parent
 #: and never imported by the test process, so each is its platform's toolkit at
 #: module scope on purpose.
 IMPORT_TIME_PLATFORM_ALLOWED = {"fixtureapp.py", "fixtureapp_gtk.py",
+                                "fixtureapp_web_gtk.py",
                                 "linux_atspi_probe.py",
                                 "linux_timeout_probe.py",
                                 "linux_tier1_probe.py",
                                 "linux_reading_probe.py",
                                 "linux_watch_probe.py",
                                 "linux_modality_probe.py",
-                                "linux_xid_probe.py"}
+                                "linux_xid_probe.py",
+                                "linux_l8_probe.py"}
 
 #: Test modules that check **platform-neutral policy** and must therefore
 #: run on every platform. A gate on one of these does not skip a Windows

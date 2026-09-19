@@ -6349,3 +6349,102 @@ Linux; the trimmed modules still collect cleanly.
 **Evidence.** Issue #39; D#39; D#111 (`InterferenceWatch` lifted neutral);
 `tests/test_structure.py`'s `MUST_RUN_EVERYWHERE`; `tests/test_tool_contracts.py`;
 `tests/test_family_watch.py`; `tests/test_lifecycle_policy.py`.
+
+### D#15. An embedded document: WebKitGTK's two GTK bindings gave opposite answers, and neither needed a wake
+
+**Context.** L8, last in the Linux measurement chain (#6, #7-#14, #21 all
+closed before this one started) and the same question D58 answered for
+Chromium on Windows: does an embedded document's accessibility tree wake
+on the first ask, and can a click and a write reach the page through it.
+No Chromium engine exists on Linux; WebKitGTK stood in, on the current
+development host (linux-host-a), with a new fixture (`tests/fixtureapp_web_gtk.py`)
+loading the same `tests/fixturepage.html` D58 used on Windows.
+
+**The two GTK bindings disagreed, and the disagreement is the finding.**
+WebKitGTK's GTK4 binding (`WebKit` 6.0, `gir1.2-webkit-6.0`) never
+published a document over AT-SPI at all: not once, across a dozen runs and
+sixty-second waits, with the page's own `load-changed` signal confirming
+`WEBKIT_LOAD_FINISHED` every time. Neither `WEBKIT_DISABLE_SANDBOX=1` nor
+setting `org.a11y.Status.IsEnabled=true` on the bus before launch changed
+this. WebKitGTK's GTK3 binding (`webkit2gtk-4.1`), reached through
+`Gtk` 3.0 rather than 4.0, published the whole document tree over AT-SPI
+**the first time anything asked, every time** -- no dormancy, no retry, no
+delay worth measuring (children present at t+0 in every run). This is the
+opposite of D58's Chromium, where the first walk had to *ask* before the
+tree existed at all.
+
+**So `walk_elements_awake` needed no wake step, and that absence is now
+measured rather than assumed.** The function was already a plain walk
+before this session (the docstring said so, honestly, as "unmeasured");
+it stays a plain walk, because nothing observed here was ever dormant on
+the engine that worked, and no amount of waking would have helped the
+engine that never published at all. Adding a poll loop with no dormancy
+to justify it would have been modelling, the thing this whole document
+exists to avoid. What did change: `"document web"` -- the AT-SPI role the
+working engine's document publishes under -- joined `WEB_HOST_CLASSES`
+in `surface.py`, which is the one line `modality.py::surface_of`'s own
+docstring already said would be the whole fix once this was measured.
+
+**D75 does not hold across hosts, and should not have been read as if it
+did.** It recorded "GTK 3 is not available from PyGObject" as a fact
+about the machine that measured it, in support of `fixtureapp_gtk.py`'s
+GTK4-only shape. `gi.require_version("Gtk", "3.0")` succeeds on linux-host-a.
+The native fixture stays GTK4 (nothing forced a change there); the new web
+fixture uses GTK3 because that is the binding that measurably works, which
+this session would not have found by trusting D75 as a platform constant
+rather than a point-in-time reading.
+
+**Click needed no web-specific code.** `verbs.click_element` already
+routes through `linux_input.act_via_action`, which calls
+`do_action(node, 0)` regardless of the action's name (D#10's reasoning for
+using the index rather than a lookup). A web button's action is named
+`press`, not `click` as a native `Gtk.Button`'s is -- and it did not
+matter, because nothing reads the name. `do_action` returned `True` and
+the page's own status text changed, confirming the click reached the
+script rather than just returning success.
+
+**Typing does not have a tier-1 route, and this is the one real gap.** A
+web `<input>` carries `Accessible`, `Action`, `Collection`, `Component`,
+`Hyperlink`, `Text` -- and neither `EditableText` nor `Value`, unlike a
+native GTK entry, which carries `EditableText` and commits with no split
+(D#10). `linux_input.set_text_via_editable` already wraps its call in
+`contextlib.suppress(Exception)`, so the missing interface produces a
+clean `False` rather than a traceback -- the existing ladder needed no
+change to handle it correctly. What it means: there is no way to write a
+web field on this backend below tier 4 (XTest under the live-actuation
+gate, D#111), which this session measured the absence of but did not
+build a route through -- `type_text_element`/`send_keys_element` stay
+empty ladders, as they already were.
+
+**Password detection and tab selection needed no web-specific code
+either.** `is_password = entry.role == "password text"` (`elements.py`)
+matched a web password field's role exactly as it matches a native one's,
+so the disclosure policy (D#34b) withholds it with no new code. A web
+ARIA tab carried `SELECTED` before and after a click the same way a
+native `page tab` does, confirming `is_selected`'s role-based state read
+(D#104) generalises to the web case unchanged.
+
+**Measured** with `tests/test_linux_l8.py` and its probe,
+`tests/linux_l8_probe.py`, following the L7/tier1 shape: `Xvfb`,
+`at-spi-bus-launcher --launch-immediately` under `dbus-run-session`, the
+new fixture launched inside it, one JSON report line. Five tests, all
+passing on linux-host-a: the wake, the click, the write's absence, password
+detection, tab selection.
+
+**What this does not cover.** Whether WebKitGTK's GTK4 binding will ever
+publish a document over AT-SPI is not answered here -- it is recorded as
+not fitting this strategy on this build, the D53 shape, not worked
+around. A caller reaching WebKitGTK through the GTK4 binding on Linux gets
+the same honest gap a Store-activated app gets on Windows. `region_evidence`,
+`resolve_hosted_app`, `assess_uia` and `assess_msaa` remain unwired for
+Linux -- `backends/linux/__init__.py` no longer calls the embedded
+document unmeasured, but building an AT-SPI-shaped assessment against it
+is a follow-on, not part of this measurement.
+
+**Evidence.** Issue #15, issue #6 (the chain this closes); D58 (the
+Windows counterpart); D#10 (native entry commits with no split); D#104
+(role-based `SelectionItem`); D53 (an unfitted target is reported, not
+worked around); D75 (GTK 3 availability, host-specific, corrected here);
+`tests/fixtureapp_web_gtk.py`; `tests/linux_l8_probe.py`;
+`tests/test_linux_l8.py`; `docs/LINUX.md`'s L8 entry and its
+`walk_elements_awake` contract row.
