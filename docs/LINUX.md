@@ -34,7 +34,7 @@ decision holds the measurement the Linux one must repeat.
 | `snapshot_clipboard`, `restore_clipboard` | every format via `EnumClipboardFormats` / `GetClipboardData` | `wl-paste --list-types` and one `wl-paste -t` per type; `wl-copy` back | D70 (the clipboard is the person's; put back whole) |
 | `is_protected` | `EM_GETPASSWORDCHAR` | AT-SPI `STATE_PROTECTED`, role `PASSWORD_TEXT` | D33 (constraint 4) |
 | `disclosure` | always `allowed` or `protected` -- the OS refuses the read itself, so nothing is withheld in software | `allowed`, `protected` or **`withheld`**: an editable entry is withheld by class, because a hidden one is indistinguishable from a plain one | D#34b, D#43 (the third state gets a name instead of borrowing `None`) |
-| `capture_window`, `CaptureError` | `PrintWindow` | `XGetImage` on the window (composited: `XCompositeNameWindowPixmap`); never a screen grab | D46 |
+| `capture_window`, `CaptureError` | `PrintWindow` | `XGetImage` on the window (composited: `XCompositeNameWindowPixmap`); never a screen grab. The window is found through the tree's frame correlation, not by matching a pid (D#101a) | D46 |
 | `top_level_state`, `blocking_ancestor` | `IsWindowEnabled` per window, owner chain | `_NET_WM_STATE_MODAL`, `WM_TRANSIENT_FOR`; AT-SPI `STATE_MODAL` on dialogs | D38, D48 (link vs victim) |
 | `snapshot`, `surface_of` | window set + foreground + blocked-by | `_NET_ACTIVE_WINDOW`, `_NET_CLIENT_LIST`; surface by toolkit and AT-SPI role | D34 |
 | `restore_process` | `SW_SHOWNOACTIVATE` (activates; D55) | `_NET_WM_STATE` remove `HIDDEN` via client message with source indication 1 (application), never 2 (pager) -- **measure whether the window manager focuses it anyway** | D55 |

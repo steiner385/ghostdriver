@@ -5137,6 +5137,78 @@ siblings under one `bwrap`, not parent and child). It is filed as its own fork
 rather than decided in a measurement entry. Evidence: issue #101; `docs/LINUX.md`
 sandboxed-app paragraph; D#40c; D#40d; D71.
 
+### D#101a. The capture path is the one D#101 named and did not rewire
+
+**Context.** D#101 listed four paths the absent `_NET_WM_PID` silently
+empties: `top_level_state`, `snapshot`, the capture-by-frame path, and the
+interference watch. Three were moved onto `display.windows_of` and the XRes
+bridge. The fourth was not, and nothing went red, because every test that
+captures anything runs against the GTK fixture -- which *does* set
+`_NET_WM_PID`, being an ordinary unsandboxed process. The suite could not
+see the hole because the hole only opens on a target the suite never uses.
+
+**What was still there.** `reading._toplevel_xid` walked up to the frame,
+took the pid AT-SPI reported for it, then forked `xwininfo -root -children`
+and `xprop _NET_WM_PID` per candidate looking for a match. Against a Flatpak
+target that is wrong in three separate ways, any one of which is fatal on its
+own:
+
+- no Studio top-level carries `_NET_WM_PID`, so every candidate compared
+  `None` and nothing ever matched;
+- the pid it compares against is the `xdg-dbus-proxy`'s, so even with the
+  property present the two spaces would not have met;
+- a pid cannot separate two windows of one process, so it returned the first
+  -- and a control inside a modal photographed the window behind it.
+  `tests/linux_xid_probe.py` wrote this one down in 2026 and it was never
+  acted on.
+
+So `capture` raised **"no X window behind this handle"** for a window that
+was on screen, fully enumerated and already correlated. That message names
+the one cause it was written for -- a control is an accessible with no
+drawable of its own (D#8) -- so the failure reads as the caller asking for
+the wrong thing rather than as the backend being unable to find a window it
+had already found. A wrong answer wearing a right answer's error message is
+worse than a crash, which is why this is an entry and not a patch.
+
+**The decision: one bridge, and the tree owns it.** `tree._correlate_frame`
+already resolves every frame to an xid at enumeration time, by accessible
+name against `_NET_WM_NAME` and by size where the name alone is ambiguous
+(D#40d), and it already tells `display` what it learned -- that call is what
+fills the XRes aliases D#101 needs. It was exposed as `tree.frame_xid_of`
+and left **with no callers at all**: the bridge was built, wired into
+`display`, and never asked. `_toplevel_xid` now asks it, and the pid match
+and both forks are deleted.
+
+**Keying on the frame's path is what makes the modal case answerable.** Two
+windows of one process are indistinguishable by pid *by construction* -- no
+amount of care with the property would have fixed the third failure above.
+They are trivially distinguishable by which frame node the handle descends
+from, which is what `frame_xid_of` reads. The route that could answer the
+question was chosen over the route that could not, rather than the broken
+one being made more careful.
+
+**A frame the tree declined to correlate stays declined.** `_correlate_frame`
+resolves nothing when two windows share a name *and* a size, because from
+here they are genuinely the same (D33). The capture then reports "no X
+window", which is what it already said for a handle with no drawable -- the
+two causes still share one message. That is a real loss of precision and it
+is accepted for now: both answers are "this cannot be captured", and neither
+invites a caller to act on a guess. Splitting them means a second error the
+Windows backend has no counterpart for.
+
+**Left open, deliberately.** `modality._xid_of` is still a *second*
+correlation, re-derived live against `display.windows_of` rather than read
+from the tree. It is correct -- it is the route this one was built from --
+but two bridges can disagree, and the honest fix is to make modality read
+the tree's answer too. That is a change to the modality contract with its
+own measurement, and folding it into a capture fix would be smuggling it in.
+Named here so the next implementer finds it rather than rediscovers it.
+
+**Cost.** A capture no longer runs two processes to find its window; it reads
+a dict. Evidence: issue #101; `tests/linux_xid_probe.py` (lines 16-21, which
+named the pid-match defect before it was fixed);
+`tests/test_linux_capture_bridge.py`; D#101; D#110; D#40c; D#40d; D33; D#8.
+
 ### D#102. On wxGTK3 the commit is a real Enter, and `grab_focus` both works and steals the foreground
 
 **Context.** The whole safety model of driving a live target rests on D#11
