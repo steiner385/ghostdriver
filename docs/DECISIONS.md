@@ -6605,3 +6605,95 @@ full window each time); D57 (the operator directory and runner); D62
 (every tool call traced). Operator session on `win-host`, workflows
 `issue27-charmap-edit` and `issue27-real-target-actuation` under
 `C:\gd-operator`, reports timestamped 2026-09-19 08:48-08:58 UTC.
+
+### D#30. Gate 4's ideal case, run: the same caption realized on two stacked pages
+
+**Context.** D76's Gate 4 passed, but not by the route `docs/VALIDATION.md`
+describes as the discriminating test: "the same caption on two *tab
+pages*". Only one page was loaded in that session, so ancestor scoping was
+proven on a repeated toolbar caption instead — a real test, but not the
+one D31 was written for, where a wrong answer is plausible rather than
+obviously wrong because the two matches sit at the same offset on two
+different pages.
+
+**What was run.** Windows' own File Explorer Options dialog (`explorer.exe
+shell:::{6DFD7C5C-2451-11d3-A299-00C04F8EF6AF}`), on win-host's real desktop
+— the same box and account D#27 drove, on a later session. This route
+stays in-process in `explorer.exe` rather than going through
+`rundll32.exe shell32.dll,Control_RunDLL`, so it sidesteps D#27's own
+finding that the CPL route's hidden owner window trips `modals`' guard.
+`modals` still reports the dialog *holding* an internal stub window
+(`MSGlobalFolderOptionsStub`, the property sheet's own housekeeping
+window) — a normal ownership relation, not the same block.
+
+**The caption.** The General and Search pages both carry a button whose
+window text is `&Restore Defaults`, character for character. The View
+page's equivalent button is `Restore &Defaults` — the accelerator sits
+before a different word, so it is not the same string and would not
+satisfy an exact-text locator against either of the other two. Worth
+recording because it is exactly the kind of near-miss D31 exists to
+guard against: two captions that read the same to a person and are not
+the same string a locator matches.
+
+**Realizing both pages at once.** A property sheet page is created the
+first time it is shown and, once created, is only hidden on tab switch,
+never destroyed — so visiting General, then View, then Search left all
+three pages' controls in the tree at once, one visible and two hidden.
+Getting there needed a real posted click on the tab item, not a
+programmatic selection: `TCM_SETCURSEL` (and UI Automation's
+`SelectionItem.Select`, per the existing note in
+`backends/windows/verbs.py::click_element`) marks a tab selected without
+sending `TCN_SELCHANGE`, so the dialog's own page-switch handler — the
+thing that actually creates the new page — never runs.
+
+**The result.**
+
+```
+within=(class=#32770 text='General'): ['0x2014a']
+within=(class=#32770 text='Search'): ['0x20174']
+within=(class=#32770 text='View') [View has no such caption]: []
+unscoped: ['0x20174', '0x2014a']
+```
+
+Unscoped, the caption is ambiguous, exactly as D33 says it must be. Scoped
+to either page's own `#32770` container, `within=` returns exactly one
+handle, and the two handles differ — the case D31 was written for,
+confirmed on a real target rather than the fixture. Scoped to the page
+that does not carry the caption, it returns nothing rather than the
+nearest wrong answer, which is D33's refusal again, now exercised against
+a real dialog's frame rather than a fixture built to exercise it.
+
+**A hazard worth recording for the next Gate 4 session.** `VALIDATION.md`
+points a tester at the Python API directly for this test, and getting a
+tab's on-screen rectangle to post a click at (there being no `find`
+route to a `SysTabControl32` item — the CLI's `find`/`describe` walk the
+window tree only, and none of the accessible-element resolution the
+`type=` locator field expects is wired into them) means sending
+`TCM_GETITEMRECT` across processes. `SendMessage` with a bare local
+pointer for a message like this is not automatically marshaled: it
+crashed `Explorer.EXE` outright on the first attempt (access violation in
+`comctl32.dll`, Windows' self-healing `userinit.exe` restarted the shell
+within about a second — win-host was confirmed idle first, and the
+restart's only visible cost was any Explorer windows the account had
+open). The fix is `VirtualAllocEx`/`ReadProcessMemory` against the target
+process, the usual cross-process marshaling pattern, checking the send
+and the read both succeeded, and refusing to click on an implausible or
+out-of-bounds rectangle before posting anything. None of this touches
+ghostdriver's own code — the crash was in ad hoc exploration tooling
+standing in for the human hand `VALIDATION.md`'s Gate 4 recipe assumes —
+but a future session reaching for the same Python-shell recipe will want
+the same guard.
+
+**What this moves.** D76's Gate 4 caveat — "the runbook's ideal test...
+was not available" — no longer holds against any target: it has now run,
+on a real one, without a fixture built for it. The real-target scorecard
+row's read-only half (D76: discovery, classification, scale, locator and
+ancestor scoping, text reading, non-interference) gains its one missing
+case; actuation end to end remains the state D#27 left it in.
+
+**Evidence.** Issue #30; D76 (Gate 4); D#27 (the same win-host session
+family, and the CPL/rundll32 modal-guard finding this reuses rather than
+repeats); D31 (`within=` exists because this exact case needs it); D33
+(refuse ambiguity, both directions); `docs/VALIDATION.md` Gate 4;
+`backends/windows/verbs.py::click_element`'s note on `SelectionItem`
+selection not notifying the application.
