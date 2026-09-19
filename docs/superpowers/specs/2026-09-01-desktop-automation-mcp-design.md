@@ -586,7 +586,7 @@ after the application self-foregrounds.
 | Item | Reason |
 |---|---|
 | Linux/X11 backend (AT-SPI, Xephyr, MPX) | Separate spec. Core model guards against Win32 leakage (§3.2) |
-| Web driver (Playwright) | Separate spec. Solved problem; no interference issue |
+| ~~Web driver (Playwright)~~ **Answered — D#16** | Not deferred, declined: the fixed surface already drives an embedded engine with no protocol (D58), so a driver would fork the surface rather than extend it (D1). A sibling, if ever. Reopening condition in D#16 |
 | HTTP/API client as test oracle | Separate spec. Belongs to orchestration, not the driver |
 | Test orchestration and assertion DSL | Separate spec, built on this one |
 | `vm` isolation strategy | After `hidden_desktop` proves insufficient |

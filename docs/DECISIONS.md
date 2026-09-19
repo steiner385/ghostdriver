@@ -6003,3 +6003,94 @@ it reports green with the protocol binding untested.
 **Evidence.** Issue #159; the before/after above, both produced on this
 machine's system interpreter at mcp 1.28.0; `tests/test_mcp_dependency.py`;
 `tests/conftest.py`; D#39; D#53; D#58.
+
+### D#16. A browser driver stays out; the fixed surface already reaches the web
+
+**Context.** Issue #16 is one of the five spec §12 rows (#16-#20) that
+`docs/product/features/deferred-scope-tracking.md` exists to keep visible
+without scheduling. It was dispatched for implementation anyway. Its body
+does not ask for code -- its "Before picking this up" section asks a
+question, whether a first-class browser driver belongs in this repository
+at all -- and that question has never been answered in writing here.
+
+**The record the feature doc points at is missing.** That doc's non-goals
+say re-deciding a deferred item is out of scope because "that call is
+already recorded in `docs/DECISIONS.md` and spec §12". For #16 it is not.
+§12 has a one-line reason, and the only browser sentence in this log is
+D58's closing paragraph, about a *browser protocol for an engine that
+cannot be woken* -- which is the other thing, and the thing #16's body
+opens by saying it is not. An item whose only written reason is "deferred"
+reads to the next triage run as unscheduled work. That reading is what
+produced this session, so the answer is written out rather than assumed.
+
+**The spec's stated reason is the weaker half.** "Solved problem" decides
+nothing on its own. Most of what this repository does is solved elsewhere,
+and was built here anyway, because the solutions elsewhere assume a desktop
+nobody is sitting at.
+
+**The load-bearing half is measured, and it is already in this log.** D58
+drove a real Chromium engine through the *existing* tool surface: it woke a
+dormant document tree, resolved the page's buttons, tabs and inputs with
+B1's ordinary element locators, clicked them with the posted button pair,
+replaced a value and saw the page commit it on tab-out, took tier 1 under a
+commit expectation, and refused a password field by the same rule that
+protects a native one. No tool was added and no protocol was spoken. So the
+browser is not an unreached target that a driver would reach. It is a
+reached one, and a driver would be a second way to do what the surface
+already does.
+
+**That is what makes D1 bind here rather than merely apply.** The
+fixed-surface constraint says onboarding an application must not grow the
+surface. A browser driver would do worse than grow it -- it would fork it.
+The same page button would be addressable by two unrelated locator
+vocabularies, with different resolution rules and different failure modes,
+and D33's refusal to pick between ambiguous matches has nothing to say
+about ambiguity between *surfaces*: a caller holding a locator would first
+have to know which of the two worlds it came from.
+
+**And the hazard this codebase exists for does not reach a browser.** The
+focus guard, the tier ladder, the disturbance report, session consent, the
+cadence -- every one is bought against a single hazard, an automation and a
+person contending for one desktop. A browser driver has its own process and
+its own profile and contends for nothing. Housed here it would pay for
+guarantees it cannot use, and every later change to those guarantees would
+have to be reasoned about against a target that cannot experience them.
+
+**Decision.** A browser driver is out of this repository. If it is ever
+wanted it is a sibling sharing the orchestration layer -- §12's own "Test
+orchestration and assertion DSL" row, issue #18 -- and not a backend under
+`backends/`. That directory is the *platform* seam (D59): `load()` picks by
+`sys.platform`, and a browser is not a platform. An entry there would make
+the registry answer two different questions depending on which entry was
+read, which is the defect R4 split the region model to remove.
+
+**Nothing new is added to enforce it, because something already does.**
+`tests/test_mcp_server.py` and `tests/test_mcp_stdio.py` assert set
+*equality* against `EXPECTED_TOOLS`, not containment, so a driver that
+reached the protocol layer fails them by name. A dependency blocklist was
+considered and rejected: it names the wrong condition, passing a
+hand-rolled CDP client and failing a browser package installed for
+something else. What a guard that names the wrong condition costs is
+already recorded twice here (D#53, D#159).
+
+**Disagreeing with this** has a real case, and it is D58's own last
+paragraph. That measurement reached the page through a Win32 *host window*
+-- posted clicks and characters to an HWND. A target that is a browser and
+nothing else, or the same embedded engine on the Linux backend that does
+not exist yet (D59), is not covered by it. The argument for a browser
+driver should be made from that gap, with a measurement in it.
+
+**What would reopen it, and what would not.** D58 already states the
+condition for the *embedded* case -- a host that answers neither posted
+clicks nor characters -- and that reopens the browser protocol, which is a
+different question: answering it yes would not answer this one. This issue,
+a browser as a first-class target driven by its own vocabulary, reopens on
+a target this project would otherwise accept under one of §2's profiles,
+whose web content cannot be reached through the accessible surface *and*
+for which the pattern route on the ladder also fails. "A browser would be
+easier" is not that condition, in the same way #19 and #20 are explicit
+that the awkwardness of the current strategy is not theirs.
+
+**Evidence.** Issue #16; spec §12 and §2.3 (profile W1);
+`docs/product/features/deferred-scope-tracking.md`; D1; D33; D58; D59; R4;
+`tests/test_mcp_server.py::EXPECTED_TOOLS`.
