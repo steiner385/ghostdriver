@@ -15,14 +15,13 @@ import asyncio
 import pytest
 
 from ghostdriver.session import SessionManager
-from tests.conftest import mcp_or_skip, on_windows
+from tests.conftest import mcp_module, on_windows
 
 pytestmark = pytest.mark.slow
 
-# Gated on the distribution version, not the module's `__version__`: mcp
-# 2.1.1 does not set one, and `importorskip(minversion=...)` read that as
-# "no version" and skipped this entire suite on a correct install (#53).
-mcp = mcp_or_skip()
+# The version gate runs once at session start (conftest.pytest_configure),
+# so by here the distribution is known good and this is only the import (#159).
+mcp = mcp_module()
 
 READ_TOOLS = {
     "list_targets", "attach", "release", "grant_targets",

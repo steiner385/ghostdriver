@@ -14,20 +14,14 @@ import os
 import sys
 
 import pytest
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
-from tests.conftest import mcp_or_skip, on_windows
+from tests.conftest import on_windows
 
-# See conftest.mcp_or_skip: gated on the distribution version, because the
-# module does not always carry a `__version__` to gate on (#53).
-mcp_or_skip()
-
-# Imported after the gate on purpose, which is why these carry a noqa: on a
-# 1.x install `mcp.client.stdio` does not exist, so importing it at the top
-# of the file would raise the ModuleNotFoundError the gate exists to turn
-# into a skip. ruff waives E402 after `pytest.importorskip` by name; it
-# cannot know this call does the same job.
-from mcp import ClientSession, StdioServerParameters  # noqa: E402
-from mcp.client.stdio import stdio_client  # noqa: E402
+# These import at the top like anything else now. The session refuses to start
+# at all on a 1.x install, where `mcp.client.stdio` does not exist, so there is
+# no longer a gate to import after -- and no E402 to waive (#159).
 
 pytestmark = pytest.mark.slow
 

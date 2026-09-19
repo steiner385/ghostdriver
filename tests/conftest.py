@@ -69,41 +69,78 @@ def _version_tuple(text: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def mcp_or_skip(minimum: str = "2.1"):
-    """Import `mcp`, or skip -- gated on the **distribution** version.
+#: 1.x is importable and then fails deep inside -- FastMCP was renamed
+#: MCPServer at the 2.0 boundary, so `import mcp` succeeds and
+#: `mcp.server.mcpserver` does not exist.
+MCP_MINIMUM = "2.1"
 
-    `pytest.importorskip(..., minversion=...)` reads the *module's*
-    `__version__` attribute, and mcp 2.1.1 ships without one. So a correct
-    install was read as version `None`, judged below the minimum, and the
-    entire protocol-layer suite skipped with a reason that looked plausible:
-    "module 'mcp' has __version__ None, required is: '2.1'" (#53).
 
-    That is the trap this project is built around -- a green run that
-    verified less than it looks -- in its most dangerous form, because the
-    skip *explained itself* and the explanation was wrong.
+def _installed_mcp_version() -> str | None:
+    """The mcp *distribution's* version, or None if it is not installed.
 
-    The version a package manager installed lives in distribution metadata,
-    which every distribution has, rather than in an attribute a module may or
-    may not set by convention. So this reads `importlib.metadata.version`.
-
-    **A missing distribution still skips; a too-old one skips saying what it
-    found.** Both are real answers about the environment. What no longer
-    happens is a good install being mistaken for either.
-
-    The minimum is 2.1 because 1.x is importable but renamed `FastMCP` to
-    `MCPServer` at the 2.0 boundary -- it answers the import and then fails
-    every test with a `ModuleNotFoundError` on an inner path.
+    Distribution metadata rather than the module's `__version__`, because mcp
+    2.1.1 ships without that attribute. `pytest.importorskip(..., minversion=)`
+    reads the attribute, so a correct install was read as version `None`,
+    judged below the minimum, and the entire protocol suite skipped with a
+    reason that looked plausible and was wrong (#53).
     """
     import importlib.metadata
 
     try:
-        installed = importlib.metadata.version("mcp")
+        return importlib.metadata.version("mcp")
     except importlib.metadata.PackageNotFoundError:
-        pytest.skip("the protocol layer is an optional extra: "
-                    "pip install -e .[server]")
+        return None
+
+
+def protocol_layer_refusal(installed: str | None, minimum: str = MCP_MINIMUM) -> str | None:
+    """Why the protocol layer cannot be tested, or `None` if it can.
+
+    Takes the version rather than looking it up, so the decision can be tested
+    by feeding it values instead of by breaking an install. A test that had to
+    uninstall mcp to check this would only run where the bug cannot be
+    reproduced, which is the mistake #39 catalogued.
+    """
+    if installed is None:
+        return ("the protocol layer is not installed: this suite needs mcp "
+                f"{minimum} or newer. Install it with: pip install -e '.[server]'")
     if _version_tuple(installed) < _version_tuple(minimum):
-        pytest.skip(f"mcp {installed} is installed; the protocol layer needs "
-                    f"{minimum} or newer (1.x renamed FastMCP to MCPServer)")
+        return (f"mcp {installed} is installed; this suite needs {minimum} or newer "
+                "(1.x renamed FastMCP to MCPServer, so 1.x imports and then fails "
+                "on an inner path). Upgrade with: pip install -e '.[server]'")
+    return None
+
+
+def refuse_unusable_protocol_layer(installed: str | None) -> None:
+    """Stop the whole run, saying why (#159).
+
+    Deliberately not a skip. `pytest.skip` at module level *is* a collection
+    error, and pytest reports it by explaining `allow_module_level` -- a
+    message about pytest's own API that never names mcp, the version required,
+    or the remedy. The run stopped either way; only the reader was left
+    guessing which of two numbers was wrong.
+
+    Stopping is the right outcome and stays. A suite that cannot exercise the
+    protocol layer has lost that coverage, and the thesis this project is built
+    on is that lost coverage must be loud rather than quietly subtracted from a
+    green run (D#39, D#53, D#58).
+
+    `UsageError` because it is reported as a plain message with no traceback,
+    before collection -- so it reads as a statement about the environment,
+    which is what it is.
+    """
+    reason = protocol_layer_refusal(installed)
+    if reason is not None:
+        raise pytest.UsageError(reason)
+
+
+def mcp_module():
+    """The `mcp` module, which `pytest_configure` has already vetted.
+
+    No gate of its own: by the time any test module imports this, the session
+    either refused to start or the distribution is good.
+    """
+    import importlib
+
     return importlib.import_module("mcp")
 
 
@@ -924,6 +961,10 @@ def modal_target():
 # Started here so it covers every test; asserted in test_zz_focus_guard.py.
 
 def pytest_configure(config):
+    # First, before a watch thread or anything else: an unusable protocol
+    # layer stops the run here rather than as a collection error later (#159).
+    refuse_unusable_protocol_layer(_installed_mcp_version())
+
     from tests.focusguard import ForegroundWatch
 
     watch = ForegroundWatch()

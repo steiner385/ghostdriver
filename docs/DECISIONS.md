@@ -5929,3 +5929,77 @@ that from one data point to a pattern.
 **Evidence.** Commands and output above, run interactively against
 `charmap.exe`'s live `CharGridWClass`; `docs/DECISIONS.md`'s own D46; issue
 #1; issue #20; issue #141 (the refusal-guard defect this session found).
+
+### D#159. The stop stays; what it says changes
+
+**Context.** `conftest.mcp_or_skip()` was called at module level by
+`test_mcp_server.py` and `test_mcp_stdio.py`. On a missing or too-old
+protocol layer it called `pytest.skip(...)` there -- and a skip outside a test
+is a collection error. pytest reported it by explaining its own API:
+
+```
+Using pytest.skip outside of a test will skip the entire module. If that's
+your intention, pass `allow_module_level=True`.
+...
+!!!! Interrupted: 2 errors during collection !!!!
+```
+
+No test in the repository ran, and nothing printed named `mcp`, named the
+version required, or named the remedy.
+
+**The outcome was already right.** The instinct is to reach for
+`allow_module_level=True` and restore the skip. That is the wrong repair. The
+protocol layer is an optional extra, but a suite that cannot exercise it has
+*lost that coverage*, and this project exists on the premise that lost
+coverage must be loud rather than subtracted quietly from a green run. D#39,
+D#53 and D#58 are three versions of the same lesson. Turning this into a
+clean skip would have made it a fourth.
+
+**So the stop stays, and stops saying the wrong thing.**
+
+```
+ERROR: mcp 1.28.0 is installed; this suite needs 2.1 or newer (1.x renamed
+FastMCP to MCPServer, so 1.x imports and then fails on an inner path).
+Upgrade with: pip install -e '.[server]'
+```
+
+Three changes produce that. The check moved to **session start**, because the
+condition is a fact about the environment and not about either module -- one
+message before collection instead of two collection errors. It raises
+**`pytest.UsageError`**, which pytest prints as a plain line with no traceback
+and exits `4`. And the message carries both numbers and the fix, because the
+reader's next question is always which of the two is wrong.
+
+**D#53 fixed what the gate measures; this fixes what it reports.** D#53 moved
+the gate from the module's `__version__` to distribution metadata, and was
+right to. It left the reporting alone, and the reporting became the part that
+misled -- the same entry's own warning, that the danger is a gate which
+*explains itself* wrongly, turned out to apply to its own successor.
+
+**The decision is a pure function, on purpose.**
+`protocol_layer_refusal(installed, minimum)` is handed a version and returns
+the reason or `None`. It does not look anything up. A test for "an absent mcp
+is refused" that had to uninstall mcp could only run where the bug cannot
+happen, which is exactly the shape #39 catalogued. Fed values instead, the
+cases run everywhere, on every platform, with nothing staged. The end-to-end
+promise -- that a refusal stops a run *before any test body executes* -- is
+proved by a subprocess pytest whose conftest refuses on purpose, and asserted
+on a file the inner test would have written, because an exit code alone
+cannot tell a refusal from a collection error.
+
+**How it was found is worth keeping.** `CLAUDE.md` documents the command as
+`PYTHONPATH=src python3 -m pytest`, which uses whichever `python3` is on
+PATH. The repo `.venv` holds mcp 2.1.1 and is correct; this machine's system
+interpreter holds 1.28.0. Running the documented command without activating
+the venv reproduces it in full, and the report gives the reader no way to
+discover that the interpreter is the problem. The defect is real independent
+of that mistake -- but it took making the mistake to see it.
+
+**Disagreeing with this** means arguing the extra is optional enough that its
+absence should not stop anything. That case can be made; it is the ordinary
+meaning of "optional extra". It has to answer what the suite is claiming when
+it reports green with the protocol binding untested.
+
+**Evidence.** Issue #159; the before/after above, both produced on this
+machine's system interpreter at mcp 1.28.0; `tests/test_mcp_dependency.py`;
+`tests/conftest.py`; D#39; D#53; D#58.
