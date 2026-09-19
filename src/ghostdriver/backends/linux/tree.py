@@ -185,6 +185,20 @@ def _applications() -> list[Any]:
     gi.require_version("Atspi", "2.0")
     from gi.repository import Atspi
 
+    from . import desktop_claim
+
+    owner = desktop_claim.effective_owner()
+    desktop_claim.claim()
+    # AT-SPI, unlike Xlib, has no explicit-argument escape from the ambient
+    # environment (D#40f) -- `Atspi.init()` only ever reads
+    # `AT_SPI_BUS_ADDRESS` / `DBUS_SESSION_BUS_ADDRESS`. Setting them here
+    # is safe to do permanently, not just for this call: `claim()` above
+    # already guarantees no other bus will ever be reached from this
+    # process, so there is nothing a later, ordinary call could be
+    # surprised by.
+    for key, value in desktop_claim.environment_for(owner).items():
+        if key in ("AT_SPI_BUS_ADDRESS", "DBUS_SESSION_BUS_ADDRESS"):
+            os.environ[key] = value
     _require_accessibility_bus()
     Atspi.init()
     desktop = Atspi.get_desktop(0)

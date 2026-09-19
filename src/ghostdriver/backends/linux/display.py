@@ -13,6 +13,12 @@ Every fact here was measured before it was coded:
 * **Un-hiding focuses.** There is no route that reveals a window without
   activating it, so `restore` hands over the foreground by necessity rather
   than by choice (D#14).
+* **One connection per claimant, not one connection total.** `HiddenDesktop`
+  (#40 slice 5b) needs its own, to a different `DISPLAY`, from inside the
+  same process that may already hold one to the operator's -- unlike AT-SPI
+  (`desktop_claim.py`), Xlib has no vendor limit on that, so the cache below
+  is keyed by `desktop_claim.effective_owner()` rather than being a single
+  slot.
 """
 
 from __future__ import annotations
@@ -22,16 +28,20 @@ import threading
 from typing import Any
 
 from .. import AccessibilityUnavailable
+from . import desktop_claim
 
 _LOCK = threading.Lock()
-_DISPLAY: Any = None
+_DISPLAYS: dict[str, Any] = {}
 
 
 def _display() -> Any:
-    """The shared connection, opened once.
+    """The connection for whoever is asking right now, opened once each.
 
     Not per-call: opening an X connection costs a round trip, and a watch
     that opened one per sample would spend more time connecting than looking.
+    Cached per claimant (see the module docstring) rather than once for the
+    whole process, so a hidden-desktop claim gets a connection to its own
+    `DISPLAY` without disturbing a connection already open to the operator's.
 
     The second of this backend's two external dependencies, and the one a
     machine can be missing while having the other. #58 guarded the
@@ -44,13 +54,24 @@ def _display() -> Any:
     Reported as the same `AccessibilityUnavailable`, because to a caller it
     is the same fact: the desktop this backend reads is not there.
     """
-    global _DISPLAY
+    owner = desktop_claim.effective_owner()
     with _LOCK:
-        if _DISPLAY is None:
+        conn = _DISPLAYS.get(owner)
+        if conn is None:
+            desktop_claim.claim()
             from Xlib import display, error
 
+            # Explicit rather than ambient: swapping `os.environ["DISPLAY"]`
+            # process-wide would race any other thread reaching for its own
+            # first connection (a watch on an unrelated, ordinary session),
+            # so a hidden desktop's own DISPLAY, registered at `prepare`
+            # time, is passed straight to `Display()` instead. The
+            # operator's own claim registers nothing, which is correct --
+            # `Display()` with no argument reads the ambient environment,
+            # which for the operator's own desktop is exactly right.
+            display_name = desktop_claim.environment_for(owner).get("DISPLAY")
             try:
-                _DISPLAY = display.Display()
+                conn = display.Display(display_name)
             except (error.DisplayNameError, error.DisplayConnectionError) as exc:
                 raise AccessibilityUnavailable(
                     f"cannot open the X display: {exc}. This backend reads "
@@ -58,7 +79,8 @@ def _display() -> Any:
                     "pointing at a running server -- on a headless box that "
                     "has to be arranged deliberately, for instance with Xvfb."
                 ) from exc
-        return _DISPLAY
+            _DISPLAYS[owner] = conn
+        return conn
 
 
 def _atom(name: str) -> int:
@@ -157,6 +179,25 @@ def exists(xid: int) -> bool:
         return True
     except Exception:
         return False
+
+
+def connection() -> Any:
+    """The shared connection for whoever is asking, exposed for the one
+    caller that needs the raw Xlib object rather than a fact read through
+    it: `notice.py`, which draws a window instead of reading one."""
+    return _display()
+
+
+def wm_present() -> bool:
+    """Whether a window manager has attached to this display yet.
+
+    `_NET_SUPPORTING_WM_CHECK` is what a WM sets on the root window to
+    announce itself; a bare `Xvfb` never sets it (D75). `HiddenDesktop`
+    polls this while bringing gnome-shell up, since `_NET_CLIENT_LIST` and
+    `_NET_ACTIVE_WINDOW` -- what the rest of this module reads -- come from
+    the WM, not the server, and answer nothing until one is there.
+    """
+    return _prop(_root(), "_NET_SUPPORTING_WM_CHECK") is not None
 
 
 def client_windows() -> list[int]:

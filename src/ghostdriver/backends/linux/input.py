@@ -8,8 +8,10 @@ window without taking the operator's focus or pointer, **does not exist on
 this platform.** The only rung below tier 1 is tier 4, real synthetic input,
 which takes the actual focus and pointer and is therefore acceptable only
 where the input being taken is not the operator's -- i.e. inside the nested
-X server. `HiddenDesktop` is not built on Linux yet (#40 slice 5b), so tier
-4 has nowhere safe to run and is not offered.
+X server. `hidden_desktop.py` builds that (#40 slice 5b), but these ladders
+do not yet route through it: routing tier 4 through a hidden desktop's
+claim is its own follow-on, not done by slice 5b building the desktop
+itself, so tier 4 is still not offered here.
 
 The consequence is worth stating plainly rather than discovering: **a control
 that tier 1 cannot reach cannot currently be actuated at all on Linux.** D#10

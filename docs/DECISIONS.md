@@ -3673,6 +3673,96 @@ position D#40d found AT-SPI does not report. They wait on slice 5b.
 
 Evidence: #40 slice 4; D#10; D#11; D#12; D#34b; D#40d; D10; D53; issue #43.
 
+### D#40f. Slice 5b: a claim, not a bind -- `Atspi.init()` has no second bus
+
+**Context.** `docs/LINUX.md` proposed the nested-display mechanism and, for
+`HiddenDesktop`, a shortcut Windows does not have: "no thread binding needed
+-- the display is an environment variable." Slice 4a's finding that tier 4
+had nowhere safe to run was blocking on this being built. It was measured
+before being trusted, and the shortcut turned out to be half right.
+
+**The half that holds: X11 has no equivalent of `CreateDesktopW`'s
+per-thread bind, and does not need one.** An `Xlib.display.Display()` is a
+plain object; nothing in Xlib stops a process holding two, one per
+`DISPLAY`. `display.py`'s single `_DISPLAY` slot was rewritten to a cache
+keyed by claimant (`desktop_claim.effective_owner()`) rather than one
+global, and that alone is sufficient for a process to read the operator's
+own display and a nested one in the same lifetime.
+
+**The half that does not: AT-SPI is a process-wide singleton, and there is
+no route around it.** Three things were tried against two real nested
+buses (`Xvfb` + a private `dbus-daemon` + `at-spi-bus-launcher`, each pair
+carrying a distinct copy of the GTK fixture so which bus answered was
+unambiguous, not just which bus was reachable):
+
+1. **Reconnect.** A second `Atspi.init()` after changing every relevant
+   environment variable (`DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`,
+   `AT_SPI_BUS_ADDRESS`) does not reconnect. It is idempotent at the C
+   library level and keeps answering from the bus the first call reached.
+2. **Fork.** A forked child that changes its own environment and calls
+   `Atspi.init()` still reports the parent's application, not its own --
+   the live D-Bus connection is inherited across the fork regardless of the
+   child's environment, because the C library's connection object, not
+   Python's module state, is what got duplicated.
+3. **`Atspi.exit()` then reconnect.** Documented as the deliberate reset,
+   and it is not one: the next `Atspi.get_desktop(0)` raises through a GLib
+   assertion (`g_hash_table_insert_internal: assertion 'hash_table !=
+   NULL' failed`) rather than returning a working connection to the new
+   bus. `exit()` tears the library's state down; it does not free it for
+   reuse.
+
+**So `run` does not marshal work onto a bound context the way Windows'
+does, because there is nothing to marshal onto -- a process that has
+reached one accessibility bus can only ever reach that one, for the rest of
+its life, no matter which thread, fork, or environment asks.** The design
+question this leaves is not "how does a call reach the right bus" but "how
+does a process find out, before it launches a target onto a display it can
+then never read from, that it has already spent its one bus on something
+else." `desktop_claim.py` is that: a single claim, taken by whichever of
+`display.py`'s or `tree.py`'s connection-opening code runs first, naming
+`"the operator's own desktop"` by default or a `HiddenDesktop`'s own name
+inside `desktop_claim.desktop(name)`. A second, different claimant is
+refused immediately, with the measurement above in the refusal, rather than
+being left to read a target's tree and silently get the wrong one back
+(D33: refuse ambiguity rather than picking; D53: a target the strategy
+cannot fit is reported as such).
+
+**`HiddenDesktop.run` is consequently almost nothing: a context manager
+around `fn()`.** Once `prepare()` has claimed the process and the nested
+`DISPLAY` / `DBUS_SESSION_BUS_ADDRESS` / `AT_SPI_BUS_ADDRESS` are set, every
+ordinary contract function -- `enumerate_process`, `read_window_text`, and
+the rest -- reaches the nested display and bus on its own, because they are
+the only ones this process can reach at all. `desktop_claim.desktop(self.
+name)` exists so those calls are *recognised* as the claim already held
+rather than a conflicting second one, not so they are *routed* anywhere.
+
+**A consequence worth stating plainly: the claim never releases.**
+`teardown()` stops the nested display's processes but does not, and cannot,
+give the process back its ability to reach a different accessibility bus --
+that ability was never something `HiddenDesktop` held to begin with, per
+the measurement above. A server process that has ever launched one hidden
+desktop has spent its one bus for the rest of its life; a second
+`launch_isolated` call, or any ordinary session, correctly refuses rather
+than silently reusing the first desktop's tree.
+
+**Also built:** `gnome-shell --x11` under the private bus (D75's window
+manager requirement, mirrored from measurement 1's nested-bus proof in
+`tests/test_linux_atspi.py`), polled via a new `display.wm_present()`
+(`_NET_SUPPORTING_WM_CHECK`) rather than a blind sleep; and `OperatorNotice`
+as an override-redirect X window with `_NET_WM_STATE_ABOVE`, drawn with the
+server's own `fixed` font rather than a toolkit, since it is the one piece
+of this backend that draws instead of reading and pulling in GTK for one
+window would be a large dependency for a small one.
+
+**Not done in this slice.** `region_evidence`, `resolve_hosted_app`,
+`assess_uia`, `assess_msaa` (slice 6) wait on the embedded-document
+measurement (#15) and a decision about what UIA/MSAA richness becomes with
+no Linux counterpart. Routing tier 4's ladders in `verbs.py` through
+`HiddenDesktop` now that it exists is a follow-on, not part of this slice --
+D#40e's empty tier-4 rungs are unchanged here.
+
+Evidence: #40 slice 5b; D#8; D#9; D33; D53; D75; D#40e; issue #40.
+
 ### D#43. The third state gets a name instead of borrowing `None`
 
 **Context.** `read_window_text` returns `str | None`, and `None` meant *did
