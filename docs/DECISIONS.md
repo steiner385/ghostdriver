@@ -6489,3 +6489,119 @@ asserted only by prose in D#40e, never by a test.
 
 **Evidence.** Issue #105; D#40e; D#40d; D#105; D70; `docs/LINUX.md`'s
 clipboard rows; `tests/test_linux_clipboard.py`; `tests/test_linux_input.py`.
+
+### D#27. The actuation half runs against a real target, and does not always land
+
+**Context.** D76 closed the read-only half of real-target validation and
+left the other half explicitly open: "no workflow has driven a control end
+to end against the real application under the interference watch. That
+remains the operator's." This is that session -- an operator session on
+`win-host` (a real Windows 11 Home desktop, not a fixture), driving the
+runner (D57) against whatever real applications the box actually has, under
+the interference watch (D62), through `run-workflow` exactly as any
+operator would.
+
+**The desktop was not manufactured for this.** No autologon rig, no
+dedicated test account: the workflows ran as scheduled tasks with an
+`Interactive` principal bound to the account already holding the console
+(`schtasks`'s "run only when logged on"), which lands a process in the
+same session as an already-open desktop rather than creating one. The
+account's own prior session -- a real Windows Terminal window, a real
+browser, Steam, 1Password -- stayed open and untouched throughout. One
+finding came directly from that: launching Windows 11's own Notepad with
+no file argument silently restored the account's actual previous document
+(a PuTTY `README.txt`, not a blank buffer) rather than starting empty --
+measured, not assumed, and the run was aborted and the process killed
+before anything was typed into it. A driving script cannot treat "just
+launched" as "blank canvas" on a real desktop; it must check title or
+content first.
+
+**Proven: a standard control, end to end.** Character Map's "Characters to
+copy" box (`class=RICHEDIT50W`, a real Win32 rich-edit control, not this
+project's fixture) was found, written to, and read back --
+`find` → `set_value` → `read`, all three steps passing. The write landed
+at tier 3 (`WINDOW_MESSAGE`, route `typed`); `verified` came back
+`"display"`, not `"committed"`, because no `expect` was given -- the tool
+told the truth about what it had and had not checked, exactly as D77 and
+`set_value`'s own docstring describe. `find` additionally reported the
+control `obscured: covered by CASCADIA_HOSTING_WINDOW_CLASS` (a real,
+concurrently open Windows Terminal overlapping it on screen) -- reported,
+not acted on, and the write succeeded anyway, because a window-message
+write does not require being on top. A disturbance stayed information, not
+a verdict (D28), on a desktop that was actually busy rather than the
+fixture's controlled idle. `interference` and `watchdog_events` were both
+empty for every workflow run this session -- nothing took the foreground
+across the whole exercise.
+
+**Contradicted: a pattern-less standard control did not respond to a
+posted click.** Resource Monitor's own tab strip (`class=SysTabControl32`
+-- a common control, not a vendor one) reports `0 accessible elements` and
+`no child windows` from `surfaces`, an emptier reading than D76's vendor
+`Pane` controls got. D76's model says a pattern-less real HWND is driven
+by a posted click at a point (D53's ladder, tier `WINDOW_MESSAGE`); three
+calibrated attempts to switch it from "Overview" to "CPU" -- the first
+guessing an even five-way split of the control's full width, the second
+correcting that guess but subtracting the wrong frame's origin (screen
+`left` instead of the capture image's own left), the third using
+`capture`'s own screenshot, cropped and measured directly, landing
+correctly on the tab's centre -- never switched the tab. A follow-up
+`capture` after the "correct" click confirmed the same "Overview"
+highlight was still showing on screen: the click was not merely unproven,
+it did nothing. The tool never claimed otherwise. Two honest shapes
+appeared across the attempts, on the identical target and point: "every
+tier delivered but none produced the expected result... verified is
+'delivery_only', expected 'effect'" (the `{"changed": true}` postcondition
+correctly found nothing moved), and, on a later attempt with no `expect`
+at all, "no tier could act on this element (tried [3])" (delivery itself
+declined, with no exception recorded). Which of the two a given attempt
+gets is not explained by anything this session controlled, and is left
+open rather than guessed at (D33). What is not open to doubt: this
+control, real and standard-classed, does not take a posted click the way
+D76's vendor Pane controls did, on this real target. D53's rule held --
+the ladder reported the mismatch rather than papering over it with a
+`disturbances`-adjacent guess -- and this is the numbered exception to
+D76's generalization the way D76 itself was to the model that came before
+it.
+
+**A related, structural finding, not fixed here.** Classic Control Panel
+applets (`main.cpl`, `inetcpl.cpl`, ...), launched the only way Windows
+launches them (`rundll32.exe shell32.dll,Control_RunDLL <name>.cpl`), are
+unconditionally refused by `modals`' own ambiguity guard --
+`BLOCKED: 'Mouse Properties' is holding '<untitled RunDLL>'` -- because
+`rundll32` creates a hidden owner window that the visible dialog is
+structurally held by. This is not a bug to route around (D33, D53): it
+means a whole common class of real Windows targets is unreachable for
+actuation by construction, worth knowing before reaching for one as a
+real-target stand-in.
+
+**A second, separate gap: modern Notepad's text box is visible but
+unreachable.** `describe --all` shows Windows 11 Notepad's edit surface
+(`RichEditD2DPT`, nested under a `Microsoft.UI.Content.DesktopChildSiteBridge`
+XAML-island host) plainly. `find` and `read`, with or without
+`all_windows`, return zero matches for the identical locator against the
+identical process. The read-only tree walk and the resolve path `find`
+shares with every actuation tool disagree about what exists -- a real gap
+between the two, worth its own issue rather than a guess folded into this
+one.
+
+**What this moves.** The real-target scorecard row D60 opened and D76 kept
+open for "the operator's" half now has a real answer: actuation has run
+against a real application, under the interference watch, and both an
+honest success and an honest, reproducible non-success are on the record
+with their traces. The row closes as "run: one proven, one contradicted,
+both reported honestly" rather than "unrun". What stays open: why the
+Resource Monitor tab strip declines a posted click that a Delphi/VCL
+vendor Pane control accepted (D76) is not diagnosed here, and the Notepad
+resolve gap is not fixed here -- each is worth its own issue and its own
+measurement, not a guess spent from this one's budget.
+
+**Evidence.** Issue #27 (successor to #3); D76 (the read half, and the
+model this session found the exception to); D77 (`expect={"changed":
+true}`, `verified` states); D53 (an unfitted target is reported, not
+worked around); D33 (refuse ambiguity rather than picking); D28 (a
+disturbance is reported, never a verdict); D48, D69 (deadline-polled
+postconditions -- exercised by every `expect` in this session, over the
+full window each time); D57 (the operator directory and runner); D62
+(every tool call traced). Operator session on `win-host`, workflows
+`issue27-charmap-edit` and `issue27-real-target-actuation` under
+`C:\gd-operator`, reports timestamped 2026-09-19 08:48-08:58 UTC.
