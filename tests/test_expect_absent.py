@@ -10,7 +10,7 @@ import pytest
 from ghostdriver.operator import ENV_VAR
 from ghostdriver.session import SessionManager
 from ghostdriver.tools import Toolbox
-from ghostdriver.tools.expect import EXPECT_KEYS, parse_expect
+from ghostdriver.tools.expect import EXPECT_KEYS, parse_expect, verify_window
 
 
 @pytest.fixture
@@ -39,6 +39,18 @@ def test_absent_needs_a_locator_and_nothing_about_it():
 def test_absent_false_is_an_ordinary_presence_expect():
     parsed = parse_expect({"locator": "class=X", "absent": False, "text": "Save"})
     assert parsed["text"] == "Save"
+
+
+# --- timeout_s widens the verify window for any expect, not just changed (#73) ----
+
+def test_verify_window_reads_timeout_s_from_any_expect():
+    assert verify_window(None) is None
+    assert verify_window("class=TPanel") is None, "a bare locator: the default window"
+    assert verify_window({"locator": "class=TPanel"}) is None
+    assert verify_window({"locator": "class=TPanel", "timeout_s": 10}) == 10.0
+    assert verify_window({"changed": True}) == 6.0, "a surface docks slowly"
+    assert verify_window({"changed": True, "timeout_s": 3}) == 3.0
+    assert verify_window({"nonsense": 1}) is None, "malformed: _expectation reports it"
 
 
 # --- the condition ----------------------------------------------------------

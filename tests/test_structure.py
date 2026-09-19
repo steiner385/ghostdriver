@@ -198,7 +198,8 @@ IMPORT_TIME_PLATFORM_ALLOWED = {"fixtureapp.py", "fixtureapp_gtk.py",
 #: policy is not neutral after all, which is a decision worth writing down.
 MUST_RUN_EVERYWHERE = {"test_tool_contracts.py", "test_modality.py",
                        "test_disturbance.py", "test_backends.py",
-                       "test_mcp_dependency.py"}
+                       "test_mcp_dependency.py", "test_family_watch.py",
+                       "test_lifecycle_policy.py"}
 
 
 def _module_level_gate(path) -> str | None:

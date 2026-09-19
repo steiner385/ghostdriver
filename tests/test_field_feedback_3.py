@@ -15,7 +15,6 @@ import psutil
 import pytest
 
 from ghostdriver.consent import ConsentStore
-from ghostdriver.model.locator import Locator
 from ghostdriver.model.result import GhostdriverError
 from ghostdriver.policy import ConsentSource, Tier
 from ghostdriver.session import SessionManager
@@ -127,15 +126,6 @@ def test_a_refusal_names_the_tier_that_permits(app):
 
     assert not refused["ok"]
     assert "needs tier 'full'" in refused["error"]["message"]
-
-
-def test_an_unquoted_regex_with_spaces_is_one_token():
-    parsed = Locator.parse("text=/Work Order/")
-
-    assert "Work Order" in repr(parsed)
-    assert "Work Order" in repr(Locator.parse("text=/Work Order/ within=(class=TPanel)"))
-    with pytest.raises(ValueError, match="must be quoted"):
-        Locator.parse("text=Work Order")
 
 
 def test_find_says_the_display_scale_when_there_is_one(app):

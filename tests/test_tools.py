@@ -82,13 +82,6 @@ def test_the_target_list_shows_what_a_person_needs_to_decide(box, win32_target):
         assert mine[0]["consent"] is None, "undecided until someone decides"
 
 
-def test_granting_nothing_is_an_error_rather_than_a_silent_no_op(box):
-    result = box.grant_targets()
-
-    assert result["ok"] is False
-    assert "allow" in result["error"]["message"]
-
-
 def test_a_decision_can_be_revised(box, win32_target):
     box.grant_targets(restrict=[win32_target])
     assert box.attach(win32_target)["ok"] is False
@@ -108,41 +101,12 @@ def test_attach_reports_blocking_state_immediately(box, modal_target):
     assert "Confirm Delete Record" in result["blocked"][0]
 
 
-def test_attaching_to_a_dead_pid_says_so(box):
-    box.grant_targets(allow=[999_999])
-    result = box.attach(999_999)
-
-    assert result["ok"] is False
-    assert result["error"]["kind"] == ErrorKind.NOT_FOUND.value
-
-
 def test_an_unknown_tier_is_refused_by_name(box, win32_target):
     box.grant_targets(allow=[win32_target])
     result = box.attach(win32_target, tier="root")
 
     assert result["ok"] is False
     assert "read_only" in result["error"]["message"]
-
-
-# --- the gate ------------------------------------------------------------
-
-@pytest.mark.parametrize("call", [
-    lambda b: b.describe("nope"),
-    lambda b: b.find("nope", "class=X"),
-    lambda b: b.read("nope", "class=X"),
-    lambda b: b.capture("nope"),
-    lambda b: b.wait_for("nope", "class=X"),
-    lambda b: b.surfaces("nope"),
-    lambda b: b.modals("nope"),
-    lambda b: b.restore("nope"),
-    lambda b: b.probe("nope"),
-])
-def test_every_tool_refuses_an_unknown_session(box, call):
-    """The gate is not optional on any of them."""
-    result = call(box)
-
-    assert result["ok"] is False
-    assert result["error"]["kind"] == ErrorKind.NOT_FOUND.value
 
 
 def test_a_released_session_stops_working(box, win32_target):

@@ -6094,3 +6094,96 @@ that the awkwardness of the current strategy is not theirs.
 **Evidence.** Issue #16; spec §12 and §2.3 (profile W1);
 `docs/product/features/deferred-scope-tracking.md`; D1; D33; D58; D59; R4;
 `tests/test_mcp_server.py::EXPECTED_TOOLS`.
+
+### D#39a. The third group had more members than the one file D#39 fixed
+
+**Context.** D#39 found three groups inside the 41 modules then gated
+`on_windows` at module level, fixed the one file that turned out to be
+entirely group three (`test_tool_contracts.py`), and left the rest of the
+audit undone: "the audit is not" per-platform, the original issue said, and
+D#39 covered one file of it. #39 stayed open. Five more `on_windows` modules
+had been added since (41 → 46), so the remaining audit was not just old
+debt -- it was still accruing.
+
+**Read every non-`test_windows_*` gated module, function by function, not by
+file.** The earlier fix moved a whole file; this pass found group three
+hiding as *individual tests* inside otherwise-correctly-gated files -- a
+shape D#39 didn't check for. The tell was the same in every case: no
+fixture that drives a real window in the signature, and a body that either
+calls a pure function on literals or feeds a class synthetic collaborators.
+
+**Six instances, two shapes.**
+
+| test | file | what it actually needs |
+|---|---|---|
+| `test_an_unquoted_regex_with_spaces_is_told_how_to_quote` | `test_field_feedback.py` | `Locator.parse` on a string |
+| `test_an_unquoted_regex_with_spaces_is_one_token` | `test_field_feedback_3.py` | same |
+| `test_the_focus_note_names_a_tool_that_activates_windows` | `test_field_feedback_6.py` | a string constant |
+| `test_verify_window_reads_timeout_s_from_any_expect` | `test_actuation_tools.py` | a pure function on dict literals |
+| `test_a_helper_taking_the_foreground_is_the_target_taking_it`, `test_moving_between_family_members_is_not_a_new_taking`, `test_a_failing_family_snapshot_falls_back_to_the_target_alone` | `test_family_watch.py` | `InterferenceWatch` fed fake callables |
+
+The first four needed nothing platform-specific at all and were moved to
+where their subject already has neutral tests: the two `Locator` cases into
+`test_model.py` beside `test_locator_parse_class_and_text` and its
+neighbours, the guidance-string case into a new `test_guidance.py`, and the
+`expect`-window case into `test_expect_absent.py`, which already carries
+the sibling `parse_expect` cases and says so in its own docstring
+("Backend-free ... on any platform").
+
+**The `InterferenceWatch` three are the same failure D#39 fixed for
+`test_tool_contracts.py`, at import time instead of collection time.**
+`InterferenceWatch` was lifted to `ghostdriver.interference` and made
+"platform-neutral by construction" in D#111 specifically so it could be fed
+synthetic collaborators and tested anywhere. These three tests already do
+exactly that -- every argument is a lambda, no real window is ever touched
+-- but they imported the class from `ghostdriver.backends.windows.interference`
+instead, which binds `ctypes.WinDLL` through `winapi` at *module* import,
+raising `AttributeError` on Linux before the neutral test body ever runs.
+Importing the same class from `ghostdriver.interference` fixes it with no
+change to the test bodies. They stay in `test_family_watch.py`, next to the
+two tests that do drive a real fixture window and correctly keep
+`@on_windows` -- the file no longer carries a module-level gate, the same
+shape as `test_backends.py` (one Windows-only test beside neutral ones).
+
+**A seventh test was not a group-three fix but a duplicate.**
+`test_tools.py::test_every_tool_refuses_an_unknown_session` hand-checked
+nine tools against an unknown session id. `test_tool_contracts.py`'s
+`test_every_session_tool_refuses_an_unknown_session`, D#39's own fix,
+already parametrises this over *every* session tool by enumeration, all
+nine included. The hand-picked list added no coverage the enumeration
+didn't already have on every platform, so it was deleted rather than moved.
+
+**Two more were group three but not duplicates: `grant_targets()` called
+with nothing to record, and `attach` on a pid `psutil.Process` cannot find.**
+Neither reaches a backend -- `Toolbox.attach` calls `psutil.Process(pid)`
+before it ever gets to `self._trees(...)`, the same window-enumeration call
+D#39 named as the actual platform touch. `test_tool_contracts.py` was the
+wrong home (its own docstring scopes it to three specific tool-surface
+promises); these went to a new `test_lifecycle_policy.py`, added to
+`MUST_RUN_EVERYWHERE` alongside `test_family_watch.py`.
+
+**Not done here.** Group two -- tests that are neutral logic but whose
+*test* drives a real window (the `app`/`win32_target`/`held_app`/`desktop`
+fixtures, or a spawned `tests.fixtureapp`) -- is still correctly gated and
+stays that way; parametrising it over backends still needs a Linux target,
+which D#39 already deferred and this session did not revisit. The 22
+`test_windows_*.py` files were skimmed, not read function by function: a
+few no-argument "classify this MSAA/UIA verdict" tests were noticed and
+left unaudited, because their subject (MSAA, UIA) is Windows by name and
+digging further was not this session's evidence to gather. Whoever picks
+that up should read this entry's method (fixture-signature first, body
+second) rather than re-deriving it.
+
+**Measured**, full suite minus the five hanging probe-pipe modules
+`ghostdriver-linux-suite-hangs` already names plus the nested-Xvfb Linux
+suites (resource contention on this host, not a defect in this change):
+**752 passed, 2 failed, 425 skipped**, collected 1179. The 2 failures are
+`test_mypy_finds_nothing[linux]` and `[windows]`, both the pre-existing
+`OrderedDict` mismatch at `tools/__init__.py:86` on this venv's mypy
+version, reproducible on `origin/main` before this change. All nine
+relocated/fixed tests verified individually passing (not skipped) on
+Linux; the trimmed modules still collect cleanly.
+
+**Evidence.** Issue #39; D#39; D#111 (`InterferenceWatch` lifted neutral);
+`tests/test_structure.py`'s `MUST_RUN_EVERYWHERE`; `tests/test_tool_contracts.py`;
+`tests/test_family_watch.py`; `tests/test_lifecycle_policy.py`.
