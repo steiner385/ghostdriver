@@ -6448,3 +6448,44 @@ worked around); D75 (GTK 3 availability, host-specific, corrected here);
 `tests/fixtureapp_web_gtk.py`; `tests/linux_l8_probe.py`;
 `tests/test_linux_l8.py`; `docs/LINUX.md`'s L8 entry and its
 `walk_elements_awake` contract row.
+
+### D#105a. The clipboard is a choice of tool by session, not a fallback chain
+
+**Context.** D#40e's slice 4a deferred `NAMED_KEYS`, `EDIT_ACTIONS`,
+`button_pair`, `copy_route`, `focus_route`, `ink_fraction`, `deepest_child_at`
+and "the clipboard" to a later slice. PR #113 built all of them together with
+the place-plus-value locator (D#105), but `docs/LINUX.md`'s own spec row
+always named two clipboard mechanisms -- `wl-paste` / `xclip -o` -- and only
+`xclip` shipped. Issue #105's own text still names both. Nothing in
+`clipboard.py`, `input.py` or `reading.py` had a dedicated test before this;
+the only exercise any of it got was through `tests/test_linux_studio_scratch.py`,
+which is opt-in and needs a real Bambu Studio Flatpak installed.
+
+**Decision.** `read_clipboard_text`, `snapshot_clipboard` and
+`restore_clipboard` now dispatch on `WAYLAND_DISPLAY`: set, they run
+`wl-paste`/`wl-copy`; unset, `xclip`. This is a choice, not a fallback --
+`xclip` reaches an X11 selection, which under a Wayland session is not the
+compositor's own clipboard (D70: the clipboard is the person's), so a
+missing `wl-paste` on a Wayland session reads nothing rather than quietly
+answering from the wrong clipboard. `DISPLAY` was rejected as the signal
+because XWayland sets it too, so its presence alone would pick `xclip` on a
+pure Wayland session.
+
+**Not measured against a real Wayland compositor.** Both Linux hosts this
+project has access to (`linux-host-b`, `linux-host-a`) run an X11 session --
+`loginctl show-session -p Type` answers `x11` on linux-host-a, where this was
+written, and neither `wl-paste` nor `wl-copy` is installed on it. The X11
+branch is unchanged behaviour, exercised as it always was; the Wayland
+branch is new code exercised only with `subprocess.run` faked
+(`tests/test_linux_clipboard.py`), the same honesty D#105 already applied
+to its own Windows half. It needs re-verification on a Wayland host before
+this half of the tension is fully closed, the same way D#105 flagged its
+`confirms_value` Windows implementation.
+
+**Also added:** dedicated tests for `button_pair` and `deepest_child_at`
+(`tests/test_linux_input.py`), which is D#40e's refusal ladder and D#40d's
+no-op respectively -- both pure logic needing no bus, and both previously
+asserted only by prose in D#40e, never by a test.
+
+**Evidence.** Issue #105; D#40e; D#40d; D#105; D70; `docs/LINUX.md`'s
+clipboard rows; `tests/test_linux_clipboard.py`; `tests/test_linux_input.py`.

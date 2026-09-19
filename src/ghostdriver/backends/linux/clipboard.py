@@ -8,13 +8,18 @@ keyboard for an instant through XTest -- and are therefore available only
 inside a live session (D#111), the same gate the value commit sits behind.
 
 The clipboard itself is the person's, read and written with the same tool
-they use (`xclip`), so a copy the tool triggers and the person's own copy
-land in the same place. Only text is snapshotted and restored; a bitmap or
-a private target the selection held is noted as lost, as on Windows (D70).
+they use -- `xclip` under X11, `wl-paste`/`wl-copy` under Wayland, chosen by
+`WAYLAND_DISPLAY` (D#105a) -- so a copy the tool triggers and the person's
+own copy land in the same place. `xclip` reaches an X selection, which under
+a Wayland session is not the compositor's own clipboard, so the two tools
+are a choice, not a fallback chain: whichever one is missing is simply not
+tried. Only text is snapshotted and restored; a bitmap or a private target
+the selection held is noted as lost, as on Windows (D70).
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 from functools import partial
 from typing import Any
@@ -23,6 +28,26 @@ from ...gridstrategy import RouteResult, Strategy
 from ...model.window import WindowNode
 from .deadline import call_with_deadline
 from .tree import _accessible
+
+#: Targets that mean "plain text, nothing lost" -- the ones `xclip -o -t
+#: TARGETS` or `wl-paste --list-types` name for a text selection with no
+#: content of its own. Anything else held is reported as lost on restore.
+_X11_TEXT_TARGETS = ("UTF8_STRING", "STRING", "TEXT", "text/plain",
+                      "text/plain;charset=utf-8", "TARGETS", "MULTIPLE",
+                      "TIMESTAMP")
+_WAYLAND_TEXT_TARGETS = ("text/plain", "text/plain;charset=utf-8",
+                          "UTF8_STRING", "STRING", "TEXT")
+
+
+def _wayland_session() -> bool:
+    """True when this process is in a Wayland session.
+
+    `WAYLAND_DISPLAY` is the same signal a Wayland-aware application uses to
+    pick its own backend, so a driver process inherits it from whoever
+    launched it rather than guessing from `DISPLAY` -- XWayland sets that
+    too, so its presence alone would pick the wrong tool.
+    """
+    return bool(os.environ.get("WAYLAND_DISPLAY"))
 
 
 def _xclip(args: list[str], data: bytes | None = None) -> tuple[bool, bytes]:
@@ -34,14 +59,33 @@ def _xclip(args: list[str], data: bytes | None = None) -> tuple[bool, bytes]:
     return done.returncode == 0, done.stdout
 
 
+def _wl_paste(args: list[str]) -> tuple[bool, bytes]:
+    try:
+        done = subprocess.run(["wl-paste", *args], capture_output=True,
+                              timeout=5, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return False, b""
+    return done.returncode == 0, done.stdout
+
+
+def _wl_copy(data: bytes) -> bool:
+    try:
+        done = subprocess.run(["wl-copy"], input=data, capture_output=True,
+                              timeout=5, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return done.returncode == 0
+
+
 def read_clipboard_text() -> str | None:
     """The clipboard's text now, or None when it holds none.
 
-    `xclip -o` fails rather than returns empty when the selection holds no
-    text target, and that is None here: "nothing text-shaped" is a real
-    answer distinct from an empty string.
+    `xclip -o` and `wl-paste` both fail rather than return empty when the
+    selection holds no text target (or the tool is not installed), and that
+    is None here: "nothing text-shaped" is a real answer distinct from an
+    empty string.
     """
-    ok, out = _xclip(["-o"])
+    ok, out = _wl_paste([]) if _wayland_session() else _xclip(["-o"])
     if not ok:
         return None
     return out.decode("utf-8", "replace")
@@ -52,15 +96,19 @@ def snapshot_clipboard() -> dict:
 
     Text only for the value; the target list is kept so a route that
     replaced a non-text selection (an image) can say what was lost, since
-    `xclip` cannot hand a bitmap back through this path.
+    neither `xclip` nor `wl-paste` can hand a bitmap back through this path.
     """
-    ok, targets = _xclip(["-o", "-t", "TARGETS"])
-    held = targets.decode("utf-8", "replace").split() if ok else []
+    boring: tuple[str, ...]
+    if _wayland_session():
+        ok, out = _wl_paste(["--list-types"])
+        held = out.decode("utf-8", "replace").splitlines() if ok else []
+        boring = _WAYLAND_TEXT_TARGETS
+    else:
+        ok, out = _xclip(["-o", "-t", "TARGETS"])
+        held = out.decode("utf-8", "replace").split() if ok else []
+        boring = _X11_TEXT_TARGETS
     text = read_clipboard_text()
-    lost = [t for t in held
-            if t not in ("UTF8_STRING", "STRING", "TEXT", "text/plain",
-                         "text/plain;charset=utf-8", "TARGETS", "MULTIPLE",
-                         "TIMESTAMP")]
+    lost = [t for t in held if t not in boring]
     return {"text": text, "lost": lost}
 
 
@@ -74,7 +122,10 @@ def restore_clipboard(snapshot: dict) -> int:
     text = snapshot.get("text")
     if text is None:
         return 0
-    ok, _ = _xclip(["-i"], data=text.encode("utf-8"))
+    if _wayland_session():
+        ok = _wl_copy(text.encode("utf-8"))
+    else:
+        ok, _ = _xclip(["-i"], data=text.encode("utf-8"))
     return 1 if ok else 0
 
 
