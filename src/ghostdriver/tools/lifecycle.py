@@ -218,17 +218,29 @@ class LifecycleTools(_LiveCore):
             )
         except ConsentRequired as exc:
             endpoints = extract_endpoints(command_line)
+            from ..consent import StandingApprovals
+
+            image = StandingApprovals.executable(pid)
             return {
                 "ok": False,
                 "error": {"kind": exc.kind.value, "message": exc.message},
                 # Everything needed to put the question to a person, so the
                 # caller does not have to go and gather it.
                 "needs_consent": True,
+                # What the approval will actually be worth, so an agent
+                # relaying the question in chat relays the same lifetime the
+                # elicitation prompt would have shown (#62).
+                "lifetime": self.sessions.consent_lifetime(),
                 "target": {
                     "pid": pid,
                     "name": name,
                     "endpoints": [e.normalized for e in endpoints],
                     "summary": describe_target(name, pid, endpoints),
+                    # The image, spelled the way the process reports it: the
+                    # string an operator has to copy to declare a standing
+                    # approval (D#125), which is not always the one they
+                    # would have guessed.
+                    **({"exe": image} if image else {}),
                 },
             }
         except GhostdriverError as exc:

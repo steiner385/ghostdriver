@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .consent import ConsentStore
+from .consent import ConsentStore, StandingApprovals
 from .ledger import Ledger
 from .model.result import ErrorKind, GhostdriverError
 from .policy import ConsentSource, Grant, Tier, denied, permits, tier_for
@@ -308,7 +308,8 @@ class SessionManager:
     """
 
     def __init__(self, parent_of: Callable[[int], int | None] = _psutil_parent,
-                 store: ConsentStore | None = None) -> None:
+                 store: ConsentStore | None = None,
+                 standing: StandingApprovals | None = None) -> None:
         self._sessions: dict[str, Session] = {}
         self._grants: dict[int, Grant] = {}
         self._parent_of = parent_of
@@ -318,6 +319,10 @@ class SessionManager:
         self._store = store if store is not None else ConsentStore.from_environment()
         for kept in self._store.load():
             self._grants[kept.pid] = kept
+        # What the operator declared about executables, ahead of time and by
+        # hand (D#125). Read only, and consulted last -- see `grant_for`.
+        self._standing = (standing if standing is not None
+                          else StandingApprovals.from_environment())
         # Approval to *launch* a command, keyed by the command itself --
         # there is no pid to key on until after the launch. Separate from
         # pid grants because launching is a distinct authority from driving
@@ -352,8 +357,21 @@ class SessionManager:
 
     def grant_for(self, pid: int, *,
                   parent_of: Callable[[int], int | None] | None = None) -> Grant | None:
-        """The decision that applies to `pid`: its own, else its nearest
-        decided ancestor's, marked as inherited; None if nobody decided.
+        """The decision that applies to `pid`, in order of specificity:
+        its own, else its nearest decided ancestor's marked as inherited,
+        else the operator's standing declaration about its executable;
+        None if none of the three answers.
+
+        **That order is the decision D#125 settled, and it is here so it is
+        in one place.** D35 says a declared note beats a learned one, which
+        reads at first like the declaration should come first. It does not
+        apply: both sides here are the person, not a person and a
+        measurement. The pid decision is their *later and more specific*
+        answer, about the process actually running, and a file edited last
+        week must never overturn "leave that one alone" said a minute ago --
+        in either direction. So the declaration answers only where nobody
+        answered at all, which is the case it was asked for: a target that
+        restarted while the operator was not looking.
 
         `parent_of` may be supplied for a bulk, informational use -- listing
         every target with its consent -- where one process snapshot answers
@@ -364,22 +382,52 @@ class SessionManager:
         own = self._grants.get(pid)
         if own is not None:
             return own
-        if not self._grants:
-            return None  # nobody has decided anything; no walk can find a decision
-        walk = parent_of or self._parent_of
-        seen = {pid}
-        current = walk(pid)
-        while current is not None and current not in seen:
-            seen.add(current)
-            ancestor = self._grants.get(current)
-            if ancestor is not None:
-                return Grant(pid=pid, allowed=ancestor.allowed, source=ancestor.source,
-                             note=ancestor.note, inherited_from=current)
-            current = walk(current)
-        return None
+        if self._grants:
+            walk = parent_of or self._parent_of
+            seen = {pid}
+            current = walk(pid)
+            while current is not None and current not in seen:
+                seen.add(current)
+                ancestor = self._grants.get(current)
+                if ancestor is not None:
+                    return Grant(pid=pid, allowed=ancestor.allowed,
+                                 source=ancestor.source, note=ancestor.note,
+                                 inherited_from=current)
+                current = walk(current)
+        # Nobody has decided about this process or anything it descends
+        # from. Costs nothing -- and opens no process -- unless the operator
+        # declared something.
+        return self._standing.decide(pid)
 
     def grants(self) -> list[Grant]:
         return list(self._grants.values())
+
+    def consent_lifetime(self) -> str:
+        """How long an approval given now will actually last, on this run.
+
+        One sentence, and it has to be the *true* one. The prompt used to
+        say "this lasts for this session only" whatever was configured,
+        which stopped being true when R1a made approvals outlive the server
+        run -- so half the time the sentence a person read before approving
+        described a different thing from the one they were approving, and
+        the other half it failed to say why they were being asked again
+        (#62). Both halves are the same defect: the lifetime is knowable
+        here, and was not being reported.
+        """
+        if self._store.enabled:
+            return (
+                "This lasts while that process keeps running, including "
+                "across restarts of this server -- and no longer: if the "
+                "application itself restarts, you are asked again."
+            )
+        from .operator import ENV_VAR
+
+        return (
+            "This lasts for this server run only, and will be asked again "
+            "after a restart -- no operator directory is configured, so "
+            f"there is nowhere to keep it. Set {ENV_VAR} to keep approvals "
+            "for as long as the target process runs."
+        )
 
     def record_launch_grant(self, command: list[str], *, allowed: bool,
                             note: str = "") -> None:
@@ -428,14 +476,13 @@ class SessionManager:
         """
         grant = self.grant_for(pid)
         if grant is None:
+            problem = self._standing.problem
             raise ConsentRequired(
                 pid,
                 f"pid {pid} has not been approved for automation in this "
                 "session. Ask the operator which targets to allow, then "
-                "record the answer with grant_targets. (With an operator "
-                "directory configured, approvals are kept while the target "
-                "process lives, across server restarts; without one they "
-                "live for one server run.)",
+                f"record the answer with grant_targets. {self.consent_lifetime()}"
+                + (f" Note: {problem}" if problem else ""),
             )
         if not grant.allowed:
             note = f" ({grant.note})" if grant.note else ""

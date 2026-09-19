@@ -219,11 +219,29 @@ def test_attach_says_the_target_is_minimized_and_names_restore(app):
 # --- 6 and 7. the messages that cost a round trip -----------------------------------
 
 def test_consent_required_says_how_long_an_approval_is_kept(app):
-    from ghostdriver.consent import ConsentStore
+    """And says it about the configuration in front of it (#62).
 
-    box = Toolbox(SessionManager(store=ConsentStore(None)))
+    This used to assert the *longer* lifetime while wiring up a manager
+    with no store -- readable only because the message then recited both
+    cases and left the reader to work out which applied. It does not any
+    more, and the contradiction became a failure, which is the useful
+    outcome: the sentence a person reads before approving now describes
+    the thing they are approving.
+
+    The neutral half of this -- both configurations, through
+    `SessionManager` -- is `tests/test_consent_lifetime.py`, and is where
+    the ordering is really checked (D#39). What this one adds, and the
+    reason it stays here with a real pid, is that the *tool* carries the
+    sentence out to a caller rather than only the manager holding it.
+    """
+    from ghostdriver.consent import ConsentStore, StandingApprovals
+
+    sessions = SessionManager(store=ConsentStore(None),
+                              standing=StandingApprovals(None))
+    box = Toolbox(sessions)
 
     result = box.attach(app["pid"])
 
     assert result["needs_consent"]
-    assert "kept while the target process lives" in result["error"]["message"]
+    assert "this server run only" in result["error"]["message"]
+    assert result["lifetime"] == sessions.consent_lifetime()

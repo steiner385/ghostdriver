@@ -6697,3 +6697,153 @@ repeats); D31 (`within=` exists because this exact case needs it); D33
 (refuse ambiguity, both directions); `docs/VALIDATION.md` Gate 4;
 `backends/windows/verbs.py::click_element`'s note on `SelectionItem`
 selection not notifying the application.
+
+### D#62. The approval prompt states the lifetime it actually has
+
+**The report, and what a second measurement did to it.** Issue #62 came
+out of a session driving a Chrome pid and named two problems: the
+approval happened as chat text rather than a dialog, and the same pid had
+to be approved again after a Claude restart. Both read as defects. A
+week later #125 re-measured the second one on a different target and
+found the opposite: a Chrome grant recorded on 9/7 was still in force on
+9/14, because that run had an operator directory and D65's store had kept
+it. The 9/7 run did not. So the persistence worked, and had worked all
+along.
+
+**What was actually wrong is that nothing said which case it was in.**
+Two sentences asserted a lifetime this server does not always have:
+
+- the elicitation prompt -- *"This lasts for this session only"* -- which
+  is the last thing a person reads before approving, and
+- `SERVER_INSTRUCTIONS` -- *"Approvals last for this server run"* -- which
+  is what the agent plans and relays from.
+
+Both predate R1a. With a store configured they are wrong; without one
+they fail to say *why* the person is being asked about an application
+they approved this morning. That is one defect with two faces, and it is
+why #62 was filed as a persistence bug: the behaviour was right and
+unobservable, so the only thing left to infer from was a sentence that
+was wrong.
+
+**The rule.** *A lifetime that is knowable at the moment of asking is
+reported at the moment of asking.* `SessionManager.consent_lifetime()`
+composes the true sentence from the store that is actually in force; the
+elicitation prompt uses it, a `needs_consent` result carries it as
+`lifetime` so an agent relaying the question in chat relays the same
+sentence the dialog would have shown, and the instructions no longer name
+a lifetime at all -- they tell the agent to quote that field instead. The
+no-store sentence names `GHOSTDRIVER_OPERATOR_DIR`, because "you will be
+asked again" is a complaint and "set this and you will not be" is an
+answer.
+
+**The first half of the report, answered but not as asked.** #62 wanted
+the approval rendered "as a real prompt, the way computer-use's
+`request_access` does". It already is, where the client can carry it:
+`attach` calls `ctx.elicit` first and falls back only on failure. There
+is nothing this server can do to make a client that does not implement
+MCP elicitation show a dialog -- and the fallback message said *"this
+client cannot be asked directly"*, which the field read as this server
+declining to ask. It now names whose limitation it is, and gives the
+exact `grant_targets(allow=[pid])` call. What we did not do: keep a
+capability flag and branch on it ahead of time. Trying and failing is one
+round trip and is correct against a client that advertises the capability
+and then refuses it; a flag would be a second source of truth about
+something the attempt already answers.
+
+**What this deliberately did not change.** The store, which was not
+broken. `grant_targets` stays the record-the-answer path for clients that
+cannot prompt (R1), and `elicited` and `operator_tool` stay distinct
+sources, because the difference between a signature and an assertion is
+still real.
+
+**Evidence.** Issues #62 (field report, 9/7) and #125 (the 9/14
+re-measurement that corrected it); R1, R1a, D65. Checked by
+`tests/test_consent_lifetime.py`, which runs on both platforms because
+its seam is `SessionManager`, not the `attach` tool (D#39).
+
+### D#125. A standing approval per executable: yes, declared by hand, and it answers last
+
+**The question.** D65 made an approval last exactly as long as the
+process it was about -- *"that application, running"* -- so a target that
+restarts is asked about again. In the field that is correct roughly
+always and wrong for one case: an operator who has already decided, for
+this machine, that this line-of-business client may be driven, and who is
+now being asked a question they consider settled. #125 asked whether to
+allow a standing approval per executable path, at the cost of that
+promise. D35 -- a declared note beats a learned one -- was cited for it.
+
+**The answer is yes, under two constraints, and the constraints are the
+decision.** The feature on its own is three lines; what took the thinking
+is what keeps it from dissolving R1.
+
+**One: no tool writes the file.** `<operator dir>/standing-consent.json`
+is read by this server and never created, amended or touched by it, and a
+test asserts the bytes are unchanged across a `grant_targets` call. This
+is not tidiness. R1 replaced a configured allowlist with elicitation to
+buy one property -- consent that *the agent cannot fabricate* -- and a
+standing approval an agent can write is a way to launder its own say-so
+into the operator's. The file being hand-edited is the signature. The
+server instructions now tell the agent it may propose the contents and
+must not offer to write them.
+
+**Two: it answers last.** `SessionManager.grant_for` resolves in order of
+specificity: the pid's own decision, then its nearest decided ancestor's,
+then the declaration. D35 reads at first like an argument for the
+opposite -- put the declared thing first -- but D35 is about a person
+against a *measurement*, and here both sides are the person. The pid
+decision is their later and more specific answer, about the process in
+front of them, so a file edited last week must not overturn "leave that
+one alone" said a minute ago. That ordering is checked in both
+directions, because the dangerous one is only half of it: a declaration
+must not un-restrict, and an operator must also be able to allow a single
+process of an executable they declared off-limits without editing a file
+mid-task.
+
+**The cost, stated where it is spent.** A standing approval really does
+give up D65's promise: a restarted target is driven without anyone being
+asked. So the grant carries `standing_for`, and `describe()` says *"[standing
+declaration for <path>]; nobody was asked about this process"* wherever
+the decision is shown. A result that presented this as an ordinary
+approval would hide the single fact that distinguishes it.
+
+**The second cost, accepted and not mitigated.** Matching is on the
+executable path and nothing else, so a declaration for a browser approves
+every instance of it, including the one pointed at production -- and
+endpoints are precisely what R1's `list_targets` shows a person so they
+can *see* what they are approving. Narrowing a declaration by command
+line is a real follow-on; it is not smuggled in here, because a
+half-specified match is worse than an honest whole-executable one. What
+this does instead is make the declaration easy to write correctly: a
+`needs_consent` result now carries `target.exe`, the image path spelled
+the way the process reports it, which is not always the one an operator
+would have guessed.
+
+**Smaller choices.** `restrict` is accepted alongside `allow`, and wins
+where an executable appears in both -- a declaration that contradicts
+itself is a mistake and the safe reading of a mistake is the refusal. A
+file that cannot be parsed approves nothing *and says so* in the next
+`needs_consent`, because an operator with a typo would otherwise get the
+behaviour of having declared nothing with no way to tell that from having
+declared nothing. An entry of the wrong shape invalidates the whole file
+rather than being skipped: three quarters of a consent policy is not a
+consent policy. A declared decision is never copied into D65's per-pid
+store, which would outlive the declaration -- deleting a line would leave
+the approval standing in a folder nobody thinks to look in. Comparison is
+through `os.path.normcase`, so a hand-typed path matches on Windows and
+two paths differing in case stay two files on Linux; symlinks are not
+resolved on either side, since `exe()` is already the resolved target and
+resolving the declared side too would silently widen a declaration to
+every name pointing at that file. A process whose image cannot be read is
+asked about: not knowing what a target is, is not evidence it was
+declared. And the file is re-read when it changes rather than at start
+-- withdrawing a standing approval must not need a redeploy, because a
+revocation that waits for one is a revocation the operator believes has
+taken effect when it has not, which is D#62's defect wearing different
+clothes. It costs one `stat`, on the path already known, only where
+nobody has decided about the target.
+
+**Evidence.** Issue #125 (and the 9/7 report in #62 it re-measured); R1,
+R1a, D65 (the promise this spends), D35 (the rule that does not apply,
+and why). `tests/test_standing_consent.py`, platform-neutral by
+construction -- the executable lookup is injected, so nothing there
+starts a process or reaches a backend (D#39).
