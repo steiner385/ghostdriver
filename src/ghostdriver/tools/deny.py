@@ -31,6 +31,12 @@ class _DenyCore(_ToolboxCore):
         a place inside a window the profile can name (D72). Each entry's
         window is resolved now, so the region follows the window wherever
         it is.
+
+        An entry with no `region` denies the whole of `within`, not a
+        rectangle inside it (D#2): the interim answer for a control that
+        scrolls -- its content moves under a fixed rectangle, but the
+        window it scrolls inside does not, so denying the window instead of
+        a place in it stays correct across any scroll position.
         """
         from ..backends import current
 
@@ -40,20 +46,25 @@ class _DenyCore(_ToolboxCore):
                 matches = self._resolve(session, entry["within"], True)
             except ValueError:
                 continue
-            region = entry["region"]
+            region = entry.get("region")
             for match in matches:
                 if isinstance(match, AccessibleElement):
-                    ox, oy = match.rect[0], match.rect[1]
+                    ox, oy, right, bottom = match.rect
                 else:
                     ox, oy = winapi.client_to_screen(match.handle, (0, 0))
-                left, top = ox + int(region["left"]), oy + int(region["top"])
-                right, bottom = ox + int(region["right"]), oy + int(region["bottom"])
+                    width, height = winapi.client_size(match.handle)
+                    right, bottom = ox + width, oy + height
+                left, top = ox, oy
+                if region is not None:
+                    left, top = ox + int(region["left"]), oy + int(region["top"])
+                    right, bottom = ox + int(region["right"]), oy + int(region["bottom"])
                 if left <= aim[0] < right and top <= aim[1] < bottom:
                     note = entry.get("note") or "no note"
+                    whole = " (the whole of it, not a place within it)" if region is None else ""
                     return _error(
                         ErrorKind.DENIED_BY_POLICY,
                         f"refused: the point {aim} lies in a denied region of "
-                        f"{entry['within']!r} ({note}); the profile's denylist "
-                        "forbids acting there",
+                        f"{entry['within']!r}{whole} ({note}); the profile's "
+                        "denylist forbids acting there",
                         locator=locator)
         return None

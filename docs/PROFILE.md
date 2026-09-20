@@ -40,8 +40,21 @@ grid cell, a row in an owner-drawn list, a painted toolbar button.
 window it names -- the frame `click at={x, y}` uses and a `capture` of
 that window shows, so the numbers are read off a capture. The window is
 resolved at the moment of each actuation, so the region follows it. A
-control that scrolls inside its window is not tracked; what can be named
-is better denied by name. A malformed place fails the profile load.
+malformed place fails the profile load.
+
+`region` is optional. A control that scrolls inside its window has no
+fixed rectangle a place entry could hold -- its content moves under one
+as the scroll offset changes, so a region sized to one page would miss
+whatever scrolled to a different offset, or worse, deny whatever
+scrolled into that spot instead (D#2). Omit `region` and the entry
+denies the whole of `within` -- coarser, but correct at every offset:
+
+```json
+{"within": "class=TVirtualStringTree", "note": "the log view scrolls"}
+```
+
+What can be named more precisely is still better denied by name or
+place; deny the whole window only for a control neither can reach.
 
 ## `input_sensitivity`
 

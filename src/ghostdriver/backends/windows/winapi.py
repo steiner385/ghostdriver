@@ -398,6 +398,13 @@ def client_centre(hwnd: int) -> tuple[int, int]:
     return (rect.right - rect.left) // 2, (rect.bottom - rect.top) // 2
 
 
+def client_size(hwnd: int) -> tuple[int, int]:
+    """The width and height of `hwnd`'s client area."""
+    rect = wintypes.RECT()
+    user32.GetClientRect(wintypes.HWND(hwnd), ctypes.byref(rect))
+    return rect.right - rect.left, rect.bottom - rect.top
+
+
 user32.ScreenToClient.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
 user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
 user32.IsHungAppWindow.argtypes = [wintypes.HWND]

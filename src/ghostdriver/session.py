@@ -52,11 +52,14 @@ class Profile:
     #: provenance.recorded_against names, so replay can warn on a mismatch (#87).
     profile_id: str = ""
     denylist: tuple[str, ...] = ()
-    #: Denied *places*: {"within": locator, "region": {left, top, right,
+    #: Denied *places*: {"within": locator, "region"?: {left, top, right,
     #: bottom}, "note"?}, the rectangle in the client coordinates of the
     #: window `within` names -- the frame `at` and a capture of it use. A
     #: grid cell or a painted button has no caption and no identity, only a
-    #: place (D72). Any actuation aimed inside one is refused.
+    #: place (D72). Any actuation aimed inside one is refused. An entry
+    #: with no `region` denies the whole of `within` (D#2): the interim
+    #: answer for a control that scrolls, whose content has no fixed
+    #: place a rectangle could hold.
     deny_regions: tuple[dict, ...] = ()
     sensitivity: Sensitivity = field(default_factory=Sensitivity)
     #: What phase 2 is permitted to actuate. Curated only.
@@ -147,14 +150,20 @@ class Profile:
                 names.append(entry)
                 continue
             region = entry.get("region") if isinstance(entry, dict) else None
+            # `region` is optional: an entry with none denies the whole of
+            # `within` rather than a rectangle inside it (D#2) -- the
+            # interim answer for a control with no place a fixed rectangle
+            # can hold, because its content scrolls under one.
             if (not isinstance(entry, dict) or not entry.get("within")
-                    or not isinstance(region, dict)
-                    or any(k not in region for k in ("left", "top", "right", "bottom"))):
+                    or (region is not None and (
+                        not isinstance(region, dict)
+                        or any(k not in region for k in ("left", "top", "right", "bottom"))))):
                 raise GhostdriverError(
                     ErrorKind.DENIED_BY_POLICY,
                     f"profile {location} has an unreadable denylist entry {entry!r}: "
-                    "a region entry is {\"within\": <locator>, \"region\": "
-                    "{left, top, right, bottom}, \"note\"?}",
+                    "a place entry is {\"within\": <locator>, \"region\"?: "
+                    "{left, top, right, bottom}, \"note\"?} -- omit \"region\" "
+                    "to deny the whole of \"within\"",
                 )
             regions.append(entry)
         pinned = document.get("posted_click_only") or []

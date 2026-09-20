@@ -6847,3 +6847,57 @@ R1a, D65 (the promise this spends), D35 (the rule that does not apply,
 and why). `tests/test_standing_consent.py`, platform-neutral by
 construction -- the executable lookup is injected, so nothing there
 starts a process or reaches a backend (D#39).
+
+### D#2. A place entry with no region denies the whole of `within`
+
+**Context.** D72's own "what it does not do" named the gap: a place is a
+rectangle in one window's frame, and a control that scrolls inside that
+window breaks the anchor -- the same control sits at a different place
+depending on scroll offset, so a fixed region either misses it after a
+scroll or, worse, silently denies whatever else scrolled into that
+rectangle instead. Issue #2 weighed three answers: anchor to
+neighbouring content, anchor to the scroll container plus an offset
+within its content, or deny the container wholesale.
+
+**Why the container, not content or an offset.** The first two both
+need *exact* text out of the region to anchor on -- and D#1, probing
+that question against a real target (`charmap.exe`'s owner-drawn grid),
+came back negative on all three routes it had to offer: no accessible
+surface, no clipboard copy, no export command. Building a content
+anchor or a scroll-offset anchor on a route that does not yet work
+would be code with nothing under it. The container answer needs none of
+that: a window is already a locator the denylist can resolve, and its
+extent is already computable (`GetClientRect`) without reading anything
+painted inside it.
+
+**What changed.** A denylist place entry's `region` is now optional:
+`{"within": <locator>, "note"?}` with no `region` denies any actuation
+aimed anywhere inside `within`'s whole client area, computed fresh per
+actuation the same way a region's rectangle already was (`deny.py`'s
+`_denied_region`, `winapi.client_size` added alongside the existing
+`client_centre`/`client_to_screen`). A malformed entry -- `region`
+present but incomplete, or `within` missing outright, with or without a
+`region` -- still fails the profile load (D72's own rule, unchanged).
+Proven on the fixture's paging grid (`tests/test_deny_regions.py`,
+`--grid-pages`): a click at a fixed point is refused before any paging,
+posting `pagedown` to the grid succeeds, and a click at that same fixed
+point is refused again afterward -- the denial does not consult, and so
+cannot be defeated by, the scroll offset.
+
+**What this does not do.** It is coarser, on purpose: everything in the
+window is denied, not just the control that scrolls, which can matter
+on a window that hosts more than one thing. That is the trade the issue
+named going in ("coarse and available today as a workaround") and
+exactly what D5's fail-closed spirit asks for when a target cannot be
+named more precisely -- refuse more than necessary rather than leave a
+control effectively unreachable by the denylist. Content-anchored and scroll-offset anchoring remain open, gated on a
+future measurement reopening the exact-text question D#1 closed
+negative -- issue #20 (OCR) is exactly the issue that measurement would
+feed, per D#1's own evidence trail.
+
+**Evidence.** Issue #2; D72 (the gap this closes); D#1 (why the other
+two options are not built yet); D5 (failing closed, three times over).
+`tests/test_deny_regions.py`:
+`test_an_entry_with_no_region_denies_the_whole_of_within`,
+`test_a_whole_window_denial_holds_across_scroll_positions`,
+`test_an_entry_with_no_within_fails_the_profile_load_even_without_a_region`.

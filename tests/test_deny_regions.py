@@ -115,6 +115,53 @@ def test_a_malformed_region_entry_fails_the_profile_load(tmp_path):
         Profile.load(path)
 
 
+def test_an_entry_with_no_within_fails_the_profile_load_even_without_a_region(tmp_path):
+    path = tmp_path / "bad.json"
+    path.write_text(json.dumps({"denylist": [{"note": "no within at all"}]}), encoding="utf-8")
+
+    with pytest.raises(GhostdriverError, match="unreadable denylist entry"):
+        Profile.load(path)
+
+
+def test_an_entry_with_no_region_denies_the_whole_of_within(app, tmp_path):
+    """A control with no fixed place -- one that scrolls -- can still be
+    denied by naming its window wholesale (D#2)."""
+    profile = profile_with(tmp_path, {"within": GRID, "note": "the whole grid scrolls"})
+    box, session = session_for(app["pid"], profile)
+
+    top = box.click(session, GRID, at={"x": 30, "y": 8})
+    bottom = box.click(session, GRID, at={"x": 30, "y": 55})
+
+    assert not top["ok"] and top["error"]["kind"] == "denied_by_policy"
+    assert "the whole grid scrolls" in top["error"]["message"]
+    assert not bottom["ok"] and bottom["error"]["kind"] == "denied_by_policy"
+
+
+def test_a_whole_window_denial_holds_across_scroll_positions(tmp_path):
+    """The interim answer for a scrolling control: deny the container, not
+    a place inside it, so the denial does not depend on -- and does not
+    drift with -- the scroll offset (D#2)."""
+    proc, handles = start("--grid-pages")
+    try:
+        pager = Toolbox(SessionManager(store=ConsentStore(None)))
+        pager.sessions.record_grant(handles["pid"], allowed=True, source=ConsentSource.ELICITED)
+        pager_session = pager.sessions.attach(
+            handles["pid"], command_line=["fixtureapp"], tier=Tier.INTERACTIVE).session_id
+
+        profile = profile_with(tmp_path, {"within": GRID, "note": "the whole grid scrolls"})
+        box, session = session_for(handles["pid"], profile)
+
+        at_top = box.click(session, GRID, at={"x": 30, "y": 25})
+        paged = pager.send_keys(pager_session, GRID, ["pagedown"])
+        at_offset = box.click(session, GRID, at={"x": 30, "y": 25})
+
+        assert paged["ok"], paged
+        assert not at_top["ok"] and at_top["error"]["kind"] == "denied_by_policy"
+        assert not at_offset["ok"] and at_offset["error"]["kind"] == "denied_by_policy"
+    finally:
+        stop(proc, handles)
+
+
 def test_attach_counts_the_regions(app, tmp_path):
     profile = profile_with(tmp_path, "*Delete*",
                            {"within": GRID, "region": ROW_1_BAND})
