@@ -443,6 +443,52 @@ def test_numbers_may_skip_and_may_arrive_out_of_order():
 
 
 
+# --- a deferred row that stopped being deferred still says why ----------------
+
+SPEC = (
+    REPO
+    / "docs"
+    / "superpowers"
+    / "specs"
+    / "2026-09-01-desktop-automation-mcp-design.md"
+)
+
+#: A spec section 12 row that no longer defers: `**Answered -- D#19**`, with the
+#: item struck through beside it. The em dash is the one the document uses.
+_ANSWERED_ROW = re.compile(r"\*\*Answered — (D#\d+[a-z]?)\*\*")
+
+
+def test_an_answered_deferred_row_points_at_a_decision_that_exists():
+    """Spec section 12's deferred rows each carried their own reason until
+    they were answered; an answered one carries a pointer instead.
+
+    That trade is only safe while the pointer resolves. D#19 is the case that
+    makes it load-bearing rather than tidy: the `vm` row is *unfired*, not
+    declined, so the trigger that would justify building it now lives in the
+    decision log and nowhere else. A rebase that drops the entry -- and this
+    log conflicts on nearly every rebase, being append-only -- would leave a
+    row reading "answered" with nothing behind it, and the contingency would
+    be gone with no red anywhere.
+
+    D60 is the precedent: a promise kept only in a decision record was broken
+    once, and the repair was to make it a test rather than a convention.
+    """
+    pointers = _ANSWERED_ROW.findall(SPEC.read_text(encoding="utf-8"))
+    assert pointers, (
+        "no answered rows found in spec section 12. Either every deferred row "
+        "is deferred again -- unlikely -- or the row format changed and this "
+        "test now checks nothing. Fix the pattern, do not delete the test."
+    )
+    written = set(_BY_ISSUE.findall(_text()))
+    dangling = sorted({p for p in pointers if p[len("D#") :] not in written})
+    assert not dangling, (
+        "spec section 12 marks a row answered by "
+        + ", ".join(dangling)
+        + ", but docs/DECISIONS.md heads no such entry. The row gave up its "
+        "own reason for that pointer, so an unresolvable one loses the reason "
+        "entirely -- restore the decision rather than the row."
+    )
+
 
 # --- nothing ships a half-finished merge --------------------------------------
 

@@ -7036,3 +7036,106 @@ merely cite the gap D46 left.
 
 **Evidence.** Issue #17; spec §12; `docs/product/features/deferred-scope-tracking.md`;
 D59; D46; D1; D#16 (the sibling decision this one parallels).
+
+### D#19. The `vm` trigger has not fired, and it now says where a firing gets written
+
+**Context.** Issue #19 is the fourth of the five spec §12 rows
+(`docs/product/features/deferred-scope-tracking.md`), and the first of the
+*conditional* kind to be dispatched. It is not declined on architecture the
+way #16 and #17 were; it is held against a named trigger -- "after
+`hidden_desktop` proves insufficient" -- and it is labelled `env: windows`.
+The feature doc predicted that a row of this kind needs no record in this
+log, because "a conditional item survives triage on its trigger: the row
+says what has to happen first, and a run that checks finds nothing fired."
+
+**That prediction is now measured, and it is false.** #19 was dispatched for
+implementation on 2026-09-20 -- the third of the five deferred rows to be,
+after #16 and #17 -- and it was dispatched to a *Linux* session against an
+`env: windows` label. So neither label gates anything: the `deferred` label
+routes triage to the feature doc (which is what it was for) and the `env:`
+label tells a human which box to be on, but the only thing a dispatcher
+reads is whether the issue is open. The distinction the feature doc drew
+between architectural and conditional rows describes the *reasons*
+correctly and the *mechanism* not at all. An open issue is a dispatchable
+issue, whatever is written inside it.
+
+**The trigger, restated, because this record now holds it.** Not every
+limit of `hidden_desktop` counts. It is launch-only, because desktop
+assignment is fixed at process creation (D51, D53); it fits classic Win32
+and not Store-activated targets (D53); a target it cannot fit is *reported
+as such, not worked around* (D53). None of those are the trigger. The
+trigger is different in kind: **a target that `hidden_desktop` accepts and
+then fails to isolate** -- focus escaping the hidden desktop, or a target
+that detects it and behaves differently. The Linux counterpart, the nested
+display, carries the same trigger.
+
+**The check, and what a check can honestly be from the wrong platform.** A
+Linux session cannot put a Win32 target on a hidden desktop, and did not
+try. But the check that matters was never a machine check. A firing is a
+measurement, and a measurement that is not written here did not happen for
+any purpose this project has -- which is the premise the whole log rests
+on. So: does anything on record show `hidden_desktop` accepting a target
+and then failing to isolate it? It does not.
+
+- D51 measured the guarantee as *structural*, and contrasted it with
+  `minimized` on exactly this axis: `minimized` is observational, watches
+  for an escape and puts the target back, and has a watchdog because one
+  quiet trial proves nothing. On a hidden desktop there is nowhere to
+  escape to.
+- D53 measured real applications, which is the measurement that could have
+  fired this. `charmap.exe` and `winver.exe` were accepted, described,
+  driven and captured with their windows never on the operator's screen.
+  `notepad.exe` was *not accepted* -- Store activation ignored the
+  `lpDesktop` and the session saw no windows at all. That is the unfitted
+  case D53 settled, which #19's own body names as not the trigger.
+- The Linux side is built and makes the same structural claim
+  (`src/ghostdriver/backends/linux/hidden_desktop.py`, D#8, D75).
+
+Nothing between D51 and today records an acceptance that then failed.
+
+**What the check also found: half the trigger is close to unreachable.** Of
+the two forms the issue names, focus escaping the hidden desktop is not
+something the strategy can do quietly the way `minimized` can. A window's
+desktop is fixed when the window is created (D51, D53), so a window on the
+hidden desktop has no foreground to escape to and no way to move to one --
+which is why the failure that *did* show up in practice was the Store-app
+one, where the target never lands on the hidden desktop at all. The live
+half is the other: a target that detects the desktop and behaves
+differently. That is also the half a VM genuinely answers, because a
+hidden desktop is detectable and a machine is not. This is not grounds to
+build anything. It narrows what to watch for, because "proves insufficient"
+read as though the two halves were equally likely and they are not.
+
+**Decision.** Issue #19 closes with no code. The contingency does not close
+with it -- it moves from the tracker into this log, which is where the
+things that have to survive are already kept. Concretely:
+
+- The trigger stands exactly as restated above. Nothing here narrows what
+  would justify a `vm` strategy; only where the justification is recorded.
+- **A firing is recorded here, as the `D#<issue>` of the issue opened for
+  it, citing this entry.** That is the thing #19 never said, and the reason
+  a session told to "confirm the trigger actually fired" had nowhere to
+  look. It is not a gate run: `docs/VALIDATION.md` names no isolation
+  strategy in any of its six gates, so Gate 6's non-interference check
+  would not distinguish a hidden desktop that held from one that was never
+  used.
+- Spec §12's row is marked answered and points here, and
+  `test_structure.py::test_an_answered_deferred_row_points_at_a_decision_that_exists`
+  fails if that pointer names a decision nobody wrote. A promise that lives
+  only in a decision record gets broken once and then found later (D60);
+  this one is checked on every run.
+
+**What would reopen it, and what would not.** A recorded measurement of
+`hidden_desktop`, or of the Linux nested display, accepting a target and
+then failing to isolate it. Not "the current strategy is awkward". Not a
+target it refuses to fit: a second Store-activated case is more evidence
+for D53, not evidence for a VM. Reopening means a new issue whose decision
+cites this one, not a reversal of it -- this entry does not decide against
+the `vm` strategy, it decides that an unfired contingency belongs in the
+log rather than in an open row that keeps being handed to implementers.
+
+**Evidence.** Issue #19; spec §12;
+`docs/product/features/deferred-scope-tracking.md`; D51; D52; D53; D55;
+D60; `src/ghostdriver/backends/linux/hidden_desktop.py`;
+`docs/VALIDATION.md` (six gates, no isolation strategy named in any);
+D#16 and D#17 (the sibling closures -- declined, where this one is unfired).
