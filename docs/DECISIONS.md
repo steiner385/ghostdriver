@@ -7139,3 +7139,144 @@ log rather than in an open row that keeps being handed to implementers.
 D60; `src/ghostdriver/backends/linux/hidden_desktop.py`;
 `docs/VALIDATION.md` (six gates, no isolation strategy named in any);
 D#16 and D#17 (the sibling closures -- declined, where this one is unfired).
+
+### D#18. The assertion DSL was not deferred; it was built under another name
+
+**Context.** Issue #18 is the last of the five spec §12 rows
+(`docs/product/features/deferred-scope-tracking.md`) to be dispatched, and
+the last of the *architectural* kind. Its row reads "Separate spec, built on
+this one". The issue body argues the hazard well: the driver already has
+assertion primitives (D57's workflow runner, D31/D32/D48's expectations,
+D62's tracing), a DSL is a language on top of them, and a language on top of
+a runner is the classic shape of the creep D60 caught once already -- "it
+starts as a thin wrapper over the runner and accretes driver logic until the
+boundary is gone." It closes by asking that, if picked up, the boundary get a
+guard the way the module-size promise got one.
+
+**The row is false, and has been since D#84.** This entry was expected to be
+a third declination in the shape of D#16 and D#17. It is not, because the
+first thing a dispatched session does is look at the code, and the code says
+the DSL is built. `src/ghostdriver/workflow.py`, measured on this branch:
+
+| Commit | Lines | What it added |
+|---|---|---|
+| `20cc197` (D57) | 297 | steps, dotted-path assertions, report |
+| `7061eaa` (D#84) | 504 | `params`, `provenance`, `verified`, `delivery_only`, `when` |
+| `19ab915` (D#85) | 682 | param binding, branch evaluation |
+| `32e182b` (D#97) | 817 | `repeat_until`, `for_each`, bounded |
+| `f0ff298` (D#106) | 939 | `on_disturbance` handlers, bounded and named |
+| `ffcc9d5` (D#112) | 948 | replay reports what held *now* |
+
+Variables, conditionals, bounded loops, event handlers, assertions, and a
+provenance record: that is a declarative test-orchestration and assertion
+language, with a closed vocabulary (`STEP_KEYS`, `BRANCH_KEYS`, `GUARD_KEYS`,
+`REPEAT_KEYS`, `FOREACH_KEYS`, `HANDLER_KEYS`) that refuses an unknown key
+rather than ignoring it (D#84, D33). Three times the size it was when the
+row was written, and none of the five commits mentions #18.
+
+**Why nobody noticed, which is the part worth keeping.** The row says "DSL".
+The work shipped as **macros**. `docs/MACROS.md` opens by saying the
+reframe that made the work tractable -- "a macro is `workflow.py` and `batch`
+joined and given a lifecycle... not a new subsystem" -- and that reframe is
+both correct and exactly what hid it: each of #84, #85, #97, #106 and #112
+is visibly smaller than "an orchestration and assertion DSL", so each author
+was right that they were not building the deferred thing, and the five of
+them together were. A deferred row is not consulted by someone extending an
+existing file; it is consulted by someone proposing a new subsystem. The row
+was therefore guarding an entrance nobody used.
+
+**The phrase "the orchestration layer" was doing two jobs.** D#16 and D#17
+both decline a thing by pointing at "the orchestration layer this driver is
+deliberately underneath -- issue #18's row". Those pointers are not wrong,
+but they mean a different layer than the row does, and the collision is what
+let the row survive being implemented:
+
+- *Sequencing this driver's own calls, with assertions* -- the macro format.
+  Everything it touches is a result this driver produced, so it stays inside
+  the D59 model and reads `WindowNode`s and `AccessibleElement`s like every
+  other thing above `backends/`. **Built, here.**
+- *A harness coordinating this driver with tools that are not desktop
+  drivers at all* -- a browser protocol (D#16), an HTTP oracle against one
+  target's own backing system (D#17). That reaches outside the D59 model
+  entirely, which is the reason both were declined. **Not built, not here,
+  and this entry does not change that.**
+
+Read with that split, D#16 and D#17 stand unamended; their "sibling layer"
+is the second sense. What is corrected is the row, which names the first.
+
+**The hazard the issue named was real, and it held.** Worth stating plainly,
+because the row's warning being *accurate* and *too late* are separable
+claims and only the second is true. Measured on this branch:
+
+- `workflow.py` imports nothing platform-specific and nothing that drives:
+  stdlib at module level, and three modules from inside the package --
+  `tools.stepper` (D#83's shared step gate), `tools.recording` (D#112), and
+  `policy` (recording the run as the operator's consent, D57). It reaches
+  the target through the toolbox handed to it and through nothing else, so
+  it is still tested with fakes.
+- Every leaf is an ordinary tool call that re-authorizes. `RUNNABLE_TOOLS`
+  in `tools/stepper.py` is an allowlist, not a denylist, so a new tool is
+  unreachable from a macro until someone names it there; the lifecycle,
+  consent and foreground tools are not in it (D#83, `tests/test_stepper.py`).
+- The control-flow forms are bounded by construction -- nesting depth
+  (D#84), loop iterations (D#97), handler firings (D#106) -- and a handler
+  cannot recurse into itself.
+- A guard's condition is in the locator/`expect` vocabulary and never
+  embedded code (D#84), so a macro stays inspectable and denylist-checkable.
+
+So the DSL did not accrete driver logic. What it did accrete is *headroom*:
+`tools/macro.py` is 400 lines against a `TOOL_MODULE_LIMIT` of 400, the
+largest module under `tools/` and the only one with none left.
+
+**Decision.** Issue #18 closes as **built, not deferred** -- the one row of
+the five that is answered by reading the source rather than by an argument.
+Concretely:
+
+- Spec §12's row is marked answered and points here, and
+  `test_structure.py::test_an_answered_deferred_row_points_at_a_decision_that_exists`
+  fails if the pointer resolves to nothing.
+- `docs/MACROS.md` says which row it satisfies, and stops saying "specified,
+  not built" -- it was the stale status line, as much as the vocabulary gap,
+  that kept the two names from meeting.
+- The boundary gets the guard the issue asked for, aimed at the boundary
+  rather than at the size. See below.
+
+**The guard, and why it is not a line limit.** The issue analogized to D60's
+module-size promise, and a line cap on `workflow.py` is the literal reading.
+It is the wrong one: size is not what the issue was afraid of, and 948 lines
+of closed-vocabulary parser is not the failure -- a 300-line runner that
+imported `resolve` would be. The promise actually load-bearing here is the
+one D57 stated and `workflow.py`'s own docstring repeats: *the runner is pure
+with respect to the desktop; the toolbox and the watch are handed in.* That
+promise currently lives in two docstrings, which is precisely the position
+the module-size promise was in when D60 found it broken.
+
+`test_structure.py::test_the_workflow_runner_reaches_the_target_only_through_its_toolbox`
+names the three in-package modules `workflow.py` may import, with the reason
+beside each, and fails on a fourth. It fails in both directions, like
+`KNOWN_UNWIRED`: an entry that is no longer imported is stale and comes off.
+A fourth entry is not forbidden -- it is required to be argued for here
+first, which is the whole mechanism this log is.
+
+**What this does not decide.** Not whether the macro vocabulary should grow
+further: #97, #106 and #112 each earned their form, and nothing here says
+the next one cannot. Not the second sense of "orchestration layer", which
+D#16 and D#17 hold. And not `tools/macro.py`'s zero headroom -- that is a
+split when it next needs a line, per D60's own rule that a module over the
+limit wants a split and not a bigger limit, and it is recorded here so the
+person who hits it knows it was seen rather than missed.
+
+**What would reopen it.** A concrete capability the macro format cannot
+express, argued as a capability rather than as a language: that is an issue
+against the format (the way #97 and #106 were), not a revival of this row.
+The row itself does not come back -- "build a DSL" has been answered by
+building one.
+
+**Evidence.** Issue #18; spec §12;
+`docs/product/features/deferred-scope-tracking.md`; `src/ghostdriver/workflow.py`
+(948 lines, and the six commits tabled above); `src/ghostdriver/tools/stepper.py`
+(`RUNNABLE_TOOLS`); `src/ghostdriver/tools/macro.py` (400 of 400);
+`docs/MACROS.md`; D57; D31; D32; D48; D62; D59; D60; D33; D#75; D#83; D#84;
+D#85; D#97; D#106; D#112; D#16 and D#17 (the sibling closures, whose pointer
+at this row is disambiguated rather than withdrawn); D#19 (the fourth row,
+unfired rather than built).
