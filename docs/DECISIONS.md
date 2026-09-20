@@ -7280,3 +7280,64 @@ building one.
 D#85; D#97; D#106; D#112; D#16 and D#17 (the sibling closures, whose pointer
 at this row is disambiguated rather than withdrawn); D#19 (the fourth row,
 unfired rather than built).
+
+### D#46. The portable agent contract branch is 168 commits stale, and stays dropped
+
+**Context.** Issue #46 is a 2026-09-05 archaeology-sweep find. The 2026-09-04
+fleet-wide rollout of a portable Claude/Codex agent contract
+(steiner385/claude-config#15) opened #31 here, proposing to make `.agents/`
+the canonical source and render `CLAUDE.md`, `AGENTS.md` and skills from it.
+#31 was closed the same evening with no comment and no merge; #32 was closed
+as its duplicate. The branch, `chore/portable-agent-contract`, was never
+deleted. #46 asked this session to decide: adopt it (reopening from the
+branch) or opt out.
+
+**The branch is not stale by a little.** Measured against `origin/main`
+today: the merge-base is `465432b`, and `main` has moved 168 commits past it
+while the branch has moved none past its own tip (`c56aff5`, 2026-09-04). The
+diff between them is 188 files, +2894/-24055. That deletion is not
+noise -- it is the entire Linux backend (`src/ghostdriver/backends/linux/*`,
+roughly twenty modules), most of `tests/test_linux_*.py`, the macro tool
+suite (`tools/macro.py`, `tests/test_macro_*.py`), and 4267 of
+`docs/DECISIONS.md`'s current 7282 lines: D57 through D#19, all of the
+`## Revision, 2026-09-02` section and all of `## Iteration 4`. None of that
+existed when the contract branch was cut, so the contract's own diff is not
+what deleted it -- but merging the branch as it stands would still delete
+it, because a merge does not know the difference a rebase would have caught.
+
+**Why #31 reads as deliberate rather than dropped.** The issue's own body
+raises this, and it holds up: `CLAUDE.md` is bespoke -- naming this project's
+own conventions (environment gating, `D#<issue>` numbering, the 400-line
+tool module limit, mypy run once per backend) -- and the contract's
+`core.md` would have replaced it with fleet-generic instructions.
+`docs/DECISIONS.md` describes itself, in its own header, as written so a
+decision "can be *disagreed with* later -- which needs the reason, not just
+the outcome." A contract built to be portable across repos has no channel
+for either -- portability and this project's bespoke conventions are the
+same trade-off, named twice.
+
+**Decision.** Opt out. `chore/portable-agent-contract` is not merged or
+rebased; it is deleted, and this repo keeps its own `CLAUDE.md` and
+`docs/DECISIONS.md` rather than adopting `.agents/`. Concretely:
+
+- The branch is deleted from `origin` -- no open PR points at it, and #31
+  and #32 are both closed.
+- steiner385/claude-config#15's rollout tracker gets a comment recording the
+  opt-out, so the fleet inventory reflects this repo correctly instead of
+  showing a silently dropped PR.
+- Nothing under `src/` or `tests/` changes. There was never a version of the
+  contract that applied to the codebase as it exists today, only to the one
+  168 commits ago.
+
+**What would reopen it.** Not "the fleet standardized and this repo is the
+odd one out" -- that restates the trade-off this entry just made. What would
+reopen it is a contract revision that can carry this repo's own conventions
+(`D#<issue>` numbering, the environment gates, the per-backend mypy split)
+without flattening them into fleet-generic text, cut against `main` as it
+stands rather than against a September snapshot.
+
+**Evidence.** Issue #46; steiner385/claude-config#15; PR #31 (closed, no
+comment, no merge, 2026-09-04); PR #32 (closed as duplicate); branch
+`chore/portable-agent-contract` at `c56aff5`; merge-base `465432b`; `git diff
+--stat origin/main origin/chore/portable-agent-contract` (188 files,
++2894/-24055).
