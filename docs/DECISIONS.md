@@ -6901,3 +6901,59 @@ two options are not built yet); D5 (failing closed, three times over).
 `test_an_entry_with_no_region_denies_the_whole_of_within`,
 `test_a_whole_window_denial_holds_across_scroll_positions`,
 `test_an_entry_with_no_within_fails_the_profile_load_even_without_a_region`.
+
+### D#17. An API oracle stays out of the driver; it belongs to orchestration
+
+**Context.** Issue #17 is one of the five spec §12 rows
+(`docs/product/features/deferred-scope-tracking.md`) kept visible without
+being scheduled. Unlike #16, its body does not leave the question open --
+it already argues its own conclusion ("Why it stays out of the driver")
+citing D59 and D46. What it lacks is the same thing #16 lacked: an entry
+in this log for the feature doc's non-goals to point at. Without one, the
+row reads to the next triage run as unscheduled work rather than decided
+-- which is exactly the gap the feature doc's Notes section named for #17
+and #18 after D#16 closed #16 alone, and exactly why this session was
+dispatched against #17 rather than left to keep re-raising the same
+question.
+
+**The idea, and why it is real.** An HTTP/API client that checks, out of
+band, whether an action driven through the UI took effect in the system
+behind it -- a test oracle independent of the surface being driven. It is
+the clean answer to the read gap D46 leaves open: if the API can confirm a
+value, the driver does not need exact text out of an owner-drawn grid's
+pixels at all. That gap is real (D46's own "what that leaves open"), which
+is why this is recorded as declined rather than dismissed.
+
+**Why it does not belong here regardless.** D59 drew the line above
+`backends/` on purpose: everything above it reads `WindowNode`s and
+`AccessibleElement`s, one model for both platforms. An API client reaches
+past that model entirely, into whatever system the target happens to be
+backed by -- a database, a message queue, a REST service, one target's
+and no other's. Housing it behind this tool surface would answer, from
+inside the driver, a question the driver's contract was never written to
+answer: not "what does the surface show", but "what did the system record".
+D1 sharpens the same point from the other direction -- the fixed-surface
+constraint holds because every capability added here is a capability of
+*the tool*, usable against any onboarded application. An API oracle is the
+opposite: it cannot be general, because every target's API is its own.
+Onboarding a second target would mean adding a second, unrelated oracle
+behind the same tool name, which is the fork D#16 already declined for a
+browser driver, for a different reason arriving at the same place.
+
+**Decision.** An API/HTTP oracle is out of this repository. If it is ever
+built, it sits on the orchestration layer this driver is deliberately
+underneath -- issue #18's row, the same sibling layer D#16 named for a
+browser driver -- reading the driver's own postconditions and tracing
+(D62) alongside its own system-specific check, not folded into a tool
+here.
+
+**What would reopen it, and what would not.** Nothing here narrows D46's
+open question -- exact text out of an owner-drawn region is still
+unsolved, and issue #20's clipboard/export probe is still the gate on it.
+An oracle proves useful *there* is not a reason to build it *here*: it
+reopens only if a future spec places verification-against-the-backing-system
+inside the driver's own contract, which would have to overturn D59, not
+merely cite the gap D46 left.
+
+**Evidence.** Issue #17; spec §12; `docs/product/features/deferred-scope-tracking.md`;
+D59; D46; D1; D#16 (the sibling decision this one parallels).
