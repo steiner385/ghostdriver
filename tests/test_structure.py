@@ -202,7 +202,7 @@ MUST_RUN_EVERYWHERE = {"test_tool_contracts.py", "test_modality.py",
                        "test_disturbance.py", "test_backends.py",
                        "test_mcp_dependency.py", "test_family_watch.py",
                        "test_lifecycle_policy.py", "test_standing_consent.py",
-                       "test_consent_lifetime.py"}
+                       "test_consent_lifetime.py", "test_grid_label_guard.py"}
 
 
 def _module_level_gate(path) -> str | None:

@@ -6092,6 +6092,85 @@ that from one data point to a pattern.
 `charmap.exe`'s live `CharGridWClass`; `docs/DECISIONS.md`'s own D46; issue
 #1; issue #20; issue #141 (the refusal-guard defect this session found).
 
+### D#141. The guard that refused a real grid stays; the person waives it, per class
+
+*Placed here rather than at the tail because it is the second half of D#1:
+the defect that session found, answered.*
+
+**The defect.** `probe_grid` refused `charmap.exe`'s `CharGridWClass`
+before trying a route, because `node.text` was non-empty:
+
+```
+not_actionable: "'class=CharGridWClass' already answers with text
+   ('Character Grid'); it is not a painted region. Use `read`"
+```
+
+Both halves of that sentence are false for this control. It *is* a painted
+region -- it paints every glyph cell itself -- and `read` does not answer
+it: the string is a static accessible name the class sets once, returned
+identically whichever glyphs are on screen or selected. A caller who took
+the tool's advice got a plausible, content-free answer with nothing in it
+to say so (issue #141).
+
+**What was considered.** The guard itself is right and is not removed. It
+exists because probing a control `read` already reads spends a side effect
+-- the target's own Copy, on the person's shared clipboard -- for nothing
+(D46), and for a button, whose caption *is* its content, the inference
+holds exactly. The fixture's `GhostFixtureCommandButton` case is that, and
+it still passes.
+
+The tempting fix is to detect the difference: compare the text against the
+class name, against a caption convention, against the rect. Every version
+of that is the tool **picking** between "this text is content" and "this
+text is a label" from a signal that does not carry the answer -- two
+controls, identical in every respect a window exposes, differing only in
+what the application meant. D33 refuses ambiguity rather than picking, and
+a wrong guess here is worse than the refusal was: it would spend the
+clipboard on a caption, or keep refusing a grid while looking as though it
+had decided.
+
+**Decision.** The guard stays, and the person waives it per control class,
+in the profile:
+
+```json
+"text_is_label": ["CharGridWClass"]
+```
+
+`fnmatch` patterns against the window class. A listed class is probed
+despite its text, and the report carries `text_is_label` saying which
+pattern let it run -- a probe that ran because of a declaration should read
+as one, not look like a measurement. This is the third field of exactly
+this shape, after `posted_click_only` (D#122) and `hover_before_click`
+(D#133), and for the same reason each time: the knowledge is a property of
+a control class, it is held by the operator who curated the profile, and a
+declared fact beats a measured one (D35).
+
+A per-call `expect_text: false` was considered and declined. The caller at
+the moment of the refusal is precisely the party who cannot tell -- D#1's
+session followed `read`'s advice and could not see that the answer was
+empty -- so a flag flipped in the moment records a guess, while a profile
+entry records something someone established and the next session inherits.
+
+`grid_seek` carried the same guard, verbatim, and now shares the same code:
+waiving it for `probe_grid` alone would have left the class reachable by
+the probe and not by the tool the probe exists to enable.
+
+**The refusal, for the case that is still refused,** no longer asserts what
+it cannot know. It says the region answered a text query, which is what was
+measured; it no longer says the region is not painted, which was inferred
+and was wrong; and it names the class to list and the key to list it under,
+so a caller who disagrees can act rather than re-run it.
+
+**Evidence.** D#1's measurement, above; issue #141. The regression runs on
+Windows against a new fixture control, `GhostFixtureLabelledGrid`
+(`--labelled-grid`): the same owner-drawn grid that answers `WM_GETTEXT`
+with a fixed label, because no existing fixture control could reproduce the
+defect -- every one of them answers with its real caption, which is why the
+refusal looked correct everywhere it could be tested. The guard's own
+decision is checked platform-neutrally in `tests/test_grid_label_guard.py`,
+at `text_guard`, the seam that needs no backend: the promise is neutral
+even though the control that broke it was Win32 (D#39).
+
 ### D#159. The stop stays; what it says changes
 
 **Context.** `conftest.mcp_or_skip()` was called at module level by

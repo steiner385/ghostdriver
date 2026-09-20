@@ -183,6 +183,27 @@ measure:
 match and every `click` result for a matching class, so the next session
 reads it before repeating the experiment that produced it.
 
+## `text_is_label` (D#141)
+
+Window classes whose text query answers with a fixed label rather than
+their content:
+
+```json
+"text_is_label": ["CharGridWClass"]
+```
+
+`fnmatch` patterns against the control's window class. `probe_grid` and
+`grid_seek` refuse a region `read` already answers, because spending a
+side effect on what a free call reads is the wrong trade -- true of a
+button, whose caption *is* its content. Measured against a real
+owner-drawn grid it was not: `WM_GETTEXT` answered with a static
+accessible name, `read` returned it whatever was painted inside, and the
+probe refused the one control it exists to reach (D#1). Nothing in a
+window tells a caption from a label, so the guard stays and a class listed
+here waives it; the probe then runs and its report says why
+(`text_is_label`). List a class after seeing `read` answer the same string
+twice over different content, not before.
+
 ## `safe_controls`
 
 What `probe_phase2` may actuate to learn how the target's controls

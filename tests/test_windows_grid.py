@@ -236,8 +236,11 @@ def test_the_tool_refuses_below_the_full_tier():
 
 
 def test_the_tool_refuses_a_region_that_read_already_answers():
-    """A control with text is not a painted region. Spending a side effect
-    on something a free call already reads is exactly the wrong trade."""
+    """A button's caption *is* its content, so `read` answers it and
+    spending a side effect on it is exactly the wrong trade. (That the text
+    answered does not, on its own, make the region unpainted -- this button
+    paints its caption, and a real grid painted its rows behind one: D#141.
+    The refusal survives that correction; its reasoning is what changed.)"""
     from ghostdriver.session import SessionManager
     from ghostdriver.tools import Toolbox
 
@@ -245,6 +248,135 @@ def test_the_tool_refuses_a_region_that_read_already_answers():
     try:
         box = Toolbox(SessionManager())
         session = full_session(box, handles["pid"])
+
+        report = box.probe_grid(
+            session, 'class=GhostFixtureCommandButton text="Expand All"')
+
+        assert not report["ok"]
+        assert "Use `read`" in report["error"]["message"]
+    finally:
+        stop(proc, handles)
+
+
+# --- a grid whose text query answers with a label (#141, D#141) ----------
+#
+# `--labelled-grid` paints the same rows as the grid above and answers
+# WM_GETTEXT with a fixed "Component Grid", the shape measured on a real
+# target (D#1). Before it existed the fixture could not reproduce the
+# defect at all: every control here answered with its real caption, so the
+# refusal looked right everywhere it could be tested.
+
+LABELLED = "class=GhostFixtureLabelledGrid"
+
+
+def labelled_profile(tmp_path, *classes):
+    path = tmp_path / "profile.json"
+    path.write_text(json.dumps({"matched_profile": "L1",
+                                "text_is_label": list(classes)}),
+                    encoding="utf-8")
+    return path
+
+
+def test_read_on_the_labelled_grid_answers_with_the_label_not_the_rows():
+    """Why the old refusal's advice was worse than no advice: a caller who
+    follows it gets a plausible answer that is the same whatever the grid
+    holds, and nothing in the result says so."""
+    from ghostdriver.session import SessionManager
+    from ghostdriver.tools import Toolbox
+
+    proc, handles = start("--labelled-grid")
+    try:
+        box = Toolbox(SessionManager())
+        session = full_session(box, handles["pid"])
+
+        values = box.read(session, LABELLED)["values"]
+
+        assert [v["text"] for v in values] == [handles["grid_label"]]
+        assert values[0]["answered"], "it answers -- that is the whole trap"
+        assert "PART-0001" not in values[0]["text"], "not one painted row"
+    finally:
+        stop(proc, handles)
+
+
+def test_an_undeclared_labelled_grid_is_still_refused(preserved_clipboard):
+    """The guard is not loosened for everything that looks like a grid. With
+    nothing declared, the tool refuses and says what would change that."""
+    from ghostdriver.session import SessionManager
+    from ghostdriver.tools import Toolbox
+
+    proc, handles = start("--labelled-grid")
+    try:
+        box = Toolbox(SessionManager())
+        session = full_session(box, handles["pid"])
+
+        report = box.probe_grid(session, LABELLED)
+
+        assert not report["ok"]
+        message = report["error"]["message"]
+        assert "GhostFixtureLabelledGrid" in message
+        assert "text_is_label" in message
+    finally:
+        stop(proc, handles)
+
+
+def test_a_declared_labelled_grid_is_probed_and_its_copy_route_found(
+    preserved_clipboard, tmp_path,
+):
+    """The regression case for #141: the same control, the same text, one
+    declaration -- and the probe reaches the routes it exists to try. Run
+    against the fixture's grid because a real target's answer is `unknown`
+    (D#1) and `unknown` cannot tell "the guard was passed" from "the guard
+    refused": both leave a caller with nothing."""
+    from ghostdriver.session import SessionManager
+    from ghostdriver.tools import Toolbox
+
+    proc, handles = start("--labelled-grid")
+    try:
+        box = Toolbox(SessionManager())
+        session = full_session(
+            box, handles["pid"],
+            labelled_profile(tmp_path, "GhostFixtureLabelledGrid"))
+
+        report = box.probe_grid(session, LABELLED)
+
+        assert report["ok"], report
+        assert report["grid_strategy"] == "clipboard_copy"
+        assert "Component Grid" in report["text_is_label"]
+        assert "text_is_label" in report["text_is_label"], "says why it ran"
+    finally:
+        stop(proc, handles)
+
+
+def test_the_declaration_is_read_as_a_class_pattern(preserved_clipboard,
+                                                    tmp_path):
+    from ghostdriver.session import SessionManager
+    from ghostdriver.tools import Toolbox
+
+    proc, handles = start("--labelled-grid")
+    try:
+        box = Toolbox(SessionManager())
+        session = full_session(box, handles["pid"],
+                               labelled_profile(tmp_path, "GhostFixture*Grid"))
+
+        report = box.probe_grid(session, LABELLED)
+
+        assert report["ok"], report
+    finally:
+        stop(proc, handles)
+
+
+def test_a_declaration_does_not_waive_the_guard_for_another_class(tmp_path):
+    """Declared per class, not per session. The button next to the grid is
+    still refused, because its caption really is its content."""
+    from ghostdriver.session import SessionManager
+    from ghostdriver.tools import Toolbox
+
+    proc, handles = start("--labelled-grid")
+    try:
+        box = Toolbox(SessionManager())
+        session = full_session(
+            box, handles["pid"],
+            labelled_profile(tmp_path, "GhostFixtureLabelledGrid"))
 
         report = box.probe_grid(
             session, 'class=GhostFixtureCommandButton text="Expand All"')

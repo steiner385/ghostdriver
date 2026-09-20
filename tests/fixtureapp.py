@@ -267,6 +267,7 @@ MAIN_CLASS = "GhostFixtureShell"
 PAGE_CLASS = "GhostFixturePage"
 BUTTON_CLASS = "GhostFixtureCommandButton"
 GRID_CLASS = "GhostFixtureDataGrid"
+LABEL_GRID_CLASS = "GhostFixtureLabelledGrid"
 BOUND_EDIT_CLASS = "GhostFixtureBoundEdit"
 PLAIN_EDIT_CLASS = "GhostFixturePlainEdit"
 MODAL_CLASS = "GhostFixtureModal"
@@ -579,6 +580,34 @@ def _grid_proc(hwnd, msg, wparam, lparam):
     return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
 
+#: The label the labelled grid answers a text query with, whatever it is
+#: painting. Generic on purpose: it names the control, never its rows.
+GRID_LABEL = "Component Grid"
+
+
+def _labelled_grid_proc(hwnd, msg, wparam, lparam):
+    """The same owner-drawn grid, whose class answers a text query.
+
+    Measured on a real target (D#1): `charmap.exe`'s `CharGridWClass` paints
+    every glyph itself and enumerates as one control with no children -- and
+    `WM_GETTEXT` answers `'Character Grid'`, a static accessible name set
+    once, the same string whichever glyphs are on screen or selected. The
+    grid above refuses that query, which is the shape every fixture control
+    had, and it is why `probe_grid`'s "a region `read` already answers is
+    not a painted region" guard could refuse a real grid and no test could
+    see it (#141).
+
+    So this one does not intercept the query: `DefWindowProcW` answers it
+    with the window text, which is a fixed label, while every other message
+    -- paint, `WM_COPY`, clicks -- goes to the grid procedure unchanged. A
+    caller who follows the old refusal's advice and calls `read` here gets
+    `GRID_LABEL` back and never sees a row, exactly as on the real target.
+    """
+    if msg in (WM_GETTEXT, WM_GETTEXTLENGTH):
+        return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+    return _grid_proc(hwnd, msg, wparam, lparam)
+
+
 # --- section 10 item 4: superclassed EDIT, plain and data-bound ----------
 
 _EDIT_PROC = ctypes.c_void_p(0)
@@ -842,9 +871,11 @@ def build(options) -> dict:
     main_p, button_p, grid_p, modal_p, float_p, plain_p, bound_p = procs
 
     label_p = WNDPROC(_label_proc)
-    _PROCS.append(label_p)
+    labelled_grid_p = WNDPROC(_labelled_grid_proc)
+    _PROCS.extend((label_p, labelled_grid_p))
     for name, proc in ((MAIN_CLASS, main_p), (PAGE_CLASS, main_p),
                        (BUTTON_CLASS, button_p), (GRID_CLASS, grid_p),
+                       (LABEL_GRID_CLASS, labelled_grid_p),
                        (MODAL_CLASS, modal_p), (FLOAT_CLASS, float_p),
                        (CAPTION_CLASS, label_p),
                        (VALUE_CLASS, label_p)):
@@ -897,6 +928,12 @@ def build(options) -> dict:
             child(BUTTON_CLASS, "Reset", 132, 12, 110, 26, parent=page),
         ])
         child(GRID_CLASS, "", 12, 50, 580, 130, parent=page)
+
+    # A second grid, identical but for answering a text query with a fixed
+    # label (#141). Behind a flag because every other test counts this tree.
+    labelled_grid = None
+    if options.labelled_grid:
+        labelled_grid = child(LABEL_GRID_CLASS, GRID_LABEL, 12, 386, 290, 26)
 
     toolbar = [child(BUTTON_CLASS, cap, 12 + i * 130, 8, 120, 26)
                for i, cap in enumerate(("Expand All", "Collapse All",
@@ -999,6 +1036,9 @@ def build(options) -> dict:
         "page_buttons": page_buttons,
         "toolbar": toolbar,
         "grid_class": GRID_CLASS,
+        "labelled_grid": labelled_grid,
+        "labelled_grid_class": LABEL_GRID_CLASS,
+        "grid_label": GRID_LABEL,
         "button_class": BUTTON_CLASS,
         "plain_edit": plain,
         "password": secret,
@@ -1036,6 +1076,10 @@ def main(argv=None) -> None:
                         help="the grid pages on PageDown/PageUp over a nine-row set")
     parser.add_argument("--floating", action="store_true",
                         help="also show a second top-level window holding a grid")
+    parser.add_argument("--labelled-grid", action="store_true",
+                        help="also show an owner-drawn grid whose class answers "
+                             "a text query with a fixed label, the way a real "
+                             "one does (#141)")
     parser.add_argument("--grid-no-copy", dest="grid_copies",
                         action="store_false",
                         help="Make the grid ignore WM_COPY, so the probe's "

@@ -83,6 +83,19 @@ class Profile:
     #: application sets from the real cursor on idle and no posted pair can
     #: create. Declared, because the message is private to one toolkit.
     hover_before_click: tuple[str, ...] = ()
+    #: Control classes (fnmatch patterns) whose window text is a fixed label
+    #: the class sets once, not the region's content (#141). `probe_grid`
+    #: and `grid_seek` refuse a region a text query already answers, because
+    #: spending a side effect on something `read` reads for free is the
+    #: wrong trade (D46) -- and for a button, whose caption *is* its content,
+    #: that holds. Measured against a real owner-drawn grid it did not:
+    #: `WM_GETTEXT` answered with a static accessible name and `read`
+    #: returned it whatever was painted inside, so the guard refused the one
+    #: control the probe exists to reach (D#1). Nothing local tells the two
+    #: apart, and a driver that guessed would be picking rather than
+    #: refusing (D33); a class listed here is declared, and a declared fact
+    #: beats a measured one (D35).
+    text_is_label: tuple[str, ...] = ()
     #: What the operator knows about a control class that a session cannot
     #: measure: {class pattern: note}. Surfaced on every find match and
     #: click result for a matching class (#137). Declared knowledge (D35):
@@ -106,6 +119,16 @@ class Profile:
 
         name = class_name or ""
         return any(fnmatch.fnmatchcase(name, p) for p in self.hover_before_click)
+
+    def declares_label_text(self, class_name: str | None) -> str | None:
+        """The `text_is_label` pattern covering `class_name`, or None."""
+        import fnmatch
+
+        name = class_name or ""
+        for pattern in self.text_is_label:
+            if fnmatch.fnmatchcase(name, pattern):
+                return pattern
+        return None
 
     def pins_to_posted(self, class_name: str | None) -> str | None:
         """The `posted_click_only` pattern that pins `class_name`, or None."""
@@ -188,6 +211,13 @@ class Profile:
                 f"profile {location} has an unreadable hover_before_click: a list of "
                 f"window-class patterns, e.g. [\"THtLeftPanel\"]; got {hovered!r}",
             )
+        labelled = document.get("text_is_label") or []
+        if not isinstance(labelled, list) or not all(isinstance(c, str) and c for c in labelled):
+            raise GhostdriverError(
+                ErrorKind.DENIED_BY_POLICY,
+                f"profile {location} has an unreadable text_is_label: a list of "
+                f"window-class patterns, e.g. [\"CharGridWClass\"]; got {labelled!r}",
+            )
         return cls(
             path=location,
             matched_profile=document.get("matched_profile", "unknown"),
@@ -199,6 +229,7 @@ class Profile:
             busy_indicator=document.get("busy_indicator") or None,
             posted_click_only=tuple(pinned),
             hover_before_click=tuple(hovered),
+            text_is_label=tuple(labelled),
             notes=dict(notes),
         )
 

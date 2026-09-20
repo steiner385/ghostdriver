@@ -641,7 +641,7 @@ def cmd_restore(pid: int) -> int:
 CURATED_PROFILE_KEYS = {
     "matched_profile", "denylist", "input_sensitivity", "busy_indicator",
     "safe_controls", "grid_strategy", "grid_evidence", "actuation_map", "focus_behavior",
-    "posted_click_only", "hover_before_click", "notes",
+    "posted_click_only", "hover_before_click", "notes", "text_is_label",
 }
 RETIRED_PROFILE_KEYS = {
     "environment_allowlist": "no longer read: which targets may be driven is "
