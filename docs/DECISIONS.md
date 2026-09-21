@@ -7528,3 +7528,59 @@ comment, no merge, 2026-09-04); PR #32 (closed as duplicate); branch
 `chore/portable-agent-contract` at `c56aff5`; merge-base `465432b`; `git diff
 --stat origin/main origin/chore/portable-agent-contract` (188 files,
 +2894/-24055).
+
+### D#145. The menu's keyboard route confirms each phase, and a result says which routes ran
+
+**Context.** `tests/test_windows_menus.py` began failing intermittently on
+CI with the merge of #139 (D#135), at least ten times in a week, on
+changes that could not reach it. The signature never varied: the item
+resolves, `tier_used` is `None`, no tier's postcondition holds. The ladder
+made it one-way -- `menu_keys` queued a Return and reported delivery; when
+the label had not changed inside the verify window the actuator fell to
+the posted pair, which ends a menu that is not under the pointer (D#135),
+and after that nothing can hold.
+
+**What was measured, and what was not.** Locally the module passed 12 of
+12 runs, and a probe over ten menu openings found the item reading back as
+highlighted after the first `MN_SELECTITEM` every time. So the cause is
+not reproduced on this machine: it needs CI's load. Two candidates stay
+open -- the selection not taking before Return is posted, and Return not
+being consumed (or the owner's handler running late) inside the window.
+The result could not tell them apart, which is the defect that can be
+fixed without knowing which it is (D45).
+
+**Decision.**
+
+- **`menu_keys` confirms each phase and names the one that fails.** The
+  item must read back as highlighted (`MF_HILITE`) before Return is
+  posted; re-selecting while waiting is idempotent. After Return the menu
+  must end, because ending is a menu's answer to Return. Either not
+  happening raises with the count and the milliseconds waited, and the
+  result carries it as `declined`. Return is posted once. This is a wait
+  for a condition, not a retry: nothing is sent twice that could act
+  twice.
+- **The postcondition clock starts when the choice was made.** Because the
+  route returns only once the menu has ended, the verify window no longer
+  begins at "a keystroke was queued". A slow menu costs the time it took
+  and the label still gets its whole window.
+- **A result says which routes ran.** `routes_attempted` rides beside
+  `tiers_attempted` -- two rungs on one tier read `[3, 3]` and said
+  nothing -- and a rung that returned without delivering is recorded in
+  `declined` like one that raised. `declined` is reported on successful
+  results too: a ladder that got there on its second rung says what the
+  first one did.
+- **The tests print the explaining fields.** pytest's truncated repr hid
+  `error` and `declined` in every CI occurrence; the assertions now show
+  them, with the routes and disturbances.
+
+**What this does not claim.** That the flake is fixed. If the cause is the
+handler running late, the second bullet removes it; if it is something
+else, the next occurrence will say so in its own assertion message, which
+is the point.
+
+**Evidence.** `tests/test_windows_menus.py`: Return waits for the
+highlight and is posted once; an item that never highlights is named and
+Return is not posted; a menu that does not end is named; a menu that
+vanishes mid-selection is named; a failed choice reports its routes.
+`tests/test_actuate.py`: routes beside tiers, a quiet decline recorded, an
+unnamed attempt reported by tier. Issue #145; D#135; D45; D28.

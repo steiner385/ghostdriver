@@ -328,6 +328,7 @@ MF_BYPOSITION = 0x0400
 MF_SEPARATOR = 0x0800
 MF_OWNERDRAW = 0x0100
 MF_POPUP = 0x0010
+MF_HILITE = 0x0080
 MF_DISABLED_OR_GRAYED = 0x0003
 POPUP_MENU_CLASS = "#32768"
 
@@ -487,7 +488,8 @@ def popup_menu_item_state(hwnd: int, index: int, *, timeout_ms: int = 500) -> di
     if state == 0xFFFFFFFF:
         return None
     return {"enabled": not (state & MF_DISABLED_OR_GRAYED),
-            "submenu": bool(state & MF_POPUP)}
+            "submenu": bool(state & MF_POPUP),
+            "highlighted": bool(state & MF_HILITE)}
 
 
 def popup_menu_select(hwnd: int, index: int, *, timeout_ms: int = 500) -> bool:
@@ -495,3 +497,10 @@ def popup_menu_select(hwnd: int, index: int, *, timeout_ms: int = 500) -> bool:
     keys would; the menu's own selection state, not a pointer."""
     send_message_timeout(hwnd, MN_SELECTITEM, index, 0, timeout_ms=timeout_ms)
     return True
+
+
+def popup_menu_showing(hwnd: int) -> bool:
+    """Whether the popup menu window is still up. A menu that has been
+    answered ends, and its window goes with it."""
+    target = wintypes.HWND(hwnd)
+    return bool(user32.IsWindow(target)) and bool(user32.IsWindowVisible(target))

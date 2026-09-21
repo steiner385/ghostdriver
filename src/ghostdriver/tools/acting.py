@@ -314,6 +314,7 @@ class _ActingCore(_DenyCore, _ExpectCore):
             "tier_used": result.tier_used,
             "route": result.route_used,
             "tiers_attempted": result.tiers_attempted,
+            "routes_attempted": result.routes_attempted,
             **({"declined": result.declined} if result.declined else {}),
             **({"declined": result.declined} if result.declined else {}),
             "cadence": prepared.cadence.name,

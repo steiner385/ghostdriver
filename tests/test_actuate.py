@@ -355,3 +355,22 @@ def test_a_declining_rung_s_reason_is_kept_and_named():
     assert not result.ok
     assert result.declined == {"live_commit": "the pointer moved while acting"}
     assert "live_commit: the pointer moved" in result.error["message"]
+
+
+# --- routes, and a rung that declined quietly (#145) ---------------------------
+
+def test_the_route_of_every_attempt_is_reported_beside_its_tier():
+    result = actuator().perform([
+        Attempt(Tier.WINDOW_MESSAGE, always(False), name="menu_keys"),
+        Attempt(Tier.WINDOW_MESSAGE, always(True), rank=1, name="posted"),
+    ])
+
+    assert result.ok
+    assert result.tiers_attempted == [3, 3]
+    assert result.routes_attempted == ["menu_keys", "posted"]
+    assert result.declined == {"menu_keys": "returned without delivering"}
+
+
+def test_an_unnamed_attempt_is_reported_by_its_tier():
+    result = actuator().perform([Attempt(Tier.UIA_PATTERN, always(True))])
+    assert result.routes_attempted == ["tier 1"]

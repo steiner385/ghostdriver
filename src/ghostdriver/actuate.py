@@ -189,9 +189,11 @@ class Actuator:
             )
 
         attempted: list[int] = []
+        routes: list[str] = []
         declined: dict[str, str] = {}
         for attempt in sorted(usable, key=lambda a: (a.rank, a.tier)):
             attempted.append(int(attempt.tier))
+            routes.append(attempt.name or f"tier {int(attempt.tier)}")
             try:
                 delivered = attempt.run()
             except Exception as exc:
@@ -201,6 +203,10 @@ class Actuator:
                 declined[attempt.name or f"tier {int(attempt.tier)}"] = str(exc)
                 delivered = False
             if not delivered:
+                # A rung that returned without delivering, and did not say
+                # why, is still a rung that declined (#145).
+                declined.setdefault(attempt.name or f"tier {int(attempt.tier)}",
+                                    "returned without delivering")
                 continue
 
             if expect_after is None:
@@ -212,6 +218,8 @@ class Actuator:
                     tier_used=int(attempt.tier),
                     route_used=attempt.name or None,
                     tiers_attempted=attempted,
+                    routes_attempted=routes,
+                    declined=declined,
                     precondition_verified=(
                         True if expect_before is not None else None
                     ),
@@ -225,6 +233,8 @@ class Actuator:
                     tier_used=int(attempt.tier),
                     route_used=attempt.name or None,
                     tiers_attempted=attempted,
+                    routes_attempted=routes,
+                    declined=declined,
                     precondition_verified=(
                         True if expect_before is not None else None
                     ),
@@ -242,6 +252,7 @@ class Actuator:
         return ActionResult(
             ok=False,
             tiers_attempted=attempted,
+            routes_attempted=routes,
             precondition_verified=True if expect_before is not None else None,
             postcondition_verified=False if failed_after else None,
             elapsed_ms=self._elapsed(started),
