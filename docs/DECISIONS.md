@@ -7585,44 +7585,6 @@ vanishes mid-selection is named; a failed choice reports its routes.
 `tests/test_actuate.py`: routes beside tiers, a quiet decline recorded, an
 unnamed attempt reported by tier. Issue #145; D#135; D45; D28.
 
-### D#186. A copy answered after the route gave up is put back
-
-**Context.** Found reading `copy_route` for #182. The route posts
-`WM_COPY`, waits 1.5 s for the clipboard's sequence number to move, and
-then restores what the clipboard held -- whether or not anything arrived.
-A posted message is not withdrawn by giving up on it. A control that gets
-to its Copy command late writes the clipboard *after* the route has
-returned, and nothing put it back: the person is left holding grid rows
-they never copied, with no result anywhere to say so. D70 promises that
-every format is saved and put back around each copy; this was the hole in
-it, and a loaded machine or a large grid is all it takes.
-
-**Decision.** When a copy times out, the clipboard is watched for a
-further ten seconds, off the calling thread.
-
-- **A change is attributed by its owner.** `GetClipboardOwner` names the
-  window that last wrote the clipboard. A change owned by the target's
-  process is the late answer: what the clipboard held before is restored,
-  and that is recorded.
-- **Anyone else's change is theirs.** The person copying something while
-  a late answer is pending must not have it undone, so a change the target
-  does not own is left alone -- and becomes the new "before", because it
-  is what a late answer would now destroy.
-- **It is said.** The timed-out result's own detail says the clipboard is
-  being watched and for how long, and what a late answer did rides on the
-  next copy's caveat, since the call it belongs to has already returned.
-- **Bounded.** One short-lived daemon thread per timed-out copy, ten
-  seconds at most. A control slower than that is outside what this
-  covers, and the caveat already says the restore is not atomic.
-
-**Evidence.** `tests/test_clipboard_policy.py`: a late answer owned by the
-target is put back and recorded; a change the target does not own is left
-alone and is what gets put back afterwards; nothing arriving records
-nothing; and end to end, a fixture grid that answers `WM_COPY` 600 ms late
-against a 200 ms timeout leaves the clipboard holding exactly what it held
-before (`env: windows`). The fixture now opens the clipboard with its main
-window, as an application does, so the owner names its process. Issue
-#186; D70; D#182.
 ### D#182. A copy that did not work is not a page of no rows
 
 **The field report.** `test_a_grid_that_does_not_page_says_the_view_did_not_change`
@@ -7672,3 +7634,42 @@ listed and the grid still reads as not advanced, `page_rows == [3, 3]`; a
 route that never answers stops after two, says so, and does not claim the
 end or the value's absence (`env: windows`, the fixture grid, the
 backend's copy route made to fail). Issue #182; D63; D64; D45.
+
+### D#186. A copy answered after the route gave up is put back
+
+**Context.** Found reading `copy_route` for #182. The route posts
+`WM_COPY`, waits 1.5 s for the clipboard's sequence number to move, and
+then restores what the clipboard held -- whether or not anything arrived.
+A posted message is not withdrawn by giving up on it. A control that gets
+to its Copy command late writes the clipboard *after* the route has
+returned, and nothing put it back: the person is left holding grid rows
+they never copied, with no result anywhere to say so. D70 promises that
+every format is saved and put back around each copy; this was the hole in
+it, and a loaded machine or a large grid is all it takes.
+
+**Decision.** When a copy times out, the clipboard is watched for a
+further ten seconds, off the calling thread.
+
+- **A change is attributed by its owner.** `GetClipboardOwner` names the
+  window that last wrote the clipboard. A change owned by the target's
+  process is the late answer: what the clipboard held before is restored,
+  and that is recorded.
+- **Anyone else's change is theirs.** The person copying something while
+  a late answer is pending must not have it undone, so a change the target
+  does not own is left alone -- and becomes the new "before", because it
+  is what a late answer would now destroy.
+- **It is said.** The timed-out result's own detail says the clipboard is
+  being watched and for how long, and what a late answer did rides on the
+  next copy's caveat, since the call it belongs to has already returned.
+- **Bounded.** One short-lived daemon thread per timed-out copy, ten
+  seconds at most. A control slower than that is outside what this
+  covers, and the caveat already says the restore is not atomic.
+
+**Evidence.** `tests/test_clipboard_policy.py`: a late answer owned by the
+target is put back and recorded; a change the target does not own is left
+alone and is what gets put back afterwards; nothing arriving records
+nothing; and end to end, a fixture grid that answers `WM_COPY` 600 ms late
+against a 200 ms timeout leaves the clipboard holding exactly what it held
+before (`env: windows`). The fixture now opens the clipboard with its main
+window, as an application does, so the owner names its process. Issue
+#186; D70; D#182.
