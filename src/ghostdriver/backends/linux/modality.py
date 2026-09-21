@@ -214,17 +214,12 @@ def surface_of(handle: int) -> str:
     here, so this walks the *accessible* ancestors and tests each role,
     `class_name` on this backend being the accessible role (D#40b).
 
-    **It answers "native" for everything today, and that is deliberate.**
-    `WEB_HOST_CLASSES` holds Win32 window classes -- `Chrome_WidgetWin_*`,
-    `MozillaWindowClass` -- and no AT-SPI role can match one. What an
-    embedded document actually reports here is L8's measurement (#15), and
-    it has not been taken. Guessing at `document web` would be modelling,
-    which is the thing this backend is built to avoid; the walk is written
-    so that adding the measured role to `WEB_HOST_CLASSES` is the whole fix.
-
-    A wrong answer costs a cadence, not a correctness bug -- the worst case
-    is typing at full speed in a region an operator had flagged -- which is
-    why this ships as a known gap rather than blocking the slice.
+    **Answered "native" for everything until L8 (#15) measured an embedded
+    document.** `document web` -- the AT-SPI role a live document
+    publishes under, measured against WebKitGTK's GTK3 binding -- now sits
+    in `WEB_HOST_CLASSES` alongside the Win32 window classes, so this walk
+    matches it exactly as written: no change needed here, because the
+    walk was already written to need none (D#15).
     """
     node = _accessible(handle)
     seen = 0

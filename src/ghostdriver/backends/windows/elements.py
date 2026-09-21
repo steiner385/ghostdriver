@@ -431,7 +431,16 @@ def set_value_via_pattern(element: AccessibleElement, text: str) -> bool:
         return False
 
 
-def menu_choose(element: AccessibleElement) -> bool:
+#: How long the menu is given to show the item highlighted, and then to end
+#: once Return has been posted. Bounds on a wait for a condition, not
+#: delays: a menu that answers at once costs one poll of each.
+MENU_HIGHLIGHT_S = 1.0
+MENU_END_S = 2.0
+MENU_POLL_S = 0.02
+
+
+def menu_choose(element: AccessibleElement, *, sleep=time.sleep,
+                now=time.monotonic) -> bool:
     """Tier 3 for a popup-menu item: the menu selects it and Enter runs it.
 
     A button pair posted at an item's rectangle is handled by the menu's
@@ -446,6 +455,17 @@ def menu_choose(element: AccessibleElement) -> bool:
 
     A greyed item is refused by name rather than pressed; a submenu is
     declined so the posted route can open it.
+
+    **Each phase is confirmed, and the one that fails is named (#145).**
+    The route failed intermittently on CI with nothing to say which half
+    had not happened. So: the item must read back as highlighted before
+    Return is posted, and the menu must end after it -- a menu's answer to
+    Return is to go away. Either not happening raises with how long was
+    waited, which the result carries as `declined`; and because this
+    returns only once the menu has ended, the caller's postcondition clock
+    starts when the choice was actually made rather than when a keystroke
+    was queued. Not a retry: re-selecting an item is idempotent, and Return
+    is posted once.
     """
     from . import input as win_input
 
@@ -459,11 +479,39 @@ def menu_choose(element: AccessibleElement) -> bool:
                           "application is not offering it right now")
     if state["submenu"]:
         return False
-    winapi.popup_menu_select(hwnd, index)
+    started = now()
+    selects = 0
+    while True:
+        winapi.popup_menu_select(hwnd, index)
+        selects += 1
+        state = winapi.popup_menu_item_state(hwnd, index)
+        if state is None:
+            raise LookupError("the menu stopped showing while its item was being selected")
+        if state["highlighted"]:
+            break
+        if now() - started >= MENU_HIGHLIGHT_S:
+            raise LookupError(
+                f"menu item {element.sibling_index} never read back as highlighted: "
+                f"{selects} selects over {int((now() - started) * 1000)} ms, so Return "
+                "was not posted")
+        sleep(MENU_POLL_S)
+
     scan = win_input.user32.MapVirtualKeyW(win_input.VK_RETURN, win_input.MAPVK_VK_TO_VSC)
     down = 1 | (scan << 16)
     up = down | (1 << 30) | (1 << 31)
     target = wintypes.HWND(hwnd)
     ok = bool(win_input.user32.PostMessageW(target, win_input.WM_KEYDOWN, win_input.VK_RETURN, down))
     ok &= bool(win_input.user32.PostMessageW(target, win_input.WM_KEYUP, win_input.VK_RETURN, up))
-    return ok
+    if not ok:
+        raise LookupError("Return could not be posted to the menu window")
+
+    posted_at = now()
+    while winapi.popup_menu_showing(hwnd):
+        if now() - posted_at >= MENU_END_S:
+            raise LookupError(
+                f"Return was posted to highlighted item {element.sibling_index} "
+                f"(after {selects} select(s)) and the menu is still showing "
+                f"{int((now() - posted_at) * 1000)} ms later: its loop has not "
+                "consumed the key")
+        sleep(MENU_POLL_S)
+    return True

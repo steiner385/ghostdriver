@@ -33,11 +33,20 @@ Start with `list_targets`. **No target may be automated until the person
 you are working with has approved it for this session.** Show them the
 candidates, ask which to automate, then `attach`. If your client supports
 it, `attach` will ask them directly; otherwise record their answer with
-`grant_targets`. Approvals last for this server run and can be changed at
-any time. Record a *restriction* only for a target the operator ruled
-out: a target nobody allowed is never automated, and one server can serve
-several chats at once, so a restriction recorded here stops that target's
-sessions in every chat.
+`grant_targets`. **How long an approval lasts depends on how this server
+is configured, so do not assert it from memory** -- a `needs_consent`
+result carries the true sentence as `lifetime`; quote that one when you
+ask. Approvals can be changed at any time. Record a *restriction* only
+for a target the operator ruled out: a target nobody allowed is never
+automated, and one server can serve several chats at once, so a
+restriction recorded here stops that target's sessions in every chat.
+
+An operator may also declare standing approvals by hand, per executable,
+in `standing-consent.json` under their own directory; a target answered
+that way says so in its grant. **You cannot write that file, and must not
+offer to** -- proposing its contents is fine, editing it is the
+operator's, and that is the only thing making it worth more than your
+say-so.
 
 Four things about this class of target are worth knowing before you plan:
 
@@ -129,8 +138,9 @@ class ConsentAnswer(BaseModel):
 
     allow: bool = Field(
         description=(
-            "Allow this application to be automated for the rest of this "
-            "session? Choose no to leave it alone."
+            "Allow this application to be automated? Choose no to leave it "
+            "alone. How long the answer lasts is stated in the question "
+            "above; it depends on how this server is configured (#62)."
         )
     )
     note: str = Field(
@@ -288,21 +298,28 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         # directly if the client can carry the question -- consent obtained
         # this way cannot be fabricated by whatever is calling this tool.
         target = result["target"]
+        # The lifetime is part of the question, not decoration: what a person
+        # is agreeing to differs by whether approvals are kept (R1a), and the
+        # prompt used to assert the shorter one either way (#62).
+        lifetime = result.get("lifetime", "")
         try:
             answer = await ctx.elicit(
                 message=(
-                    f"Allow automation of {target['summary']}?\n\n"
-                    "This lasts for this session only."
+                    f"Allow automation of {target['summary']}?\n\n{lifetime}"
                 ),
                 schema=ConsentAnswer,
             )
         except Exception:
             # No elicitation support, or the client refused to carry it.
-            # Say what to do instead rather than failing blankly.
+            # Say what to do instead rather than failing blankly -- and say
+            # whose limitation it is, because "cannot be asked directly"
+            # was read in the field as this server declining to ask (#62).
             result["error"]["message"] = (
                 f"pid {pid} has not been approved for automation, and this "
-                "client cannot be asked directly. Ask the operator which "
-                "targets to allow, then call grant_targets."
+                "client does not support MCP elicitation, so the server "
+                "cannot put the question in a dialog. Ask the operator in "
+                "chat -- quoting the lifetime below -- and record their "
+                f"answer with grant_targets(allow=[{pid}]). {lifetime}"
             )
             return result
 

@@ -94,6 +94,15 @@ def test_a_browser_host_class_is_a_web_document():
     assert kind_of(node(class_name="Internet Explorer_Server")) is SurfaceKind.WEB
 
 
+def test_the_linux_document_role_is_a_web_document_too():
+    """`class_name` is a window class on Windows and an AT-SPI role on
+    Linux (`tree.py`, D#40b) -- `document web` is the role a live embedded
+    document publishes under, measured for L8 (#15, D#15) against
+    WebKitGTK's GTK3 binding. One list, two kinds of identifier, both
+    matched the same way."""
+    assert kind_of(node(class_name="document web")) is SurfaceKind.WEB
+
+
 def test_a_browser_host_wins_over_its_own_child_windows():
     """Order inside the classifier is load-bearing, and this is why.
 

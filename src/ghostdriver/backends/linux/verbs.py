@@ -4,8 +4,10 @@ Same contract as the Windows module: each function returns the tiers that
 implement one verb, and nothing here decides whether an action worked.
 
 **Every ladder in this file is one rung long, or empty.** That is the shape
-D#11 forced: tier 3 does not exist on GTK4/X11, and tier 4 has no isolation
-to run inside until #40 slice 5b builds `HiddenDesktop`. Where the Windows
+D#11 forced: tier 3 does not exist on GTK4/X11, and tier 4 is not offered
+here yet -- `hidden_desktop.py` builds the isolation it would need to run
+inside (#40 slice 5b), but wiring these ladders to route through it is a
+follow-on, not part of building the desktop itself. Where the Windows
 module offers a pattern *and* a posted message and lets the actuator choose,
 this offers tier 1 or nothing.
 

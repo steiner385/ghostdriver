@@ -1,10 +1,24 @@
 # Macros: a specification, built on what already exists
 
-Status: specified, not built. This document is the design for issue #81 --
-record, modify, replay and delete macros over MCP, and let a macro respond
-to what the UI does rather than only run a fixed line. It is written the way
-`docs/LINUX.md` is: the model stated so it can be contradicted by the first
-measurement, and a phase order so the risky part comes last.
+Status: **built, all three phases** (see "The phases", below: v1 #83-#88,
+v2 #97, v3 #106, with #112 on what a replay reports). This document is the
+design for issue #81 -- record, modify, replay and delete macros over MCP,
+and let a macro respond to what the UI does rather than only run a fixed
+line. It is written the way `docs/LINUX.md` is: the model stated so it can
+be contradicted by the first measurement, and a phase order so the risky
+part comes last.
+
+**This is the spec §12 "test orchestration and assertion DSL", and saying so
+is the point of this paragraph (D#18).** That row deferred a DSL to a
+separate spec; the macro work built one here instead, a phase at a time,
+under a name that did not match the row. Nobody was wrong about their own
+slice -- each of #84, #85, #97, #106 and #112 is visibly smaller than "a
+DSL", and the reframe below is what made them tractable -- but between them
+`workflow.py` tripled and the deferral was never consulted, because a
+deferral list is read by someone proposing a subsystem and not by someone
+adding a key to a format. The status line above said "not built" for the
+whole of it. D#18 has the measurement, and the guard that now holds the one
+boundary this document calls load-bearing.
 
 The one-line reframe, because it is the most useful thing here: **a macro is
 `workflow.py` and `batch` joined and given a lifecycle.** Neither is new. The
@@ -221,7 +235,10 @@ first, each phase standing on its own.
   `Workflow`/`Step`, and the runner gains the branch/loop/handler evaluation
   -- still pure with respect to the desktop (toolbox and watch handed in), so
   it is tested with fakes and the tools are tested with the fixture (the
-  existing split).
+  existing split). That purity is now a test rather than a promise:
+  `test_structure.py::test_the_workflow_runner_reaches_the_target_only_through_its_toolbox`
+  names the three in-package modules `workflow.py` may import and fails on a
+  fourth (D#18).
 - The execution core is `batch`'s dispatcher, factored so the workflow runner
   and the `batch` tool call the same thing.
 - New tools register in `mcp_server.py` and the tier table in `policy.py`,

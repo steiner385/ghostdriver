@@ -40,8 +40,21 @@ grid cell, a row in an owner-drawn list, a painted toolbar button.
 window it names -- the frame `click at={x, y}` uses and a `capture` of
 that window shows, so the numbers are read off a capture. The window is
 resolved at the moment of each actuation, so the region follows it. A
-control that scrolls inside its window is not tracked; what can be named
-is better denied by name. A malformed place fails the profile load.
+malformed place fails the profile load.
+
+`region` is optional. A control that scrolls inside its window has no
+fixed rectangle a place entry could hold -- its content moves under one
+as the scroll offset changes, so a region sized to one page would miss
+whatever scrolled to a different offset, or worse, deny whatever
+scrolled into that spot instead (D#2). Omit `region` and the entry
+denies the whole of `within` -- coarser, but correct at every offset:
+
+```json
+{"within": "class=TVirtualStringTree", "note": "the log view scrolls"}
+```
+
+What can be named more precisely is still better denied by name or
+place; deny the whole window only for a control neither can reach.
 
 ## `input_sensitivity`
 
@@ -169,6 +182,27 @@ measure:
 `fnmatch` class patterns to plain text. The note rides on every `find`
 match and every `click` result for a matching class, so the next session
 reads it before repeating the experiment that produced it.
+
+## `text_is_label` (D#141)
+
+Window classes whose text query answers with a fixed label rather than
+their content:
+
+```json
+"text_is_label": ["CharGridWClass"]
+```
+
+`fnmatch` patterns against the control's window class. `probe_grid` and
+`grid_seek` refuse a region `read` already answers, because spending a
+side effect on what a free call reads is the wrong trade -- true of a
+button, whose caption *is* its content. Measured against a real
+owner-drawn grid it was not: `WM_GETTEXT` answered with a static
+accessible name, `read` returned it whatever was painted inside, and the
+probe refused the one control it exists to reach (D#1). Nothing in a
+window tells a caption from a label, so the guard stays and a class listed
+here waives it; the probe then runs and its report says why
+(`text_is_label`). List a class after seeing `read` answer the same string
+twice over different content, not before.
 
 ## `safe_controls`
 

@@ -53,7 +53,7 @@ def l7():
     try:
         for line in probe.stdout:
             line = line.strip()
-            if line.startswith(("CONTROL", "RESULT", "ABORT", "==")):
+            if line.startswith(("CONTROL", "RESULT", "TIMING", "ABORT", "==")):
                 lines.append(line)
             if line.startswith("RESULT after_activate") or line.startswith("ABORT"):
                 break
@@ -68,18 +68,40 @@ def l7():
         server.wait(timeout=10)
 
     if any(ln.startswith("ABORT") for ln in lines) or "== controls pass ==" not in lines:
+        # The whole trace, not a tail. #163: the controls are themselves
+        # timed steps now, and which one blew its limit is the difference
+        # between a loaded box and a window manager that has changed
+        # behaviour -- a six-line tail can cut off exactly that.
         pytest.skip("the L7 harness could not hide a focused window, so nothing "
                     "it says about restoring one means anything:\n"
-                    + "\n".join(lines[-6:]))
-    return {ln.split()[1]: " ".join(ln.split()[2:])
-            for ln in lines if ln.startswith("RESULT")}
+                    + "\n".join(lines))
+    return {
+        "results": {ln.split()[1]: " ".join(ln.split()[2:])
+                    for ln in lines if ln.startswith("RESULT")},
+        "timing": [ln for ln in lines if ln.startswith("TIMING")],
+    }
 
 
-def _field(blob, key):
-    for token in blob.split():
+def _field(l7, result, key):
+    for token in l7["results"].get(result, "").split():
         if token.startswith(key + "="):
             return token.split("=", 1)[1]
     return None
+
+
+def _why(l7):
+    """What the probe's clock says, appended to every assertion here.
+
+    #163: `test_restoring_a_window_necessarily_focuses_it` failed on every
+    full-suite run and passed when this module ran alone, and the message said
+    only that the foreground had not moved -- which is the consequence, not
+    the cause. The probe now waits for the window manager rather than
+    assuming two seconds of it, and reports what each step cost; a step
+    marked `ok=0` here means the limit was blown, which is a loaded box, and
+    a run where every step settled quickly and the assertion still failed is
+    a real change in what GNOME Shell does with a restored window.
+    """
+    return "\nprobe timings:\n  " + "\n  ".join(l7["timing"] or ["(none recorded)"])
 
 
 def test_a_bare_map_does_not_bring_a_hidden_window_back(l7):
@@ -89,17 +111,17 @@ def test_a_bare_map_does_not_bring_a_hidden_window_back(l7):
     So there is no "show it without focusing it" route, which is what a
     caller wanting to reveal a window quietly would reach for.
     """
-    assert _field(l7["before_restore"], "a_hidden") == "1"
-    assert _field(l7["after_map"], "a_hidden") == "1", (
+    assert _field(l7, "before_restore", "a_hidden") == "1", _why(l7)
+    assert _field(l7, "after_map", "a_hidden") == "1", (
         "a bare map un-hid the window -- there is a quiet route after all, "
-        "and restore does not have to take focus"
+        "and restore does not have to take focus" + _why(l7)
     )
 
 
 def test_the_bare_map_also_does_not_disturb_the_foreground(l7):
     """The other half of the same fact. It changed nothing at all, rather
     than half-restoring the window."""
-    assert _field(l7["after_map"], "active") == _field(l7["after_map"], "was")
+    assert _field(l7, "after_map", "active") == _field(l7, "after_map", "was"), _why(l7)
 
 
 def test_restoring_a_window_necessarily_focuses_it(l7):
@@ -113,10 +135,12 @@ def test_restoring_a_window_necessarily_focuses_it(l7):
     What it forbids is any code path that wants a window visible but not
     focused: on this window manager there isn't one.
     """
-    assert _field(l7["after_activate"], "a_hidden") == "0", "activation did not restore it"
-    assert _field(l7["after_activate"], "active") == _field(l7["before_restore"], "target"), (
-        "the restored window is not the active one"
+    assert _field(l7, "after_activate", "a_hidden") == "0", (
+        "activation did not restore it" + _why(l7)
     )
-    assert _field(l7["after_activate"], "active") != _field(l7["before_restore"], "active"), (
-        "the foreground did not move, so this proves nothing about focus"
+    assert _field(l7, "after_activate", "active") == _field(l7, "before_restore", "target"), (
+        "the restored window is not the active one" + _why(l7)
+    )
+    assert _field(l7, "after_activate", "active") != _field(l7, "before_restore", "active"), (
+        "the foreground did not move, so this proves nothing about focus" + _why(l7)
     )

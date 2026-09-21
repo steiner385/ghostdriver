@@ -587,9 +587,9 @@ after the application self-foregrounds.
 |---|---|
 | Linux/X11 backend (AT-SPI, Xephyr, MPX) | Separate spec. Core model guards against Win32 leakage (§3.2) |
 | ~~Web driver (Playwright)~~ **Answered — D#16** | Not deferred, declined: the fixed surface already drives an embedded engine with no protocol (D58), so a driver would fork the surface rather than extend it (D1). A sibling, if ever. Reopening condition in D#16 |
-| HTTP/API client as test oracle | Separate spec. Belongs to orchestration, not the driver |
-| Test orchestration and assertion DSL | Separate spec, built on this one |
-| `vm` isolation strategy | After `hidden_desktop` proves insufficient |
+| ~~HTTP/API client as test oracle~~ **Answered — D#17** | Not deferred, declined: reaches past the D59 model into a system that is one target's own, which the fixed-surface constraint (D1) cannot generalize. A sibling, if ever. Reopening condition in D#17 |
+| ~~Test orchestration and assertion DSL~~ **Answered — D#18** | Not deferred, *built* — as the macro format, on this one, between D#84 and D#112: params, guards, branches, bounded loops, handlers, assertions. `workflow.py` tripled and no commit mentioned the row. D#18 has the measurement and the boundary guard |
+| ~~`vm` isolation strategy~~ **Answered — D#19** | Still contingent, not declined: the trigger has not fired, and the one real-target measurement on record (D53) is the unfitted case, which is not it. D#19 restates the trigger and names where a firing is written, since nothing did |
 | OCR grid reading | Only if clipboard and export routes both fail |
 
 ---

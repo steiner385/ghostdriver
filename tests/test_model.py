@@ -84,6 +84,20 @@ def test_locator_rejects_unknown_key():
         Locator.parse("colour=red")
 
 
+def test_an_unquoted_regex_with_spaces_is_told_how_to_quote():
+    with pytest.raises(ValueError, match="must be quoted"):
+        Locator.parse("text=Release Packages")  # a slash-delimited regex is one token now (D65)
+
+
+def test_an_unquoted_regex_with_spaces_is_one_token():
+    parsed = Locator.parse("text=/Work Order/")
+
+    assert "Work Order" in repr(parsed)
+    assert "Work Order" in repr(Locator.parse("text=/Work Order/ within=(class=TPanel)"))
+    with pytest.raises(ValueError, match="must be quoted"):
+        Locator.parse("text=Work Order")
+
+
 def test_locator_parse_rejects_role_with_an_explanation():
     """`role=` must fail loudly rather than resolve to nothing.
 

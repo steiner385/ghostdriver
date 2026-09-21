@@ -86,3 +86,35 @@ def test_bad_notes_are_an_error_not_a_default(tmp_path, bad):
     path.write_text(json.dumps({"notes": bad}))
     with pytest.raises(GhostdriverError, match="notes"):
         Profile.load(path)
+
+
+# --- text_is_label (#141) ------------------------------------------------------
+
+def test_text_is_label_names_the_classes_whose_text_is_not_their_content(tmp_path):
+    path = tmp_path / "p.json"
+    path.write_text(json.dumps({"text_is_label": ["CharGridWClass", "Tsf*Grid"]}))
+
+    profile = Profile.load(path)
+
+    assert profile.text_is_label == ("CharGridWClass", "Tsf*Grid")
+    assert profile.declares_label_text("CharGridWClass") == "CharGridWClass"
+    assert profile.declares_label_text("TsfDataGrid") == "Tsf*Grid"
+    assert profile.declares_label_text("GhostFixtureCommandButton") is None
+    assert profile.declares_label_text(None) is None
+
+
+def test_an_absent_key_declares_nothing(tmp_path):
+    """Refusing the probe is the default, and stays it. A profile that says
+    nothing must not quietly decide a caption is decorative."""
+    path = tmp_path / "p.json"
+    path.write_text("{}")
+    assert Profile.load(path).text_is_label == ()
+    assert Profile().declares_label_text("CharGridWClass") is None
+
+
+@pytest.mark.parametrize("bad", ["CharGridWClass", [1], [""], {"class": "x"}])
+def test_a_bad_text_is_label_is_an_error_not_a_default(tmp_path, bad):
+    path = tmp_path / "p.json"
+    path.write_text(json.dumps({"text_is_label": bad}))
+    with pytest.raises(GhostdriverError, match="text_is_label"):
+        Profile.load(path)

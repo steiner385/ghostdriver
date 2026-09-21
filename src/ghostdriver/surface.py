@@ -76,12 +76,23 @@ class Access(str, Enum):
 #: Window classes that host an embedded browser engine. These are framework
 #: identifiers, not application ones: any product embedding these engines
 #: produces the same class names, which is what makes them safe to match on.
+#:
+#: `"document web"` is the Linux entry, and it is a different *kind* of
+#: identifier from the rest: an AT-SPI role, not a window class, because on
+#: that backend `class_name` **is** the role (`tree.py`). It was the
+#: measurement L8 (#15, D#15) existed to take -- guessing at it earlier
+#: would have been modelling, not measuring. Measured against WebKitGTK's
+#: GTK3 binding (`webkit2gtk-4.1`), where the document publishes under this
+#: role immediately; WebKitGTK's GTK4 binding never published one at all in
+#: the same measurement, which D#15 records separately rather than folding
+#: in here.
 WEB_HOST_CLASSES: tuple[str, ...] = (
     "Chrome_WidgetWin_*",       # CEF, Electron, WebView2
     "Internet Explorer_Server",  # MSHTML, still common in older desktop stacks
     "Shell DocObject View",
     "Shell Embedding",
     "MozillaWindowClass",
+    "document web",             # AT-SPI role, Linux only (D#15)
 )
 
 #: Below this, a childless window is an ordinary leaf control -- an empty

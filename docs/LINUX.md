@@ -28,26 +28,26 @@ decision holds the measurement the Linux one must repeat.
 | `read_window_text` | `SendMessageTimeout(WM_GETTEXT)` | AT-SPI `Text` interface, or `Name` for controls without one; timeout per call because a hung application hangs the bus call | D4 (the unresponsive control), D47 |
 | `confirms_value` | read then compare | `protection.confirms`: the read is compared to the expected string and only the yes/no leaves, so a withheld field (D#34b) is matchable by value without disclosure -- the safe half of a place-plus-value locator | D#34b, D#105 |
 | `direct_children` | `GetWindow(GW_CHILD/GW_HWNDNEXT)` | AT-SPI child accessibles of a node | D71 (a dialog's controls, read top to bottom) |
-| `read_clipboard_text` | `OpenClipboard` / `GetClipboardData(CF_UNICODETEXT)` | `wl-paste` / `xclip -o`: the same tool the person uses, so the same clipboard | D65 (a target's own Copy is the one exact read some grids have) |
+| `read_clipboard_text` | `OpenClipboard` / `GetClipboardData(CF_UNICODETEXT)` | **built (D#105a):** `wl-paste` under Wayland, `xclip -o` under X11 (`WAYLAND_DISPLAY` chooses), the same tool the person uses, so the same clipboard -- a choice, not a fallback, since `xclip` under Wayland reaches the wrong clipboard | D65 (a target's own Copy is the one exact read some grids have) |
 | `ink_fraction` | `PrintWindow` pixels; the most common colour is the background | the same over the AT-SPI screenshot of the window (`org.gnome.Shell.Screenshot` / `grim -g`) | D66 (a control that answers empty and renders content) |
 | `deepest_child_at` | `ChildWindowFromPointEx` | the deepest accessible with a bounding box under the point | D66 (a click goes to the window under the pointer) |
-| `snapshot_clipboard`, `restore_clipboard` | every format via `EnumClipboardFormats` / `GetClipboardData` | `wl-paste --list-types` and one `wl-paste -t` per type; `wl-copy` back | D70 (the clipboard is the person's; put back whole) |
+| `snapshot_clipboard`, `restore_clipboard` | every format via `EnumClipboardFormats` / `GetClipboardData` | **built (D#105a):** `wl-paste --list-types` / `wl-copy`, or `xclip -o -t TARGETS` / `xclip -i`, by the same `WAYLAND_DISPLAY` choice as the read; only the text value is put back, non-text targets are named as lost | D70 (the clipboard is the person's; put back whole) |
 | `is_protected` | `EM_GETPASSWORDCHAR` | AT-SPI `STATE_PROTECTED`, role `PASSWORD_TEXT` | D33 (constraint 4) |
 | `disclosure` | always `allowed` or `protected` -- the OS refuses the read itself, so nothing is withheld in software | `allowed`, `protected` or **`withheld`**: an editable entry is withheld by class, because a hidden one is indistinguishable from a plain one | D#34b, D#43 (the third state gets a name instead of borrowing `None`) |
-| `capture_window`, `CaptureError` | `PrintWindow` | `XGetImage` on the window (composited: `XCompositeNameWindowPixmap`); never a screen grab | D46 |
+| `capture_window`, `CaptureError` | `PrintWindow` | `XGetImage` on the window (composited: `XCompositeNameWindowPixmap`); never a screen grab. The window is found through the tree's frame correlation, not by matching a pid (D#101a) | D46 |
 | `top_level_state`, `blocking_ancestor` | `IsWindowEnabled` per window, owner chain | `_NET_WM_STATE_MODAL`, `WM_TRANSIENT_FOR`; AT-SPI `STATE_MODAL` on dialogs | D38, D48 (link vs victim) |
 | `snapshot`, `surface_of` | window set + foreground + blocked-by | `_NET_ACTIVE_WINDOW`, `_NET_CLIENT_LIST`; surface by toolkit and AT-SPI role | D34 |
 | `restore_process` | `SW_SHOWNOACTIVATE` (activates; D55) | `_NET_WM_STATE` remove `HIDDEN` via client message with source indication 1 (application), never 2 (pager) -- **measure whether the window manager focuses it anyway** | D55 |
-| `walk_elements_awake`, `is_selected`, `_current_value` | UIA control view; wake by first query | **built (D#104)**: the element view is assembled from the enumeration registry (`tree._Entry`) rather than a second bus walk -- an element carries the node's own handle and its screen extents, so an unnamed field is addressed by position plus value (D#101); `is_selected` re-reads the live state; `_current_value` withholds an editable field (D#34b). No wake step -- the embedded-document case (#15) is unmeasured | D56, D58, D#104 |
+| `walk_elements_awake`, `is_selected`, `_current_value` | UIA control view; wake by first query | **built (D#104)**: the element view is assembled from the enumeration registry (`tree._Entry`) rather than a second bus walk -- an element carries the node's own handle and its screen extents, so an unnamed field is addressed by position plus value (D#101); `is_selected` re-reads the live state; `_current_value` withholds an editable field (D#34b). **Still no wake step, measured rather than assumed (D#15)**: the working engine's document was complete on the first ask every time, so there was nothing to wake; the other engine never published one at all, which a wake loop would not have fixed | D56, D58, D#104, D#15 |
 | `region_evidence`, `resolve_hosted_app` | UIA count under a window; frame-host resolution | AT-SPI subtree count; embedded documents are `ROLE_DOCUMENT_WEB` | D41 |
 | `assess_uia`, `assess_msaa` | pattern richness | AT-SPI interface richness (`Action`, `Value`, `Text`, `Selection` counts) | D5 |
 | `verbs` | posted `WM_LBUTTONDOWN/UP`, posted `WM_CHAR`, UIA patterns | tier 1: AT-SPI `Action.DoAction` and `EditableText`; there is **no tier 3** (D#11 measured GTK discarding sent events). `set_text` takes a `live_window`: without one it is the tier-1 write alone (display only on wxGTK3, which does not commit; D#102), with one it is a single **tier-4** rung that writes and presses a real Enter, guarded by the live-actuation gate (D#111) | D21, D30, D44, D56, D#11, D#102, D#111 |
 | `NAMED_KEYS`, `EDIT_ACTIONS`, `button_pair` | virtual-key table; button messages with modifier flags | X keysym **names** for XTest (`press_key`, tier 4, live only); `button_pair` only *refuses* a right click or a modifier, since an AT-SPI action carries neither and there is no posted pair (D#11); `deepest_child_at` is a no-op -- a control is an accessible, not a window to hit-test | D44, D61, D#11 |
 | `copy_route`, `focus_route` | `WM_COPY`, posted `WM_SETFOCUS` | AT-SPI `Action` named "copy", `Component.GrabFocus` -- **measured (D#102): on wxGTK3 it works *and* raises the window to the foreground**, so it is a focus steal, not the harmless focus set D#11 assumed; on GTK4 it raised instead (D#10) | D50, D#102 |
 | `MinimizedWatch`, `WatchError` | poll `WS_MINIMIZE` + foreground; `SW_SHOWMINNOACTIVE` | poll `_NET_WM_STATE_HIDDEN` + `_NET_ACTIVE_WINDOW`; iconify via `XIconifyWindow` (does not focus) | D49, D55 |
-| `HiddenDesktop` | `CreateDesktopW` + thread binding | a nested X server (`Xephyr` or `Xvfb`) with its own `DISPLAY` and its own AT-SPI bus (`at-spi-bus-launcher` per display); launch-only, as on Windows; **no thread binding needed** -- the display is an environment variable | D51, D52, D53 |
+| `HiddenDesktop` | `CreateDesktopW` + thread binding | a nested `Xvfb` with its own `DISPLAY`, its own private D-Bus session bus, and its own AT-SPI bus (`at-spi-bus-launcher`) and window manager (`gnome-shell --x11`); launch-only, as on Windows. **Corrected (D#40f): "no thread binding needed" was half right** -- Xlib needs none, but AT-SPI is a process-wide singleton with no route to a second bus, measured against fork, a second `Atspi.init()`, and `Atspi.exit()` then reconnect, none of which worked; `run` claims the process (`desktop_claim.py`) rather than binding a context to it | D51, D52, D53, D#40f |
 | `InterferenceWatch` | foreground pid + cursor | `_NET_ACTIVE_WINDOW` owner + `XQueryPointer` | D57 |
-| `OperatorNotice` | a topmost, no-activate popup window | an override-redirect X window with `_NET_WM_STATE_ABOVE`, never focused (`WM_HINTS` input False); under Wayland a layer-shell surface or a desktop notification (`org.freedesktop.Notifications`) | D61 |
+| `OperatorNotice` | a topmost, no-activate popup window | built (#40 slice 5b): an override-redirect X window with `_NET_WM_STATE_ABOVE`, drawn with the server's `fixed` font rather than a toolkit; override-redirect means no WM decision is involved in "never focused" at all. Wayland (a layer-shell surface or `org.freedesktop.Notifications`) is unmeasured | D61, D#40f |
 | `winapi` | raw Win32 | a small `x11` module: the handful of Xlib and EWMH calls above | -- |
 
 ## What is the same
@@ -130,7 +130,8 @@ a foreground grab *is*).
 1. **A nested X server with an AT-SPI bus.** `Xvfb :99`, `DISPLAY=:99
    at-spi-bus-launcher --launch-immediately`, the fixture on it, and
    `pyatspi` (or raw D-Bus) listing the fixture's tree. Until this works
-   nothing else can be measured. This is also `HiddenDesktop`.
+   nothing else can be measured. This is also `HiddenDesktop`, built in
+   #40 slice 5b as `backends/linux/hidden_desktop.py`.
    **Correction (D75): it also needs a window manager**, and one runs --
    `gnome-shell --x11` under its own `dbus-run-session` (D#11), which
    unblocks measurements 6 and 7. A bare `Xvfb` sets
@@ -207,6 +208,21 @@ a foreground grab *is*).
    accidental un-hide is an accidental focus steal.
 8. **An embedded document.** A Chromium engine on the nested display, the
    wake, the click, the typing -- D58 again.
+   **Done (D#15), and the answer splits by WebKitGTK binding.** No
+   Chromium engine was available to measure; WebKitGTK stood in, and its
+   two GTK bindings disagreed. The GTK4 one (`WebKit` 6.0) never published
+   a document over AT-SPI at all -- not once, across a dozen runs and
+   sixty-second waits, load-complete or not. The GTK3 one (`webkit2gtk-4.1`)
+   did, immediately: the document was already complete the first time
+   anything asked, every time, so `walk_elements_awake` needed no wake
+   step to add. The click and the password-field detection needed no
+   web-specific code either -- `Action.DoAction` and role-based state
+   reads already worked. The one real gap: a web `<input>` carries no
+   `EditableText` and no `Value` at all, unlike a native GTK entry (D#10),
+   so there is no tier-1 write route to one; typing would need tier 4.
+   D75's "GTK 3 is not available from PyGObject here" does not hold on
+   this host -- it is available -- so that was a measurement of one
+   machine, not a fixed platform constraint.
 
 Each measurement is a test in `tests/test_linux_*.py`, skipped where
 `sys.platform != "linux"`, and each records its number in the decision

@@ -12,6 +12,13 @@ Layout, all optional until used:
     <dir>/profiles/<name>.json     profile documents (denylist, safe_controls, ...)
     <dir>/workflows/<name>.json    workflow files the runner executes
     <dir>/reports/                 what the runner writes back
+    <dir>/consent/<pid>.json       decisions kept while their process runs (D65)
+    <dir>/standing-consent.json    executables the operator declared (D#125)
+
+The last two are opposites and the difference matters: `consent/` is
+written by this server and records what someone was asked, while
+`standing-consent.json` is written only by the operator and records what
+they decided in advance. Nothing here will ever create or amend it.
 
 Configured by the GHOSTDRIVER_OPERATOR_DIR environment variable or an
 explicit path. Nothing here reads from the source tree, and a test guards

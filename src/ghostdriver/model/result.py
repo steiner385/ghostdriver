@@ -50,6 +50,9 @@ class ActionResult:
     #: -- when the verb named its attempts. A tier number alone cannot say.
     route_used: str | None = None
     tiers_attempted: list[int] = field(default_factory=list)
+    #: The route of each attempt, beside its tier: two rungs on one tier
+    #: read `[3, 3]` and say nothing about which ran (#145).
+    routes_attempted: list[str] = field(default_factory=list)
     precondition_verified: bool | None = None
     postcondition_verified: bool | None = None
     elapsed_ms: int = 0

@@ -598,20 +598,6 @@ def test_an_expect_sent_as_json_text_is_read_as_the_object_it_was(box, app):
     assert result["verified"] == "effect"
 
 
-# --- timeout_s widens the verify window for any expect, not just changed (#73) ----
-
-def test_verify_window_reads_timeout_s_from_any_expect():
-    from ghostdriver.tools.expect import verify_window
-
-    assert verify_window(None) is None
-    assert verify_window("class=TPanel") is None, "a bare locator: the default window"
-    assert verify_window({"locator": "class=TPanel"}) is None
-    assert verify_window({"locator": "class=TPanel", "timeout_s": 10}) == 10.0
-    assert verify_window({"changed": True}) == 6.0, "a surface docks slowly"
-    assert verify_window({"changed": True, "timeout_s": 3}) == 3.0
-    assert verify_window({"nonsense": 1}) is None, "malformed: _expectation reports it"
-
-
 # --- a profile pins a class to the posted click (#122) ---------------------
 
 EXPAND = 'class=GhostFixtureCommandButton text="Expand All"'

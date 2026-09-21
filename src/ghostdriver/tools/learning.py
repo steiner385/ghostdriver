@@ -9,7 +9,7 @@ from .core import (
     _element,
     _error,
 )
-from .guidance import CLIPBOARD_NOT_ALLOWED
+from .guidance import CLIPBOARD_NOT_ALLOWED, text_guard
 
 
 class LearningTools(_ActingCore):
@@ -226,7 +226,10 @@ class LearningTools(_ActingCore):
         caller, exactly one match; a denylisted caption or a held
         application refuses. And a region that already answers `read` is
         refused too -- it is not a grid, and the tool would be spending a
-        side effect on something a free call already reads.
+        side effect on something a free call already reads. That last guard
+        is waived for a control class the profile's `text_is_label` names,
+        because a real grid answered `WM_GETTEXT` with a static label and
+        was refused for it (D#141); the report says when it was waived.
         """
         try:
             session = self.sessions.authorize(session_id, "probe_grid")
@@ -248,12 +251,9 @@ class LearningTools(_ActingCore):
             return _error(ErrorKind.NOT_ACTIONABLE,
                           "the application is held by a dialog; deal with it "
                           "before probing anything")
-        if node.text:
-            return _error(
-                ErrorKind.NOT_ACTIONABLE,
-                f"{locator!r} already answers with text ({node.text[:40]!r}); "
-                "it is not a painted region. Use `read`",
-            )
+        refusal, waiver = text_guard(session.profile, node, locator)
+        if refusal is not None:
+            return _error(ErrorKind.NOT_ACTIONABLE, refusal)
 
         from ..backends import current
         copy_route = current().copy_route
@@ -272,6 +272,8 @@ class LearningTools(_ActingCore):
         ))
         report = {"ok": True, "locator": locator, "element": _element(node),
                   **finding.to_dict()}
+        if waiver is not None:
+            report["text_is_label"] = waiver
         if allow_clipboard and not session.clipboard:
             report["clipboard"] = CLIPBOARD_NOT_ALLOWED
         if finding.strategy.value == "unknown":

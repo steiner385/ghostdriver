@@ -21,9 +21,11 @@ from .. import CONTRACT, UnsupportedPlatform
 from . import (
     clipboard,
     elements,
+    hidden_desktop,
     interference,
     isolate,
     modality,
+    notice,
     reading,
     restore,
     tree,
@@ -95,6 +97,13 @@ _WIRED: dict[str, Any] = {
     # and tier 4 has no isolation to run inside until slice 5b, so several
     # of these ladders are deliberately empty (D53).
     "verbs": verbs,
+    # slice 5b, the nested-display strategy (#40, D#40f): a hidden desktop
+    # is a second display and bus rather than a second thread on the same
+    # ones (see hidden_desktop.py for the measurement that forced the
+    # difference), and a notice on the operator's own display for the one
+    # tool that needs a person to see it.
+    "HiddenDesktop": hidden_desktop,
+    "OperatorNotice": notice,
     # slice 3's last name. `winapi` *is* a module -- the contract hands the
     # raw platform API over whole -- which `backends/windows` marks the same
     # way. Deliberately partial: `winapi.__getattr__` refuses an unbuilt
@@ -120,13 +129,14 @@ class _LinuxBackend:
         raise UnsupportedPlatform(
             f"{name} is not implemented on Linux yet. The window tree, "
             "reading, modality and state, the minimized watch, elements, "
-            "acting (tier 1, and tier 4 under the live-actuation consent) "
-            "and the interference watch are wired; this is not part of them. "
-            "What is left is assessment -- region_evidence, resolve_hosted_app, "
-            "assess_uia, assess_msaa -- which needs an embedded document "
-            "measured (#15), and HiddenDesktop / OperatorNotice, which are the "
-            "nested-display strategy. docs/LINUX.md tracks what has been "
-            "measured and what has not."
+            "acting (tier 1, and tier 4 under the live-actuation consent), "
+            "the interference watch and the nested-display strategy "
+            "(HiddenDesktop, OperatorNotice) are wired; this is not part of "
+            "them. What is left is assessment -- region_evidence, "
+            "resolve_hosted_app, assess_uia, assess_msaa -- against an "
+            "embedded document, now measured (D#15) but not yet wired up "
+            "here. docs/LINUX.md tracks what has been measured and what "
+            "has not."
         )
 
 

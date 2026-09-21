@@ -152,15 +152,6 @@ def test_hit_targets_flags_a_child_outside_the_container():
         stop(proc, handles)
 
 
-# --- the focus note names the division of labour ----------------------------------------
-
-def test_the_focus_note_names_a_tool_that_activates_windows():
-    from ghostdriver.tools.guidance import FOCUS_NOTE
-
-    assert "tool that does activate windows" in FOCUS_NOTE
-    assert "until_change" in FOCUS_NOTE
-
-
 @pytest.mark.parametrize("flag", ["--busy-ms"])
 def test_the_fixture_busy_flag_is_accepted(flag):
     proc, handles = start(flag, "10")

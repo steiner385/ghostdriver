@@ -18,7 +18,30 @@ import json
 import os
 import subprocess
 import sys
-import time
+
+from tests.linux_probe_support import Budget, settle
+
+#: When the fixture raises its modal, in milliseconds from its own start.
+#:
+#: #163: this was 9000, and the `before` block below has to finish inside it
+#: -- three contract calls and a full `enumerate_process` tree walk. Alone
+#: that fits easily; under a full suite the walk overran, the modal was
+#: already up when the calm state was sampled, and the four tests that read
+#: `before` failed saying "a modal before one was raised". They were right:
+#: there was one. The harness had simply lost the race to a timer nothing in
+#: the probe acknowledged.
+#:
+#: Raised to a budget the walk fits under even on a loaded box. The number on
+#: its own would only be a better guess, so `before_budget` in the report
+#: says how much of it was actually used -- if that margin ever goes
+#: negative again the report names the overrun instead of blaming the modal.
+MODAL_AFTER_MS = 30000
+
+#: The fixture prints its announce line on a 120ms timer armed alongside the
+#: modal's, so the budget the probe really has is that much shorter than
+#: `MODAL_AFTER_MS`. Small, and subtracted rather than ignored because a
+#: budget that is quietly optimistic is what this is replacing.
+ANNOUNCE_DELAY_S = 0.12
 
 
 def _state(pid):
@@ -64,15 +87,29 @@ def _snapshot(pid):
 def main():
     app = subprocess.Popen(
         [sys.executable, "-m", "tests.fixtureapp_gtk",
-         "--modal-after", "9000", "--quit-after", "70000"],
+         "--modal-after", str(MODAL_AFTER_MS), "--quit-after", "90000"],
         stdout=subprocess.PIPE, text=True,
         env=dict(os.environ, GDK_BACKEND="x11"),
     )
     announced = json.loads(app.stdout.readline())
     pid = announced["pid"]
-    time.sleep(3)
 
     from ghostdriver.backends import current
+
+    timing = []
+    # Everything from here to the end of the `before` block is racing the
+    # fixture's modal timer, so the clock starts with the announce line.
+    before_budget = Budget("before_budget", MODAL_AFTER_MS / 1000 - ANNOUNCE_DELAY_S)
+
+    # Nothing below can happen once the fixture has exited, so every wait
+    # stops when it does rather than serving out its limit.
+    def gone():
+        return app.poll() is not None
+
+    # Was `time.sleep(3)`, a guess at how long the window takes to appear on
+    # the nested display. The thing actually being waited for is the
+    # application having a top-level the backend can see, so wait for that.
+    timing.append(settle("app_visible", lambda: bool(_state(pid)), timeout=30, giveup=gone))
 
     report = {"pid": pid, "announced_main": announced["main"]}
     report["platform"] = current().platform
@@ -107,14 +144,26 @@ def main():
         report["before"]["blocking_ancestor"] = current().blocking_ancestor(entry.handle)
         report["before"]["surface_of"] = current().surface_of(entry.handle)
 
-    # Wait for the modal.
-    deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        if any(w["modal"] for w in _state(pid)):
-            break
-        time.sleep(0.5)
-    time.sleep(1.0)
+    # The calm state is sampled. Whether it *was* calm is now a recorded fact
+    # rather than an assumption: a negative margin means the modal fired
+    # while the tree walk above was still running, and every assertion about
+    # `before` is then describing the overrun.
+    timing.append(before_budget.record())
 
+    # Wait for the modal, then for it to be attached to its owner. The second
+    # wait was `time.sleep(1.0)` -- the owner comes from `WM_TRANSIENT_FOR`,
+    # which the window manager sets shortly after the window maps, so the
+    # real precondition is that the property has arrived, not that a second
+    # has passed.
+    timing.append(settle("modal_up", lambda: any(w["modal"] for w in _state(pid)),
+                         timeout=40, giveup=gone))
+    timing.append(settle(
+        "modal_owned",
+        lambda: any(w["modal"] and w["owner"] is not None for w in _state(pid)),
+        timeout=15, giveup=gone,
+    ))
+
+    report["timing"] = timing
     report["during"] = {
         "state": _state(pid),
         "blocks": _blocks(pid),

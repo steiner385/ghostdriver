@@ -3673,6 +3673,96 @@ position D#40d found AT-SPI does not report. They wait on slice 5b.
 
 Evidence: #40 slice 4; D#10; D#11; D#12; D#34b; D#40d; D10; D53; issue #43.
 
+### D#40f. Slice 5b: a claim, not a bind -- `Atspi.init()` has no second bus
+
+**Context.** `docs/LINUX.md` proposed the nested-display mechanism and, for
+`HiddenDesktop`, a shortcut Windows does not have: "no thread binding needed
+-- the display is an environment variable." Slice 4a's finding that tier 4
+had nowhere safe to run was blocking on this being built. It was measured
+before being trusted, and the shortcut turned out to be half right.
+
+**The half that holds: X11 has no equivalent of `CreateDesktopW`'s
+per-thread bind, and does not need one.** An `Xlib.display.Display()` is a
+plain object; nothing in Xlib stops a process holding two, one per
+`DISPLAY`. `display.py`'s single `_DISPLAY` slot was rewritten to a cache
+keyed by claimant (`desktop_claim.effective_owner()`) rather than one
+global, and that alone is sufficient for a process to read the operator's
+own display and a nested one in the same lifetime.
+
+**The half that does not: AT-SPI is a process-wide singleton, and there is
+no route around it.** Three things were tried against two real nested
+buses (`Xvfb` + a private `dbus-daemon` + `at-spi-bus-launcher`, each pair
+carrying a distinct copy of the GTK fixture so which bus answered was
+unambiguous, not just which bus was reachable):
+
+1. **Reconnect.** A second `Atspi.init()` after changing every relevant
+   environment variable (`DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`,
+   `AT_SPI_BUS_ADDRESS`) does not reconnect. It is idempotent at the C
+   library level and keeps answering from the bus the first call reached.
+2. **Fork.** A forked child that changes its own environment and calls
+   `Atspi.init()` still reports the parent's application, not its own --
+   the live D-Bus connection is inherited across the fork regardless of the
+   child's environment, because the C library's connection object, not
+   Python's module state, is what got duplicated.
+3. **`Atspi.exit()` then reconnect.** Documented as the deliberate reset,
+   and it is not one: the next `Atspi.get_desktop(0)` raises through a GLib
+   assertion (`g_hash_table_insert_internal: assertion 'hash_table !=
+   NULL' failed`) rather than returning a working connection to the new
+   bus. `exit()` tears the library's state down; it does not free it for
+   reuse.
+
+**So `run` does not marshal work onto a bound context the way Windows'
+does, because there is nothing to marshal onto -- a process that has
+reached one accessibility bus can only ever reach that one, for the rest of
+its life, no matter which thread, fork, or environment asks.** The design
+question this leaves is not "how does a call reach the right bus" but "how
+does a process find out, before it launches a target onto a display it can
+then never read from, that it has already spent its one bus on something
+else." `desktop_claim.py` is that: a single claim, taken by whichever of
+`display.py`'s or `tree.py`'s connection-opening code runs first, naming
+`"the operator's own desktop"` by default or a `HiddenDesktop`'s own name
+inside `desktop_claim.desktop(name)`. A second, different claimant is
+refused immediately, with the measurement above in the refusal, rather than
+being left to read a target's tree and silently get the wrong one back
+(D33: refuse ambiguity rather than picking; D53: a target the strategy
+cannot fit is reported as such).
+
+**`HiddenDesktop.run` is consequently almost nothing: a context manager
+around `fn()`.** Once `prepare()` has claimed the process and the nested
+`DISPLAY` / `DBUS_SESSION_BUS_ADDRESS` / `AT_SPI_BUS_ADDRESS` are set, every
+ordinary contract function -- `enumerate_process`, `read_window_text`, and
+the rest -- reaches the nested display and bus on its own, because they are
+the only ones this process can reach at all. `desktop_claim.desktop(self.
+name)` exists so those calls are *recognised* as the claim already held
+rather than a conflicting second one, not so they are *routed* anywhere.
+
+**A consequence worth stating plainly: the claim never releases.**
+`teardown()` stops the nested display's processes but does not, and cannot,
+give the process back its ability to reach a different accessibility bus --
+that ability was never something `HiddenDesktop` held to begin with, per
+the measurement above. A server process that has ever launched one hidden
+desktop has spent its one bus for the rest of its life; a second
+`launch_isolated` call, or any ordinary session, correctly refuses rather
+than silently reusing the first desktop's tree.
+
+**Also built:** `gnome-shell --x11` under the private bus (D75's window
+manager requirement, mirrored from measurement 1's nested-bus proof in
+`tests/test_linux_atspi.py`), polled via a new `display.wm_present()`
+(`_NET_SUPPORTING_WM_CHECK`) rather than a blind sleep; and `OperatorNotice`
+as an override-redirect X window with `_NET_WM_STATE_ABOVE`, drawn with the
+server's own `fixed` font rather than a toolkit, since it is the one piece
+of this backend that draws instead of reading and pulling in GTK for one
+window would be a large dependency for a small one.
+
+**Not done in this slice.** `region_evidence`, `resolve_hosted_app`,
+`assess_uia`, `assess_msaa` (slice 6) wait on the embedded-document
+measurement (#15) and a decision about what UIA/MSAA richness becomes with
+no Linux counterpart. Routing tier 4's ladders in `verbs.py` through
+`HiddenDesktop` now that it exists is a follow-on, not part of this slice --
+D#40e's empty tier-4 rungs are unchanged here.
+
+Evidence: #40 slice 5b; D#8; D#9; D33; D53; D75; D#40e; issue #40.
+
 ### D#43. The third state gets a name instead of borrowing `None`
 
 **Context.** `read_window_text` returns `str | None`, and `None` meant *did
@@ -5137,6 +5227,78 @@ siblings under one `bwrap`, not parent and child). It is filed as its own fork
 rather than decided in a measurement entry. Evidence: issue #101; `docs/LINUX.md`
 sandboxed-app paragraph; D#40c; D#40d; D71.
 
+### D#101a. The capture path is the one D#101 named and did not rewire
+
+**Context.** D#101 listed four paths the absent `_NET_WM_PID` silently
+empties: `top_level_state`, `snapshot`, the capture-by-frame path, and the
+interference watch. Three were moved onto `display.windows_of` and the XRes
+bridge. The fourth was not, and nothing went red, because every test that
+captures anything runs against the GTK fixture -- which *does* set
+`_NET_WM_PID`, being an ordinary unsandboxed process. The suite could not
+see the hole because the hole only opens on a target the suite never uses.
+
+**What was still there.** `reading._toplevel_xid` walked up to the frame,
+took the pid AT-SPI reported for it, then forked `xwininfo -root -children`
+and `xprop _NET_WM_PID` per candidate looking for a match. Against a Flatpak
+target that is wrong in three separate ways, any one of which is fatal on its
+own:
+
+- no Studio top-level carries `_NET_WM_PID`, so every candidate compared
+  `None` and nothing ever matched;
+- the pid it compares against is the `xdg-dbus-proxy`'s, so even with the
+  property present the two spaces would not have met;
+- a pid cannot separate two windows of one process, so it returned the first
+  -- and a control inside a modal photographed the window behind it.
+  `tests/linux_xid_probe.py` wrote this one down in 2026 and it was never
+  acted on.
+
+So `capture` raised **"no X window behind this handle"** for a window that
+was on screen, fully enumerated and already correlated. That message names
+the one cause it was written for -- a control is an accessible with no
+drawable of its own (D#8) -- so the failure reads as the caller asking for
+the wrong thing rather than as the backend being unable to find a window it
+had already found. A wrong answer wearing a right answer's error message is
+worse than a crash, which is why this is an entry and not a patch.
+
+**The decision: one bridge, and the tree owns it.** `tree._correlate_frame`
+already resolves every frame to an xid at enumeration time, by accessible
+name against `_NET_WM_NAME` and by size where the name alone is ambiguous
+(D#40d), and it already tells `display` what it learned -- that call is what
+fills the XRes aliases D#101 needs. It was exposed as `tree.frame_xid_of`
+and left **with no callers at all**: the bridge was built, wired into
+`display`, and never asked. `_toplevel_xid` now asks it, and the pid match
+and both forks are deleted.
+
+**Keying on the frame's path is what makes the modal case answerable.** Two
+windows of one process are indistinguishable by pid *by construction* -- no
+amount of care with the property would have fixed the third failure above.
+They are trivially distinguishable by which frame node the handle descends
+from, which is what `frame_xid_of` reads. The route that could answer the
+question was chosen over the route that could not, rather than the broken
+one being made more careful.
+
+**A frame the tree declined to correlate stays declined.** `_correlate_frame`
+resolves nothing when two windows share a name *and* a size, because from
+here they are genuinely the same (D33). The capture then reports "no X
+window", which is what it already said for a handle with no drawable -- the
+two causes still share one message. That is a real loss of precision and it
+is accepted for now: both answers are "this cannot be captured", and neither
+invites a caller to act on a guess. Splitting them means a second error the
+Windows backend has no counterpart for.
+
+**Left open, deliberately.** `modality._xid_of` is still a *second*
+correlation, re-derived live against `display.windows_of` rather than read
+from the tree. It is correct -- it is the route this one was built from --
+but two bridges can disagree, and the honest fix is to make modality read
+the tree's answer too. That is a change to the modality contract with its
+own measurement, and folding it into a capture fix would be smuggling it in.
+Named here so the next implementer finds it rather than rediscovers it.
+
+**Cost.** A capture no longer runs two processes to find its window; it reads
+a dict. Evidence: issue #101; `tests/linux_xid_probe.py` (lines 16-21, which
+named the pid-match defect before it was fixed);
+`tests/test_linux_capture_bridge.py`; D#101; D#110; D#40c; D#40d; D33; D#8.
+
 ### D#102. On wxGTK3 the commit is a real Enter, and `grab_focus` both works and steals the foreground
 
 **Context.** The whole safety model of driving a live target rests on D#11
@@ -5930,6 +6092,85 @@ that from one data point to a pattern.
 `charmap.exe`'s live `CharGridWClass`; `docs/DECISIONS.md`'s own D46; issue
 #1; issue #20; issue #141 (the refusal-guard defect this session found).
 
+### D#141. The guard that refused a real grid stays; the person waives it, per class
+
+*Placed here rather than at the tail because it is the second half of D#1:
+the defect that session found, answered.*
+
+**The defect.** `probe_grid` refused `charmap.exe`'s `CharGridWClass`
+before trying a route, because `node.text` was non-empty:
+
+```
+not_actionable: "'class=CharGridWClass' already answers with text
+   ('Character Grid'); it is not a painted region. Use `read`"
+```
+
+Both halves of that sentence are false for this control. It *is* a painted
+region -- it paints every glyph cell itself -- and `read` does not answer
+it: the string is a static accessible name the class sets once, returned
+identically whichever glyphs are on screen or selected. A caller who took
+the tool's advice got a plausible, content-free answer with nothing in it
+to say so (issue #141).
+
+**What was considered.** The guard itself is right and is not removed. It
+exists because probing a control `read` already reads spends a side effect
+-- the target's own Copy, on the person's shared clipboard -- for nothing
+(D46), and for a button, whose caption *is* its content, the inference
+holds exactly. The fixture's `GhostFixtureCommandButton` case is that, and
+it still passes.
+
+The tempting fix is to detect the difference: compare the text against the
+class name, against a caption convention, against the rect. Every version
+of that is the tool **picking** between "this text is content" and "this
+text is a label" from a signal that does not carry the answer -- two
+controls, identical in every respect a window exposes, differing only in
+what the application meant. D33 refuses ambiguity rather than picking, and
+a wrong guess here is worse than the refusal was: it would spend the
+clipboard on a caption, or keep refusing a grid while looking as though it
+had decided.
+
+**Decision.** The guard stays, and the person waives it per control class,
+in the profile:
+
+```json
+"text_is_label": ["CharGridWClass"]
+```
+
+`fnmatch` patterns against the window class. A listed class is probed
+despite its text, and the report carries `text_is_label` saying which
+pattern let it run -- a probe that ran because of a declaration should read
+as one, not look like a measurement. This is the third field of exactly
+this shape, after `posted_click_only` (D#122) and `hover_before_click`
+(D#133), and for the same reason each time: the knowledge is a property of
+a control class, it is held by the operator who curated the profile, and a
+declared fact beats a measured one (D35).
+
+A per-call `expect_text: false` was considered and declined. The caller at
+the moment of the refusal is precisely the party who cannot tell -- D#1's
+session followed `read`'s advice and could not see that the answer was
+empty -- so a flag flipped in the moment records a guess, while a profile
+entry records something someone established and the next session inherits.
+
+`grid_seek` carried the same guard, verbatim, and now shares the same code:
+waiving it for `probe_grid` alone would have left the class reachable by
+the probe and not by the tool the probe exists to enable.
+
+**The refusal, for the case that is still refused,** no longer asserts what
+it cannot know. It says the region answered a text query, which is what was
+measured; it no longer says the region is not painted, which was inferred
+and was wrong; and it names the class to list and the key to list it under,
+so a caller who disagrees can act rather than re-run it.
+
+**Evidence.** D#1's measurement, above; issue #141. The regression runs on
+Windows against a new fixture control, `GhostFixtureLabelledGrid`
+(`--labelled-grid`): the same owner-drawn grid that answers `WM_GETTEXT`
+with a fixed label, because no existing fixture control could reproduce the
+defect -- every one of them answers with its real caption, which is why the
+refusal looked correct everywhere it could be tested. The guard's own
+decision is checked platform-neutrally in `tests/test_grid_label_guard.py`,
+at `text_guard`, the seam that needs no backend: the promise is neutral
+even though the control that broke it was Win32 (D#39).
+
 ### D#159. The stop stays; what it says changes
 
 **Context.** `conftest.mcp_or_skip()` was called at module level by
@@ -6166,3 +6407,1251 @@ one thing the project exists to check.
 **Evidence.** Issue #157; the two probe lines above, from
 `C:\gd-run\out\pytest.log` and a SYSTEM-scheduled run of the same
 `where.py`; `tests/focusguard.py`; `tests/test_zz_focus_guard.py`; D#39.
+### D#39a. The third group had more members than the one file D#39 fixed
+
+**Context.** D#39 found three groups inside the 41 modules then gated
+`on_windows` at module level, fixed the one file that turned out to be
+entirely group three (`test_tool_contracts.py`), and left the rest of the
+audit undone: "the audit is not" per-platform, the original issue said, and
+D#39 covered one file of it. #39 stayed open. Five more `on_windows` modules
+had been added since (41 → 46), so the remaining audit was not just old
+debt -- it was still accruing.
+
+**Read every non-`test_windows_*` gated module, function by function, not by
+file.** The earlier fix moved a whole file; this pass found group three
+hiding as *individual tests* inside otherwise-correctly-gated files -- a
+shape D#39 didn't check for. The tell was the same in every case: no
+fixture that drives a real window in the signature, and a body that either
+calls a pure function on literals or feeds a class synthetic collaborators.
+
+**Six instances, two shapes.**
+
+| test | file | what it actually needs |
+|---|---|---|
+| `test_an_unquoted_regex_with_spaces_is_told_how_to_quote` | `test_field_feedback.py` | `Locator.parse` on a string |
+| `test_an_unquoted_regex_with_spaces_is_one_token` | `test_field_feedback_3.py` | same |
+| `test_the_focus_note_names_a_tool_that_activates_windows` | `test_field_feedback_6.py` | a string constant |
+| `test_verify_window_reads_timeout_s_from_any_expect` | `test_actuation_tools.py` | a pure function on dict literals |
+| `test_a_helper_taking_the_foreground_is_the_target_taking_it`, `test_moving_between_family_members_is_not_a_new_taking`, `test_a_failing_family_snapshot_falls_back_to_the_target_alone` | `test_family_watch.py` | `InterferenceWatch` fed fake callables |
+
+The first four needed nothing platform-specific at all and were moved to
+where their subject already has neutral tests: the two `Locator` cases into
+`test_model.py` beside `test_locator_parse_class_and_text` and its
+neighbours, the guidance-string case into a new `test_guidance.py`, and the
+`expect`-window case into `test_expect_absent.py`, which already carries
+the sibling `parse_expect` cases and says so in its own docstring
+("Backend-free ... on any platform").
+
+**The `InterferenceWatch` three are the same failure D#39 fixed for
+`test_tool_contracts.py`, at import time instead of collection time.**
+`InterferenceWatch` was lifted to `ghostdriver.interference` and made
+"platform-neutral by construction" in D#111 specifically so it could be fed
+synthetic collaborators and tested anywhere. These three tests already do
+exactly that -- every argument is a lambda, no real window is ever touched
+-- but they imported the class from `ghostdriver.backends.windows.interference`
+instead, which binds `ctypes.WinDLL` through `winapi` at *module* import,
+raising `AttributeError` on Linux before the neutral test body ever runs.
+Importing the same class from `ghostdriver.interference` fixes it with no
+change to the test bodies. They stay in `test_family_watch.py`, next to the
+two tests that do drive a real fixture window and correctly keep
+`@on_windows` -- the file no longer carries a module-level gate, the same
+shape as `test_backends.py` (one Windows-only test beside neutral ones).
+
+**A seventh test was not a group-three fix but a duplicate.**
+`test_tools.py::test_every_tool_refuses_an_unknown_session` hand-checked
+nine tools against an unknown session id. `test_tool_contracts.py`'s
+`test_every_session_tool_refuses_an_unknown_session`, D#39's own fix,
+already parametrises this over *every* session tool by enumeration, all
+nine included. The hand-picked list added no coverage the enumeration
+didn't already have on every platform, so it was deleted rather than moved.
+
+**Two more were group three but not duplicates: `grant_targets()` called
+with nothing to record, and `attach` on a pid `psutil.Process` cannot find.**
+Neither reaches a backend -- `Toolbox.attach` calls `psutil.Process(pid)`
+before it ever gets to `self._trees(...)`, the same window-enumeration call
+D#39 named as the actual platform touch. `test_tool_contracts.py` was the
+wrong home (its own docstring scopes it to three specific tool-surface
+promises); these went to a new `test_lifecycle_policy.py`, added to
+`MUST_RUN_EVERYWHERE` alongside `test_family_watch.py`.
+
+**Not done here.** Group two -- tests that are neutral logic but whose
+*test* drives a real window (the `app`/`win32_target`/`held_app`/`desktop`
+fixtures, or a spawned `tests.fixtureapp`) -- is still correctly gated and
+stays that way; parametrising it over backends still needs a Linux target,
+which D#39 already deferred and this session did not revisit. The 22
+`test_windows_*.py` files were skimmed, not read function by function: a
+few no-argument "classify this MSAA/UIA verdict" tests were noticed and
+left unaudited, because their subject (MSAA, UIA) is Windows by name and
+digging further was not this session's evidence to gather. Whoever picks
+that up should read this entry's method (fixture-signature first, body
+second) rather than re-deriving it.
+
+**Measured**, full suite minus the five hanging probe-pipe modules
+`ghostdriver-linux-suite-hangs` already names plus the nested-Xvfb Linux
+suites (resource contention on this host, not a defect in this change):
+**752 passed, 2 failed, 425 skipped**, collected 1179. The 2 failures are
+`test_mypy_finds_nothing[linux]` and `[windows]`, both the pre-existing
+`OrderedDict` mismatch at `tools/__init__.py:86` on this venv's mypy
+version, reproducible on `origin/main` before this change. All nine
+relocated/fixed tests verified individually passing (not skipped) on
+Linux; the trimmed modules still collect cleanly.
+
+**Evidence.** Issue #39; D#39; D#111 (`InterferenceWatch` lifted neutral);
+`tests/test_structure.py`'s `MUST_RUN_EVERYWHERE`; `tests/test_tool_contracts.py`;
+`tests/test_family_watch.py`; `tests/test_lifecycle_policy.py`.
+
+### D#163. The Linux flake was fixed sleeps racing undeclared fixture timers, and the timers are now declared
+
+**Context.** Across three full-suite runs on one Linux box, one session, one
+interpreter, the failing set was different every time: `restore`×1 /
+`restore`×1+`slice3`×4+`tier1`×1+`watch`×2 / `restore`×1+`watch`×4, over an
+identical 1309 collected. Run duration for identical work varied 387s-681s.
+The four modules run *alone* gave a fourth distinct set, `3 failed, 17
+passed`, which said the preceding ~1300 tests were changing the outcome.
+
+D45 is the standing rule: an intermittent failure gets instrumented, never
+retried, because a retry takes the evidence with it. The sample assertion in
+#163 is what that rule was asking for and not getting:
+
+```
+>       assert watched["any_capture"] is True, watched["events"]
+E       AssertionError: []
+```
+
+It reports *that* nothing arrived and not *why* -- no window id, no timings,
+no indication whether the watch was even running when the target moved.
+
+**What it was.** Not four flakes; one mistake made in four places. Every
+nested-display probe bounded its steps with a fixed `sleep`, and two
+different guesses hide under that word.
+
+*A dwell after an action.* `xdotool windowactivate` then `sleep 2`, then read
+`_NET_ACTIVE_WINDOW`. Under load GNOME Shell has not finished, so the probe
+photographs the previous state and the assertion reports a window manager
+that did not activate. This is `test_restoring_a_window_necessarily_focuses_it`
+-- the one constant failure, and constant because a full suite is reliably
+slower than a lone module. `linux_l7_probe.sh` already contained the right
+shape one function above the bug: `focus()` polls until `_NET_ACTIVE_WINDOW`
+agrees, and never flaked.
+
+Worth being exact about what was reproduced: the manufactured load below
+bites one step earlier, on the `sleep 2.5` after `windowminimize`, and
+aborts the control rather than failing the measurement. Same script, same
+mistake, different sleep -- which is the argument for fixing the pattern
+rather than the one line #163 happened to name.
+
+*A budget before a timer.* `tests/fixtureapp_gtk.py` arms its disruptions with
+`GLib.timeout_add(options.modal_after, ...)` -- absolute, from the app's own
+start. A probe sampling the calm state *before* the disruption is racing that
+timer with its own setup work, and nothing in the probes said so. Slice 3 had
+9s to do three contract calls and a full `enumerate_process` AT-SPI tree walk;
+when the walk overran, the modal was already up, and the four tests that read
+`before` failed on "a modal before one was raised". They were right. There
+was one. That `slice3`×4 is exactly the four tests reading `before` is what
+identified the mechanism.
+
+**Decision.** `tests/linux_probe_support.py`, and four probes rewritten
+against it.
+
+1. **Where a condition exists, wait for it and record the wait.** `settle()`
+   polls, stops the moment the condition holds, and returns a record: `ok`,
+   `seconds`, `timeout`, `polls`, last error. Not a retry under D45 -- the
+   condition is the window manager finishing the action just requested, and
+   the measurement is still taken exactly once, afterwards. What the fixed
+   sleep threw away was the number, and the number is the diagnosis.
+
+2. **Where no condition exists, say so.** A negative claim -- "a bare map does
+   *not* un-hide the window", "an owner-drawn control emits *no* event" --
+   cannot be polled for. Waiting is the only way to ask and the length of the
+   wait is part of what the answer means. Those stay fixed and are recorded as
+   `dwell`, so a reader can see which two steps are still guessing on purpose.
+
+3. **A budget that is raced is declared, and its margin reported.** `Budget`
+   names the fixture timer a probe runs against and reports what the setup
+   spent against it. A negative margin means the harness lost the race, and
+   the fixtures **skip** on it rather than failing -- the precedent
+   `test_linux_restore.py` already sets, where the L7 harness skips if it
+   could not hide a focused window, "so nothing it says about restoring one
+   means anything". A probe that never reached the state a test is about has
+   measured nothing, and nothing is not a defect. Skipped *loudly*, with the
+   margin in the message, because the way this goes wrong is a budget that
+   quietly stops being met and takes the coverage with it.
+
+**The distinction in point 3 is the reusable part.** "The harness could not
+set the scenario up" and "the scenario ran and the promise broke" are
+different findings, and a suite that renders both as the same red line
+teaches people to stop reading it -- the same argument #161 makes about a
+permanently-red mypy pair, arriving from the other direction.
+
+**Two harness faults found while building this, both of them the same
+failure of instrumentation one level up.**
+
+*The report was all-or-nothing.* Every timing was assembled into one JSON
+line printed at the end, so a probe that stalled produced nothing and the
+fixture could say only "the probe produced no report" -- which is the
+uninformative failure #163 is about, reached from the other side. Measured
+here: a probe whose fixture application had already exited sat for over 200s
+and emitted not one usable fact. Records are now streamed as `TIMING <json>`
+the moment they are taken, so whatever the probe does next, the steps it
+finished are already out.
+
+*The fixture's read deadline could not fire.* `line, deadline = None,
+time.monotonic() + 240` then `for out in probe.stdout:` with the clock
+checked *inside* the loop -- so the deadline only expires when a line
+arrives. It bounded a slow probe and not a silent one, which is the wrong
+half, and a silent probe blocked the run indefinitely. `collect()` reads on a
+thread against a real deadline and keeps the streamed trace. **The same
+pattern is still in `test_linux_slice4.py` and `test_linux_reading_wired.py`,
+which are outside this issue's failing set and are left for their own** --
+noted here rather than fixed quietly, because two modules that can hang a
+local run are worth an issue of their own.
+
+*Stale fixed paths.* `linux_l7_probe.sh` wrote `/tmp/gd-l7.json`. Once the
+announce wait became a condition on file *contents* rather than a sleep, a
+previous run's leftovers satisfied it instantly and handed the measurement
+two window ids that no longer existed -- observed aborting a control that had
+nothing wrong with it. It uses `mktemp -d` now. Separately, the announce line
+is printed on a 120ms timer, well before GNOME Shell has adopted the window,
+so the probe also waits for the id to appear in `_NET_CLIENT_LIST` before
+asking the window manager to activate it. The old `sleep 5` had been covering
+both by accident.
+
+**Measured**, on linux-host-a, GNOME Shell 46.0, the four modules in one run,
+`origin/main` at 5402b23 in a detached worktree against this branch:
+
+| box | `origin/main` | this branch |
+|---|---|---|
+| quiet-ish (load avg 4-6) | 20 passed | 20 passed |
+| 24 busy loops on 16 cores (load avg 20-31) | **7 skipped**, 13 passed | **20 passed** |
+
+The load had to be manufactured. #163's three runs were a full suite and its
+own failing sets did not reproduce on demand today at natural load, which is
+the property that made the bug expensive in the first place; 24 spinning
+processes stand in for the ~1300 tests that used to precede these four.
+
+Under that load `origin/main` does not *fail*. It stops measuring, and says
+almost nothing about it:
+
+```
+SKIPPED tests/test_linux_restore.py:105: the L7 harness could not hide a
+  focused window, so nothing it says about restoring one means anything:
+CONTROL focus A ok active=0xa00004
+ABORT A did not hide
+SKIPPED tests/test_linux_watch.py:103: the watch probe produced no report
+```
+
+`ABORT A did not hide` is the `sleep 2.5` after `windowminimize`, named
+exactly. "The watch probe produced no report" is the other four, and carries
+nothing whatsoever -- which is #163's complaint arriving in its purest form.
+Seven of twenty measurements gone, and a run that reads as green.
+
+Runtime, same modules alone: `test_linux_restore.py` 20.70s → **5.48s**,
+`test_linux_tier1.py` → 5.84s. The fall is the same fact read forwards: a
+fixed sleep pays its full cost on every run including the fast ones, and
+these `slow`-marked modules are themselves part of the load that made the
+others flake.
+
+**What the instrumentation has already ruled out**, which is the point of
+having it. The watch's setup budget was the obvious suspect for `watch`×2 and
+`watch`×4, and the measurement says it is not the one:
+
+```
+TIMING {"what": "window_mapped", "ok": true, "polls": 1, "seconds": 0.03, ...}
+TIMING {"what": "watch_ready", "ok": true, "budget": 29.88, "spent": 0.12, "margin": 29.76}
+TIMING {"what": "escape_seen", "ok": true, "polls": 121, "seconds": 30.01, "timeout": 60, ...}
+TIMING {"what": "put_back", "ok": true, "polls": 1, "seconds": 0.0, ...}
+```
+
+The watch is in place having spent 0.12s of a 29.88s budget, and the escape
+lands at 30.01s against a grab due at 30.00s. So the original 12s was never
+close on this box, and if `events` comes back empty again the answer is *not*
+"the watch was late" -- it is a real question about the escape path, and the
+report says which. The budgets were raised anyway (slice 3's modal 9s → 30s,
+the watch's grab 12s → 30s), but a larger number alone is only a better
+guess. The recorded margin is what makes the next overrun name itself.
+
+**Not claimed.** The full suite was run, minus the two modules named above
+that still hold the unbounded pipe read -- three of the five that used to
+hang a local run are fixed here by `collect()`, as a side effect of needing
+the trace. But it was not run against the *original* conditions of #163,
+because those three runs are not reproducible on demand; they are the
+evidence for the mechanism, not something re-measured after the change. A future run where every step settled in a fraction of its
+limit and the assertion still failed is a real change in behaviour rather
+than a busy box; that distinction did not exist before and is the point.
+
+**Evidence.** Issue #163; D45 (instrument, never retry); D#13/D#14 (hidden,
+and no quiet un-hide); `tests/linux_probe_support.py`;
+`tests/linux_l7_probe.sh`; `tests/linux_slice3_probe.py`;
+`tests/linux_watch_probe.py`; `tests/linux_tier1_probe.py`;
+`src/ghostdriver/backends/linux/isolate.py`'s `SETTLE_S`, whose comment
+records this same lesson already learned once inside the backend --
+"code written from the Windows shape reads the state back too early".
+
+### D#15. An embedded document: WebKitGTK's two GTK bindings gave opposite answers, and neither needed a wake
+
+**Context.** L8, last in the Linux measurement chain (#6, #7-#14, #21 all
+closed before this one started) and the same question D58 answered for
+Chromium on Windows: does an embedded document's accessibility tree wake
+on the first ask, and can a click and a write reach the page through it.
+No Chromium engine exists on Linux; WebKitGTK stood in, on the current
+development host (linux-host-a), with a new fixture (`tests/fixtureapp_web_gtk.py`)
+loading the same `tests/fixturepage.html` D58 used on Windows.
+
+**The two GTK bindings disagreed, and the disagreement is the finding.**
+WebKitGTK's GTK4 binding (`WebKit` 6.0, `gir1.2-webkit-6.0`) never
+published a document over AT-SPI at all: not once, across a dozen runs and
+sixty-second waits, with the page's own `load-changed` signal confirming
+`WEBKIT_LOAD_FINISHED` every time. Neither `WEBKIT_DISABLE_SANDBOX=1` nor
+setting `org.a11y.Status.IsEnabled=true` on the bus before launch changed
+this. WebKitGTK's GTK3 binding (`webkit2gtk-4.1`), reached through
+`Gtk` 3.0 rather than 4.0, published the whole document tree over AT-SPI
+**the first time anything asked, every time** -- no dormancy, no retry, no
+delay worth measuring (children present at t+0 in every run). This is the
+opposite of D58's Chromium, where the first walk had to *ask* before the
+tree existed at all.
+
+**So `walk_elements_awake` needed no wake step, and that absence is now
+measured rather than assumed.** The function was already a plain walk
+before this session (the docstring said so, honestly, as "unmeasured");
+it stays a plain walk, because nothing observed here was ever dormant on
+the engine that worked, and no amount of waking would have helped the
+engine that never published at all. Adding a poll loop with no dormancy
+to justify it would have been modelling, the thing this whole document
+exists to avoid. What did change: `"document web"` -- the AT-SPI role the
+working engine's document publishes under -- joined `WEB_HOST_CLASSES`
+in `surface.py`, which is the one line `modality.py::surface_of`'s own
+docstring already said would be the whole fix once this was measured.
+
+**D75 does not hold across hosts, and should not have been read as if it
+did.** It recorded "GTK 3 is not available from PyGObject" as a fact
+about the machine that measured it, in support of `fixtureapp_gtk.py`'s
+GTK4-only shape. `gi.require_version("Gtk", "3.0")` succeeds on linux-host-a.
+The native fixture stays GTK4 (nothing forced a change there); the new web
+fixture uses GTK3 because that is the binding that measurably works, which
+this session would not have found by trusting D75 as a platform constant
+rather than a point-in-time reading.
+
+**Click needed no web-specific code.** `verbs.click_element` already
+routes through `linux_input.act_via_action`, which calls
+`do_action(node, 0)` regardless of the action's name (D#10's reasoning for
+using the index rather than a lookup). A web button's action is named
+`press`, not `click` as a native `Gtk.Button`'s is -- and it did not
+matter, because nothing reads the name. `do_action` returned `True` and
+the page's own status text changed, confirming the click reached the
+script rather than just returning success.
+
+**Typing does not have a tier-1 route, and this is the one real gap.** A
+web `<input>` carries `Accessible`, `Action`, `Collection`, `Component`,
+`Hyperlink`, `Text` -- and neither `EditableText` nor `Value`, unlike a
+native GTK entry, which carries `EditableText` and commits with no split
+(D#10). `linux_input.set_text_via_editable` already wraps its call in
+`contextlib.suppress(Exception)`, so the missing interface produces a
+clean `False` rather than a traceback -- the existing ladder needed no
+change to handle it correctly. What it means: there is no way to write a
+web field on this backend below tier 4 (XTest under the live-actuation
+gate, D#111), which this session measured the absence of but did not
+build a route through -- `type_text_element`/`send_keys_element` stay
+empty ladders, as they already were.
+
+**Password detection and tab selection needed no web-specific code
+either.** `is_password = entry.role == "password text"` (`elements.py`)
+matched a web password field's role exactly as it matches a native one's,
+so the disclosure policy (D#34b) withholds it with no new code. A web
+ARIA tab carried `SELECTED` before and after a click the same way a
+native `page tab` does, confirming `is_selected`'s role-based state read
+(D#104) generalises to the web case unchanged.
+
+**Measured** with `tests/test_linux_l8.py` and its probe,
+`tests/linux_l8_probe.py`, following the L7/tier1 shape: `Xvfb`,
+`at-spi-bus-launcher --launch-immediately` under `dbus-run-session`, the
+new fixture launched inside it, one JSON report line. Five tests, all
+passing on linux-host-a: the wake, the click, the write's absence, password
+detection, tab selection.
+
+**What this does not cover.** Whether WebKitGTK's GTK4 binding will ever
+publish a document over AT-SPI is not answered here -- it is recorded as
+not fitting this strategy on this build, the D53 shape, not worked
+around. A caller reaching WebKitGTK through the GTK4 binding on Linux gets
+the same honest gap a Store-activated app gets on Windows. `region_evidence`,
+`resolve_hosted_app`, `assess_uia` and `assess_msaa` remain unwired for
+Linux -- `backends/linux/__init__.py` no longer calls the embedded
+document unmeasured, but building an AT-SPI-shaped assessment against it
+is a follow-on, not part of this measurement.
+
+**Evidence.** Issue #15, issue #6 (the chain this closes); D58 (the
+Windows counterpart); D#10 (native entry commits with no split); D#104
+(role-based `SelectionItem`); D53 (an unfitted target is reported, not
+worked around); D75 (GTK 3 availability, host-specific, corrected here);
+`tests/fixtureapp_web_gtk.py`; `tests/linux_l8_probe.py`;
+`tests/test_linux_l8.py`; `docs/LINUX.md`'s L8 entry and its
+`walk_elements_awake` contract row.
+
+### D#105a. The clipboard is a choice of tool by session, not a fallback chain
+
+**Context.** D#40e's slice 4a deferred `NAMED_KEYS`, `EDIT_ACTIONS`,
+`button_pair`, `copy_route`, `focus_route`, `ink_fraction`, `deepest_child_at`
+and "the clipboard" to a later slice. PR #113 built all of them together with
+the place-plus-value locator (D#105), but `docs/LINUX.md`'s own spec row
+always named two clipboard mechanisms -- `wl-paste` / `xclip -o` -- and only
+`xclip` shipped. Issue #105's own text still names both. Nothing in
+`clipboard.py`, `input.py` or `reading.py` had a dedicated test before this;
+the only exercise any of it got was through `tests/test_linux_studio_scratch.py`,
+which is opt-in and needs a real Bambu Studio Flatpak installed.
+
+**Decision.** `read_clipboard_text`, `snapshot_clipboard` and
+`restore_clipboard` now dispatch on `WAYLAND_DISPLAY`: set, they run
+`wl-paste`/`wl-copy`; unset, `xclip`. This is a choice, not a fallback --
+`xclip` reaches an X11 selection, which under a Wayland session is not the
+compositor's own clipboard (D70: the clipboard is the person's), so a
+missing `wl-paste` on a Wayland session reads nothing rather than quietly
+answering from the wrong clipboard. `DISPLAY` was rejected as the signal
+because XWayland sets it too, so its presence alone would pick `xclip` on a
+pure Wayland session.
+
+**Not measured against a real Wayland compositor.** Both Linux hosts this
+project has access to (`linux-host-b`, `linux-host-a`) run an X11 session --
+`loginctl show-session -p Type` answers `x11` on linux-host-a, where this was
+written, and neither `wl-paste` nor `wl-copy` is installed on it. The X11
+branch is unchanged behaviour, exercised as it always was; the Wayland
+branch is new code exercised only with `subprocess.run` faked
+(`tests/test_linux_clipboard.py`), the same honesty D#105 already applied
+to its own Windows half. It needs re-verification on a Wayland host before
+this half of the tension is fully closed, the same way D#105 flagged its
+`confirms_value` Windows implementation.
+
+**Also added:** dedicated tests for `button_pair` and `deepest_child_at`
+(`tests/test_linux_input.py`), which is D#40e's refusal ladder and D#40d's
+no-op respectively -- both pure logic needing no bus, and both previously
+asserted only by prose in D#40e, never by a test.
+
+**Evidence.** Issue #105; D#40e; D#40d; D#105; D70; `docs/LINUX.md`'s
+clipboard rows; `tests/test_linux_clipboard.py`; `tests/test_linux_input.py`.
+
+### D#27. The actuation half runs against a real target, and does not always land
+
+**Context.** D76 closed the read-only half of real-target validation and
+left the other half explicitly open: "no workflow has driven a control end
+to end against the real application under the interference watch. That
+remains the operator's." This is that session -- an operator session on
+`win-host` (a real Windows 11 Home desktop, not a fixture), driving the
+runner (D57) against whatever real applications the box actually has, under
+the interference watch (D62), through `run-workflow` exactly as any
+operator would.
+
+**The desktop was not manufactured for this.** No autologon rig, no
+dedicated test account: the workflows ran as scheduled tasks with an
+`Interactive` principal bound to the account already holding the console
+(`schtasks`'s "run only when logged on"), which lands a process in the
+same session as an already-open desktop rather than creating one. The
+account's own prior session -- a real Windows Terminal window, a real
+browser, Steam, 1Password -- stayed open and untouched throughout. One
+finding came directly from that: launching Windows 11's own Notepad with
+no file argument silently restored the account's actual previous document
+(a PuTTY `README.txt`, not a blank buffer) rather than starting empty --
+measured, not assumed, and the run was aborted and the process killed
+before anything was typed into it. A driving script cannot treat "just
+launched" as "blank canvas" on a real desktop; it must check title or
+content first.
+
+**Proven: a standard control, end to end.** Character Map's "Characters to
+copy" box (`class=RICHEDIT50W`, a real Win32 rich-edit control, not this
+project's fixture) was found, written to, and read back --
+`find` → `set_value` → `read`, all three steps passing. The write landed
+at tier 3 (`WINDOW_MESSAGE`, route `typed`); `verified` came back
+`"display"`, not `"committed"`, because no `expect` was given -- the tool
+told the truth about what it had and had not checked, exactly as D77 and
+`set_value`'s own docstring describe. `find` additionally reported the
+control `obscured: covered by CASCADIA_HOSTING_WINDOW_CLASS` (a real,
+concurrently open Windows Terminal overlapping it on screen) -- reported,
+not acted on, and the write succeeded anyway, because a window-message
+write does not require being on top. A disturbance stayed information, not
+a verdict (D28), on a desktop that was actually busy rather than the
+fixture's controlled idle. `interference` and `watchdog_events` were both
+empty for every workflow run this session -- nothing took the foreground
+across the whole exercise.
+
+**Contradicted: a pattern-less standard control did not respond to a
+posted click.** Resource Monitor's own tab strip (`class=SysTabControl32`
+-- a common control, not a vendor one) reports `0 accessible elements` and
+`no child windows` from `surfaces`, an emptier reading than D76's vendor
+`Pane` controls got. D76's model says a pattern-less real HWND is driven
+by a posted click at a point (D53's ladder, tier `WINDOW_MESSAGE`); three
+calibrated attempts to switch it from "Overview" to "CPU" -- the first
+guessing an even five-way split of the control's full width, the second
+correcting that guess but subtracting the wrong frame's origin (screen
+`left` instead of the capture image's own left), the third using
+`capture`'s own screenshot, cropped and measured directly, landing
+correctly on the tab's centre -- never switched the tab. A follow-up
+`capture` after the "correct" click confirmed the same "Overview"
+highlight was still showing on screen: the click was not merely unproven,
+it did nothing. The tool never claimed otherwise. Two honest shapes
+appeared across the attempts, on the identical target and point: "every
+tier delivered but none produced the expected result... verified is
+'delivery_only', expected 'effect'" (the `{"changed": true}` postcondition
+correctly found nothing moved), and, on a later attempt with no `expect`
+at all, "no tier could act on this element (tried [3])" (delivery itself
+declined, with no exception recorded). Which of the two a given attempt
+gets is not explained by anything this session controlled, and is left
+open rather than guessed at (D33). What is not open to doubt: this
+control, real and standard-classed, does not take a posted click the way
+D76's vendor Pane controls did, on this real target. D53's rule held --
+the ladder reported the mismatch rather than papering over it with a
+`disturbances`-adjacent guess -- and this is the numbered exception to
+D76's generalization the way D76 itself was to the model that came before
+it.
+
+**A related, structural finding, not fixed here.** Classic Control Panel
+applets (`main.cpl`, `inetcpl.cpl`, ...), launched the only way Windows
+launches them (`rundll32.exe shell32.dll,Control_RunDLL <name>.cpl`), are
+unconditionally refused by `modals`' own ambiguity guard --
+`BLOCKED: 'Mouse Properties' is holding '<untitled RunDLL>'` -- because
+`rundll32` creates a hidden owner window that the visible dialog is
+structurally held by. This is not a bug to route around (D33, D53): it
+means a whole common class of real Windows targets is unreachable for
+actuation by construction, worth knowing before reaching for one as a
+real-target stand-in.
+
+**A second, separate gap: modern Notepad's text box is visible but
+unreachable.** `describe --all` shows Windows 11 Notepad's edit surface
+(`RichEditD2DPT`, nested under a `Microsoft.UI.Content.DesktopChildSiteBridge`
+XAML-island host) plainly. `find` and `read`, with or without
+`all_windows`, return zero matches for the identical locator against the
+identical process. The read-only tree walk and the resolve path `find`
+shares with every actuation tool disagree about what exists -- a real gap
+between the two, worth its own issue rather than a guess folded into this
+one.
+
+**What this moves.** The real-target scorecard row D60 opened and D76 kept
+open for "the operator's" half now has a real answer: actuation has run
+against a real application, under the interference watch, and both an
+honest success and an honest, reproducible non-success are on the record
+with their traces. The row closes as "run: one proven, one contradicted,
+both reported honestly" rather than "unrun". What stays open: why the
+Resource Monitor tab strip declines a posted click that a Delphi/VCL
+vendor Pane control accepted (D76) is not diagnosed here, and the Notepad
+resolve gap is not fixed here -- each is worth its own issue and its own
+measurement, not a guess spent from this one's budget.
+
+**Evidence.** Issue #27 (successor to #3); D76 (the read half, and the
+model this session found the exception to); D77 (`expect={"changed":
+true}`, `verified` states); D53 (an unfitted target is reported, not
+worked around); D33 (refuse ambiguity rather than picking); D28 (a
+disturbance is reported, never a verdict); D48, D69 (deadline-polled
+postconditions -- exercised by every `expect` in this session, over the
+full window each time); D57 (the operator directory and runner); D62
+(every tool call traced). Operator session on `win-host`, workflows
+`issue27-charmap-edit` and `issue27-real-target-actuation` under
+`C:\gd-operator`, reports timestamped 2026-09-19 08:48-08:58 UTC.
+
+### D#30. Gate 4's ideal case, run: the same caption realized on two stacked pages
+
+**Context.** D76's Gate 4 passed, but not by the route `docs/VALIDATION.md`
+describes as the discriminating test: "the same caption on two *tab
+pages*". Only one page was loaded in that session, so ancestor scoping was
+proven on a repeated toolbar caption instead — a real test, but not the
+one D31 was written for, where a wrong answer is plausible rather than
+obviously wrong because the two matches sit at the same offset on two
+different pages.
+
+**What was run.** Windows' own File Explorer Options dialog (`explorer.exe
+shell:::{6DFD7C5C-2451-11d3-A299-00C04F8EF6AF}`), on win-host's real desktop
+— the same box and account D#27 drove, on a later session. This route
+stays in-process in `explorer.exe` rather than going through
+`rundll32.exe shell32.dll,Control_RunDLL`, so it sidesteps D#27's own
+finding that the CPL route's hidden owner window trips `modals`' guard.
+`modals` still reports the dialog *holding* an internal stub window
+(`MSGlobalFolderOptionsStub`, the property sheet's own housekeeping
+window) — a normal ownership relation, not the same block.
+
+**The caption.** The General and Search pages both carry a button whose
+window text is `&Restore Defaults`, character for character. The View
+page's equivalent button is `Restore &Defaults` — the accelerator sits
+before a different word, so it is not the same string and would not
+satisfy an exact-text locator against either of the other two. Worth
+recording because it is exactly the kind of near-miss D31 exists to
+guard against: two captions that read the same to a person and are not
+the same string a locator matches.
+
+**Realizing both pages at once.** A property sheet page is created the
+first time it is shown and, once created, is only hidden on tab switch,
+never destroyed — so visiting General, then View, then Search left all
+three pages' controls in the tree at once, one visible and two hidden.
+Getting there needed a real posted click on the tab item, not a
+programmatic selection: `TCM_SETCURSEL` (and UI Automation's
+`SelectionItem.Select`, per the existing note in
+`backends/windows/verbs.py::click_element`) marks a tab selected without
+sending `TCN_SELCHANGE`, so the dialog's own page-switch handler — the
+thing that actually creates the new page — never runs.
+
+**The result.**
+
+```
+within=(class=#32770 text='General'): ['0x2014a']
+within=(class=#32770 text='Search'): ['0x20174']
+within=(class=#32770 text='View') [View has no such caption]: []
+unscoped: ['0x20174', '0x2014a']
+```
+
+Unscoped, the caption is ambiguous, exactly as D33 says it must be. Scoped
+to either page's own `#32770` container, `within=` returns exactly one
+handle, and the two handles differ — the case D31 was written for,
+confirmed on a real target rather than the fixture. Scoped to the page
+that does not carry the caption, it returns nothing rather than the
+nearest wrong answer, which is D33's refusal again, now exercised against
+a real dialog's frame rather than a fixture built to exercise it.
+
+**A hazard worth recording for the next Gate 4 session.** `VALIDATION.md`
+points a tester at the Python API directly for this test, and getting a
+tab's on-screen rectangle to post a click at (there being no `find`
+route to a `SysTabControl32` item — the CLI's `find`/`describe` walk the
+window tree only, and none of the accessible-element resolution the
+`type=` locator field expects is wired into them) means sending
+`TCM_GETITEMRECT` across processes. `SendMessage` with a bare local
+pointer for a message like this is not automatically marshaled: it
+crashed `Explorer.EXE` outright on the first attempt (access violation in
+`comctl32.dll`, Windows' self-healing `userinit.exe` restarted the shell
+within about a second — win-host was confirmed idle first, and the
+restart's only visible cost was any Explorer windows the account had
+open). The fix is `VirtualAllocEx`/`ReadProcessMemory` against the target
+process, the usual cross-process marshaling pattern, checking the send
+and the read both succeeded, and refusing to click on an implausible or
+out-of-bounds rectangle before posting anything. None of this touches
+ghostdriver's own code — the crash was in ad hoc exploration tooling
+standing in for the human hand `VALIDATION.md`'s Gate 4 recipe assumes —
+but a future session reaching for the same Python-shell recipe will want
+the same guard.
+
+**What this moves.** D76's Gate 4 caveat — "the runbook's ideal test...
+was not available" — no longer holds against any target: it has now run,
+on a real one, without a fixture built for it. The real-target scorecard
+row's read-only half (D76: discovery, classification, scale, locator and
+ancestor scoping, text reading, non-interference) gains its one missing
+case; actuation end to end remains the state D#27 left it in.
+
+**Evidence.** Issue #30; D76 (Gate 4); D#27 (the same win-host session
+family, and the CPL/rundll32 modal-guard finding this reuses rather than
+repeats); D31 (`within=` exists because this exact case needs it); D33
+(refuse ambiguity, both directions); `docs/VALIDATION.md` Gate 4;
+`backends/windows/verbs.py::click_element`'s note on `SelectionItem`
+selection not notifying the application.
+
+### D#62. The approval prompt states the lifetime it actually has
+
+**The report, and what a second measurement did to it.** Issue #62 came
+out of a session driving a Chrome pid and named two problems: the
+approval happened as chat text rather than a dialog, and the same pid had
+to be approved again after a Claude restart. Both read as defects. A
+week later #125 re-measured the second one on a different target and
+found the opposite: a Chrome grant recorded on 9/7 was still in force on
+9/14, because that run had an operator directory and D65's store had kept
+it. The 9/7 run did not. So the persistence worked, and had worked all
+along.
+
+**What was actually wrong is that nothing said which case it was in.**
+Two sentences asserted a lifetime this server does not always have:
+
+- the elicitation prompt -- *"This lasts for this session only"* -- which
+  is the last thing a person reads before approving, and
+- `SERVER_INSTRUCTIONS` -- *"Approvals last for this server run"* -- which
+  is what the agent plans and relays from.
+
+Both predate R1a. With a store configured they are wrong; without one
+they fail to say *why* the person is being asked about an application
+they approved this morning. That is one defect with two faces, and it is
+why #62 was filed as a persistence bug: the behaviour was right and
+unobservable, so the only thing left to infer from was a sentence that
+was wrong.
+
+**The rule.** *A lifetime that is knowable at the moment of asking is
+reported at the moment of asking.* `SessionManager.consent_lifetime()`
+composes the true sentence from the store that is actually in force; the
+elicitation prompt uses it, a `needs_consent` result carries it as
+`lifetime` so an agent relaying the question in chat relays the same
+sentence the dialog would have shown, and the instructions no longer name
+a lifetime at all -- they tell the agent to quote that field instead. The
+no-store sentence names `GHOSTDRIVER_OPERATOR_DIR`, because "you will be
+asked again" is a complaint and "set this and you will not be" is an
+answer.
+
+**The first half of the report, answered but not as asked.** #62 wanted
+the approval rendered "as a real prompt, the way computer-use's
+`request_access` does". It already is, where the client can carry it:
+`attach` calls `ctx.elicit` first and falls back only on failure. There
+is nothing this server can do to make a client that does not implement
+MCP elicitation show a dialog -- and the fallback message said *"this
+client cannot be asked directly"*, which the field read as this server
+declining to ask. It now names whose limitation it is, and gives the
+exact `grant_targets(allow=[pid])` call. What we did not do: keep a
+capability flag and branch on it ahead of time. Trying and failing is one
+round trip and is correct against a client that advertises the capability
+and then refuses it; a flag would be a second source of truth about
+something the attempt already answers.
+
+**What this deliberately did not change.** The store, which was not
+broken. `grant_targets` stays the record-the-answer path for clients that
+cannot prompt (R1), and `elicited` and `operator_tool` stay distinct
+sources, because the difference between a signature and an assertion is
+still real.
+
+**Evidence.** Issues #62 (field report, 9/7) and #125 (the 9/14
+re-measurement that corrected it); R1, R1a, D65. Checked by
+`tests/test_consent_lifetime.py`, which runs on both platforms because
+its seam is `SessionManager`, not the `attach` tool (D#39).
+
+### D#125. A standing approval per executable: yes, declared by hand, and it answers last
+
+**The question.** D65 made an approval last exactly as long as the
+process it was about -- *"that application, running"* -- so a target that
+restarts is asked about again. In the field that is correct roughly
+always and wrong for one case: an operator who has already decided, for
+this machine, that this line-of-business client may be driven, and who is
+now being asked a question they consider settled. #125 asked whether to
+allow a standing approval per executable path, at the cost of that
+promise. D35 -- a declared note beats a learned one -- was cited for it.
+
+**The answer is yes, under two constraints, and the constraints are the
+decision.** The feature on its own is three lines; what took the thinking
+is what keeps it from dissolving R1.
+
+**One: no tool writes the file.** `<operator dir>/standing-consent.json`
+is read by this server and never created, amended or touched by it, and a
+test asserts the bytes are unchanged across a `grant_targets` call. This
+is not tidiness. R1 replaced a configured allowlist with elicitation to
+buy one property -- consent that *the agent cannot fabricate* -- and a
+standing approval an agent can write is a way to launder its own say-so
+into the operator's. The file being hand-edited is the signature. The
+server instructions now tell the agent it may propose the contents and
+must not offer to write them.
+
+**Two: it answers last.** `SessionManager.grant_for` resolves in order of
+specificity: the pid's own decision, then its nearest decided ancestor's,
+then the declaration. D35 reads at first like an argument for the
+opposite -- put the declared thing first -- but D35 is about a person
+against a *measurement*, and here both sides are the person. The pid
+decision is their later and more specific answer, about the process in
+front of them, so a file edited last week must not overturn "leave that
+one alone" said a minute ago. That ordering is checked in both
+directions, because the dangerous one is only half of it: a declaration
+must not un-restrict, and an operator must also be able to allow a single
+process of an executable they declared off-limits without editing a file
+mid-task.
+
+**The cost, stated where it is spent.** A standing approval really does
+give up D65's promise: a restarted target is driven without anyone being
+asked. So the grant carries `standing_for`, and `describe()` says *"[standing
+declaration for <path>]; nobody was asked about this process"* wherever
+the decision is shown. A result that presented this as an ordinary
+approval would hide the single fact that distinguishes it.
+
+**The second cost, accepted and not mitigated.** Matching is on the
+executable path and nothing else, so a declaration for a browser approves
+every instance of it, including the one pointed at production -- and
+endpoints are precisely what R1's `list_targets` shows a person so they
+can *see* what they are approving. Narrowing a declaration by command
+line is a real follow-on; it is not smuggled in here, because a
+half-specified match is worse than an honest whole-executable one. What
+this does instead is make the declaration easy to write correctly: a
+`needs_consent` result now carries `target.exe`, the image path spelled
+the way the process reports it, which is not always the one an operator
+would have guessed.
+
+**Smaller choices.** `restrict` is accepted alongside `allow`, and wins
+where an executable appears in both -- a declaration that contradicts
+itself is a mistake and the safe reading of a mistake is the refusal. A
+file that cannot be parsed approves nothing *and says so* in the next
+`needs_consent`, because an operator with a typo would otherwise get the
+behaviour of having declared nothing with no way to tell that from having
+declared nothing. An entry of the wrong shape invalidates the whole file
+rather than being skipped: three quarters of a consent policy is not a
+consent policy. A declared decision is never copied into D65's per-pid
+store, which would outlive the declaration -- deleting a line would leave
+the approval standing in a folder nobody thinks to look in. Comparison is
+through `os.path.normcase`, so a hand-typed path matches on Windows and
+two paths differing in case stay two files on Linux; symlinks are not
+resolved on either side, since `exe()` is already the resolved target and
+resolving the declared side too would silently widen a declaration to
+every name pointing at that file. A process whose image cannot be read is
+asked about: not knowing what a target is, is not evidence it was
+declared. And the file is re-read when it changes rather than at start
+-- withdrawing a standing approval must not need a redeploy, because a
+revocation that waits for one is a revocation the operator believes has
+taken effect when it has not, which is D#62's defect wearing different
+clothes. It costs one `stat`, on the path already known, only where
+nobody has decided about the target.
+
+**Evidence.** Issue #125 (and the 9/7 report in #62 it re-measured); R1,
+R1a, D65 (the promise this spends), D35 (the rule that does not apply,
+and why). `tests/test_standing_consent.py`, platform-neutral by
+construction -- the executable lookup is injected, so nothing there
+starts a process or reaches a backend (D#39).
+
+### D#2. A place entry with no region denies the whole of `within`
+
+**Context.** D72's own "what it does not do" named the gap: a place is a
+rectangle in one window's frame, and a control that scrolls inside that
+window breaks the anchor -- the same control sits at a different place
+depending on scroll offset, so a fixed region either misses it after a
+scroll or, worse, silently denies whatever else scrolled into that
+rectangle instead. Issue #2 weighed three answers: anchor to
+neighbouring content, anchor to the scroll container plus an offset
+within its content, or deny the container wholesale.
+
+**Why the container, not content or an offset.** The first two both
+need *exact* text out of the region to anchor on -- and D#1, probing
+that question against a real target (`charmap.exe`'s owner-drawn grid),
+came back negative on all three routes it had to offer: no accessible
+surface, no clipboard copy, no export command. Building a content
+anchor or a scroll-offset anchor on a route that does not yet work
+would be code with nothing under it. The container answer needs none of
+that: a window is already a locator the denylist can resolve, and its
+extent is already computable (`GetClientRect`) without reading anything
+painted inside it.
+
+**What changed.** A denylist place entry's `region` is now optional:
+`{"within": <locator>, "note"?}` with no `region` denies any actuation
+aimed anywhere inside `within`'s whole client area, computed fresh per
+actuation the same way a region's rectangle already was (`deny.py`'s
+`_denied_region`, `winapi.client_size` added alongside the existing
+`client_centre`/`client_to_screen`). A malformed entry -- `region`
+present but incomplete, or `within` missing outright, with or without a
+`region` -- still fails the profile load (D72's own rule, unchanged).
+Proven on the fixture's paging grid (`tests/test_deny_regions.py`,
+`--grid-pages`): a click at a fixed point is refused before any paging,
+posting `pagedown` to the grid succeeds, and a click at that same fixed
+point is refused again afterward -- the denial does not consult, and so
+cannot be defeated by, the scroll offset.
+
+**What this does not do.** It is coarser, on purpose: everything in the
+window is denied, not just the control that scrolls, which can matter
+on a window that hosts more than one thing. That is the trade the issue
+named going in ("coarse and available today as a workaround") and
+exactly what D5's fail-closed spirit asks for when a target cannot be
+named more precisely -- refuse more than necessary rather than leave a
+control effectively unreachable by the denylist. Content-anchored and scroll-offset anchoring remain open, gated on a
+future measurement reopening the exact-text question D#1 closed
+negative -- issue #20 (OCR) is exactly the issue that measurement would
+feed, per D#1's own evidence trail.
+
+**Evidence.** Issue #2; D72 (the gap this closes); D#1 (why the other
+two options are not built yet); D5 (failing closed, three times over).
+`tests/test_deny_regions.py`:
+`test_an_entry_with_no_region_denies_the_whole_of_within`,
+`test_a_whole_window_denial_holds_across_scroll_positions`,
+`test_an_entry_with_no_within_fails_the_profile_load_even_without_a_region`.
+
+### D#17. An API oracle stays out of the driver; it belongs to orchestration
+
+**Context.** Issue #17 is one of the five spec §12 rows
+(`docs/product/features/deferred-scope-tracking.md`) kept visible without
+being scheduled. Unlike #16, its body does not leave the question open --
+it already argues its own conclusion ("Why it stays out of the driver")
+citing D59 and D46. What it lacks is the same thing #16 lacked: an entry
+in this log for the feature doc's non-goals to point at. Without one, the
+row reads to the next triage run as unscheduled work rather than decided
+-- which is exactly the gap the feature doc's Notes section named for #17
+and #18 after D#16 closed #16 alone, and exactly why this session was
+dispatched against #17 rather than left to keep re-raising the same
+question.
+
+**The idea, and why it is real.** An HTTP/API client that checks, out of
+band, whether an action driven through the UI took effect in the system
+behind it -- a test oracle independent of the surface being driven. It is
+the clean answer to the read gap D46 leaves open: if the API can confirm a
+value, the driver does not need exact text out of an owner-drawn grid's
+pixels at all. That gap is real (D46's own "what that leaves open"), which
+is why this is recorded as declined rather than dismissed.
+
+**Why it does not belong here regardless.** D59 drew the line above
+`backends/` on purpose: everything above it reads `WindowNode`s and
+`AccessibleElement`s, one model for both platforms. An API client reaches
+past that model entirely, into whatever system the target happens to be
+backed by -- a database, a message queue, a REST service, one target's
+and no other's. Housing it behind this tool surface would answer, from
+inside the driver, a question the driver's contract was never written to
+answer: not "what does the surface show", but "what did the system record".
+D1 sharpens the same point from the other direction -- the fixed-surface
+constraint holds because every capability added here is a capability of
+*the tool*, usable against any onboarded application. An API oracle is the
+opposite: it cannot be general, because every target's API is its own.
+Onboarding a second target would mean adding a second, unrelated oracle
+behind the same tool name, which is the fork D#16 already declined for a
+browser driver, for a different reason arriving at the same place.
+
+**Decision.** An API/HTTP oracle is out of this repository. If it is ever
+built, it sits on the orchestration layer this driver is deliberately
+underneath -- issue #18's row, the same sibling layer D#16 named for a
+browser driver -- reading the driver's own postconditions and tracing
+(D62) alongside its own system-specific check, not folded into a tool
+here.
+
+**What would reopen it, and what would not.** Nothing here narrows D46's
+open question -- exact text out of an owner-drawn region is still
+unsolved, and issue #20's clipboard/export probe is still the gate on it.
+An oracle proves useful *there* is not a reason to build it *here*: it
+reopens only if a future spec places verification-against-the-backing-system
+inside the driver's own contract, which would have to overturn D59, not
+merely cite the gap D46 left.
+
+**Evidence.** Issue #17; spec §12; `docs/product/features/deferred-scope-tracking.md`;
+D59; D46; D1; D#16 (the sibling decision this one parallels).
+
+### D#19. The `vm` trigger has not fired, and it now says where a firing gets written
+
+**Context.** Issue #19 is the fourth of the five spec §12 rows
+(`docs/product/features/deferred-scope-tracking.md`), and the first of the
+*conditional* kind to be dispatched. It is not declined on architecture the
+way #16 and #17 were; it is held against a named trigger -- "after
+`hidden_desktop` proves insufficient" -- and it is labelled `env: windows`.
+The feature doc predicted that a row of this kind needs no record in this
+log, because "a conditional item survives triage on its trigger: the row
+says what has to happen first, and a run that checks finds nothing fired."
+
+**That prediction is now measured, and it is false.** #19 was dispatched for
+implementation on 2026-09-20 -- the third of the five deferred rows to be,
+after #16 and #17 -- and it was dispatched to a *Linux* session against an
+`env: windows` label. So neither label gates anything: the `deferred` label
+routes triage to the feature doc (which is what it was for) and the `env:`
+label tells a human which box to be on, but the only thing a dispatcher
+reads is whether the issue is open. The distinction the feature doc drew
+between architectural and conditional rows describes the *reasons*
+correctly and the *mechanism* not at all. An open issue is a dispatchable
+issue, whatever is written inside it.
+
+**The trigger, restated, because this record now holds it.** Not every
+limit of `hidden_desktop` counts. It is launch-only, because desktop
+assignment is fixed at process creation (D51, D53); it fits classic Win32
+and not Store-activated targets (D53); a target it cannot fit is *reported
+as such, not worked around* (D53). None of those are the trigger. The
+trigger is different in kind: **a target that `hidden_desktop` accepts and
+then fails to isolate** -- focus escaping the hidden desktop, or a target
+that detects it and behaves differently. The Linux counterpart, the nested
+display, carries the same trigger.
+
+**The check, and what a check can honestly be from the wrong platform.** A
+Linux session cannot put a Win32 target on a hidden desktop, and did not
+try. But the check that matters was never a machine check. A firing is a
+measurement, and a measurement that is not written here did not happen for
+any purpose this project has -- which is the premise the whole log rests
+on. So: does anything on record show `hidden_desktop` accepting a target
+and then failing to isolate it? It does not.
+
+- D51 measured the guarantee as *structural*, and contrasted it with
+  `minimized` on exactly this axis: `minimized` is observational, watches
+  for an escape and puts the target back, and has a watchdog because one
+  quiet trial proves nothing. On a hidden desktop there is nowhere to
+  escape to.
+- D53 measured real applications, which is the measurement that could have
+  fired this. `charmap.exe` and `winver.exe` were accepted, described,
+  driven and captured with their windows never on the operator's screen.
+  `notepad.exe` was *not accepted* -- Store activation ignored the
+  `lpDesktop` and the session saw no windows at all. That is the unfitted
+  case D53 settled, which #19's own body names as not the trigger.
+- The Linux side is built and makes the same structural claim
+  (`src/ghostdriver/backends/linux/hidden_desktop.py`, D#8, D75).
+
+Nothing between D51 and today records an acceptance that then failed.
+
+**What the check also found: half the trigger is close to unreachable.** Of
+the two forms the issue names, focus escaping the hidden desktop is not
+something the strategy can do quietly the way `minimized` can. A window's
+desktop is fixed when the window is created (D51, D53), so a window on the
+hidden desktop has no foreground to escape to and no way to move to one --
+which is why the failure that *did* show up in practice was the Store-app
+one, where the target never lands on the hidden desktop at all. The live
+half is the other: a target that detects the desktop and behaves
+differently. That is also the half a VM genuinely answers, because a
+hidden desktop is detectable and a machine is not. This is not grounds to
+build anything. It narrows what to watch for, because "proves insufficient"
+read as though the two halves were equally likely and they are not.
+
+**Decision.** Issue #19 closes with no code. The contingency does not close
+with it -- it moves from the tracker into this log, which is where the
+things that have to survive are already kept. Concretely:
+
+- The trigger stands exactly as restated above. Nothing here narrows what
+  would justify a `vm` strategy; only where the justification is recorded.
+- **A firing is recorded here, as the `D#<issue>` of the issue opened for
+  it, citing this entry.** That is the thing #19 never said, and the reason
+  a session told to "confirm the trigger actually fired" had nowhere to
+  look. It is not a gate run: `docs/VALIDATION.md` names no isolation
+  strategy in any of its six gates, so Gate 6's non-interference check
+  would not distinguish a hidden desktop that held from one that was never
+  used.
+- Spec §12's row is marked answered and points here, and
+  `test_structure.py::test_an_answered_deferred_row_points_at_a_decision_that_exists`
+  fails if that pointer names a decision nobody wrote. A promise that lives
+  only in a decision record gets broken once and then found later (D60);
+  this one is checked on every run.
+
+**What would reopen it, and what would not.** A recorded measurement of
+`hidden_desktop`, or of the Linux nested display, accepting a target and
+then failing to isolate it. Not "the current strategy is awkward". Not a
+target it refuses to fit: a second Store-activated case is more evidence
+for D53, not evidence for a VM. Reopening means a new issue whose decision
+cites this one, not a reversal of it -- this entry does not decide against
+the `vm` strategy, it decides that an unfired contingency belongs in the
+log rather than in an open row that keeps being handed to implementers.
+
+**Evidence.** Issue #19; spec §12;
+`docs/product/features/deferred-scope-tracking.md`; D51; D52; D53; D55;
+D60; `src/ghostdriver/backends/linux/hidden_desktop.py`;
+`docs/VALIDATION.md` (six gates, no isolation strategy named in any);
+D#16 and D#17 (the sibling closures -- declined, where this one is unfired).
+
+### D#18. The assertion DSL was not deferred; it was built under another name
+
+**Context.** Issue #18 is the last of the five spec §12 rows
+(`docs/product/features/deferred-scope-tracking.md`) to be dispatched, and
+the last of the *architectural* kind. Its row reads "Separate spec, built on
+this one". The issue body argues the hazard well: the driver already has
+assertion primitives (D57's workflow runner, D31/D32/D48's expectations,
+D62's tracing), a DSL is a language on top of them, and a language on top of
+a runner is the classic shape of the creep D60 caught once already -- "it
+starts as a thin wrapper over the runner and accretes driver logic until the
+boundary is gone." It closes by asking that, if picked up, the boundary get a
+guard the way the module-size promise got one.
+
+**The row is false, and has been since D#84.** This entry was expected to be
+a third declination in the shape of D#16 and D#17. It is not, because the
+first thing a dispatched session does is look at the code, and the code says
+the DSL is built. `src/ghostdriver/workflow.py`, measured on this branch:
+
+| Commit | Lines | What it added |
+|---|---|---|
+| `20cc197` (D57) | 297 | steps, dotted-path assertions, report |
+| `7061eaa` (D#84) | 504 | `params`, `provenance`, `verified`, `delivery_only`, `when` |
+| `19ab915` (D#85) | 682 | param binding, branch evaluation |
+| `32e182b` (D#97) | 817 | `repeat_until`, `for_each`, bounded |
+| `f0ff298` (D#106) | 939 | `on_disturbance` handlers, bounded and named |
+| `ffcc9d5` (D#112) | 948 | replay reports what held *now* |
+
+Variables, conditionals, bounded loops, event handlers, assertions, and a
+provenance record: that is a declarative test-orchestration and assertion
+language, with a closed vocabulary (`STEP_KEYS`, `BRANCH_KEYS`, `GUARD_KEYS`,
+`REPEAT_KEYS`, `FOREACH_KEYS`, `HANDLER_KEYS`) that refuses an unknown key
+rather than ignoring it (D#84, D33). Three times the size it was when the
+row was written, and none of the five commits mentions #18.
+
+**Why nobody noticed, which is the part worth keeping.** The row says "DSL".
+The work shipped as **macros**. `docs/MACROS.md` opens by saying the
+reframe that made the work tractable -- "a macro is `workflow.py` and `batch`
+joined and given a lifecycle... not a new subsystem" -- and that reframe is
+both correct and exactly what hid it: each of #84, #85, #97, #106 and #112
+is visibly smaller than "an orchestration and assertion DSL", so each author
+was right that they were not building the deferred thing, and the five of
+them together were. A deferred row is not consulted by someone extending an
+existing file; it is consulted by someone proposing a new subsystem. The row
+was therefore guarding an entrance nobody used.
+
+**The phrase "the orchestration layer" was doing two jobs.** D#16 and D#17
+both decline a thing by pointing at "the orchestration layer this driver is
+deliberately underneath -- issue #18's row". Those pointers are not wrong,
+but they mean a different layer than the row does, and the collision is what
+let the row survive being implemented:
+
+- *Sequencing this driver's own calls, with assertions* -- the macro format.
+  Everything it touches is a result this driver produced, so it stays inside
+  the D59 model and reads `WindowNode`s and `AccessibleElement`s like every
+  other thing above `backends/`. **Built, here.**
+- *A harness coordinating this driver with tools that are not desktop
+  drivers at all* -- a browser protocol (D#16), an HTTP oracle against one
+  target's own backing system (D#17). That reaches outside the D59 model
+  entirely, which is the reason both were declined. **Not built, not here,
+  and this entry does not change that.**
+
+Read with that split, D#16 and D#17 stand unamended; their "sibling layer"
+is the second sense. What is corrected is the row, which names the first.
+
+**The hazard the issue named was real, and it held.** Worth stating plainly,
+because the row's warning being *accurate* and *too late* are separable
+claims and only the second is true. Measured on this branch:
+
+- `workflow.py` imports nothing platform-specific and nothing that drives:
+  stdlib at module level, and three modules from inside the package --
+  `tools.stepper` (D#83's shared step gate), `tools.recording` (D#112), and
+  `policy` (recording the run as the operator's consent, D57). It reaches
+  the target through the toolbox handed to it and through nothing else, so
+  it is still tested with fakes.
+- Every leaf is an ordinary tool call that re-authorizes. `RUNNABLE_TOOLS`
+  in `tools/stepper.py` is an allowlist, not a denylist, so a new tool is
+  unreachable from a macro until someone names it there; the lifecycle,
+  consent and foreground tools are not in it (D#83, `tests/test_stepper.py`).
+- The control-flow forms are bounded by construction -- nesting depth
+  (D#84), loop iterations (D#97), handler firings (D#106) -- and a handler
+  cannot recurse into itself.
+- A guard's condition is in the locator/`expect` vocabulary and never
+  embedded code (D#84), so a macro stays inspectable and denylist-checkable.
+
+So the DSL did not accrete driver logic. What it did accrete is *headroom*:
+`tools/macro.py` is 400 lines against a `TOOL_MODULE_LIMIT` of 400, the
+largest module under `tools/` and the only one with none left.
+
+**Decision.** Issue #18 closes as **built, not deferred** -- the one row of
+the five that is answered by reading the source rather than by an argument.
+Concretely:
+
+- Spec §12's row is marked answered and points here, and
+  `test_structure.py::test_an_answered_deferred_row_points_at_a_decision_that_exists`
+  fails if the pointer resolves to nothing.
+- `docs/MACROS.md` says which row it satisfies, and stops saying "specified,
+  not built" -- it was the stale status line, as much as the vocabulary gap,
+  that kept the two names from meeting.
+- The boundary gets the guard the issue asked for, aimed at the boundary
+  rather than at the size. See below.
+
+**The guard, and why it is not a line limit.** The issue analogized to D60's
+module-size promise, and a line cap on `workflow.py` is the literal reading.
+It is the wrong one: size is not what the issue was afraid of, and 948 lines
+of closed-vocabulary parser is not the failure -- a 300-line runner that
+imported `resolve` would be. The promise actually load-bearing here is the
+one D57 stated and `workflow.py`'s own docstring repeats: *the runner is pure
+with respect to the desktop; the toolbox and the watch are handed in.* That
+promise currently lives in two docstrings, which is precisely the position
+the module-size promise was in when D60 found it broken.
+
+`test_structure.py::test_the_workflow_runner_reaches_the_target_only_through_its_toolbox`
+names the three in-package modules `workflow.py` may import, with the reason
+beside each, and fails on a fourth. It fails in both directions, like
+`KNOWN_UNWIRED`: an entry that is no longer imported is stale and comes off.
+A fourth entry is not forbidden -- it is required to be argued for here
+first, which is the whole mechanism this log is.
+
+**What this does not decide.** Not whether the macro vocabulary should grow
+further: #97, #106 and #112 each earned their form, and nothing here says
+the next one cannot. Not the second sense of "orchestration layer", which
+D#16 and D#17 hold. And not `tools/macro.py`'s zero headroom -- that is a
+split when it next needs a line, per D60's own rule that a module over the
+limit wants a split and not a bigger limit, and it is recorded here so the
+person who hits it knows it was seen rather than missed.
+
+**What would reopen it.** A concrete capability the macro format cannot
+express, argued as a capability rather than as a language: that is an issue
+against the format (the way #97 and #106 were), not a revival of this row.
+The row itself does not come back -- "build a DSL" has been answered by
+building one.
+
+**Evidence.** Issue #18; spec §12;
+`docs/product/features/deferred-scope-tracking.md`; `src/ghostdriver/workflow.py`
+(948 lines, and the six commits tabled above); `src/ghostdriver/tools/stepper.py`
+(`RUNNABLE_TOOLS`); `src/ghostdriver/tools/macro.py` (400 of 400);
+`docs/MACROS.md`; D57; D31; D32; D48; D62; D59; D60; D33; D#75; D#83; D#84;
+D#85; D#97; D#106; D#112; D#16 and D#17 (the sibling closures, whose pointer
+at this row is disambiguated rather than withdrawn); D#19 (the fourth row,
+unfired rather than built).
+
+### D#46. The portable agent contract branch is 168 commits stale, and stays dropped
+
+**Context.** Issue #46 is a 2026-09-05 archaeology-sweep find. The 2026-09-04
+fleet-wide rollout of a portable Claude/Codex agent contract
+(steiner385/claude-config#15) opened #31 here, proposing to make `.agents/`
+the canonical source and render `CLAUDE.md`, `AGENTS.md` and skills from it.
+#31 was closed the same evening with no comment and no merge; #32 was closed
+as its duplicate. The branch, `chore/portable-agent-contract`, was never
+deleted. #46 asked this session to decide: adopt it (reopening from the
+branch) or opt out.
+
+**The branch is not stale by a little.** Measured against `origin/main`
+today: the merge-base is `465432b`, and `main` has moved 168 commits past it
+while the branch has moved none past its own tip (`c56aff5`, 2026-09-04). The
+diff between them is 188 files, +2894/-24055. That deletion is not
+noise -- it is the entire Linux backend (`src/ghostdriver/backends/linux/*`,
+roughly twenty modules), most of `tests/test_linux_*.py`, the macro tool
+suite (`tools/macro.py`, `tests/test_macro_*.py`), and 4267 of
+`docs/DECISIONS.md`'s current 7282 lines: D57 through D#19, all of the
+`## Revision, 2026-09-02` section and all of `## Iteration 4`. None of that
+existed when the contract branch was cut, so the contract's own diff is not
+what deleted it -- but merging the branch as it stands would still delete
+it, because a merge does not know the difference a rebase would have caught.
+
+**Why #31 reads as deliberate rather than dropped.** The issue's own body
+raises this, and it holds up: `CLAUDE.md` is bespoke -- naming this project's
+own conventions (environment gating, `D#<issue>` numbering, the 400-line
+tool module limit, mypy run once per backend) -- and the contract's
+`core.md` would have replaced it with fleet-generic instructions.
+`docs/DECISIONS.md` describes itself, in its own header, as written so a
+decision "can be *disagreed with* later -- which needs the reason, not just
+the outcome." A contract built to be portable across repos has no channel
+for either -- portability and this project's bespoke conventions are the
+same trade-off, named twice.
+
+**Decision.** Opt out. `chore/portable-agent-contract` is not merged or
+rebased; it is deleted, and this repo keeps its own `CLAUDE.md` and
+`docs/DECISIONS.md` rather than adopting `.agents/`. Concretely:
+
+- The branch is deleted from `origin` -- no open PR points at it, and #31
+  and #32 are both closed.
+- steiner385/claude-config#15's rollout tracker gets a comment recording the
+  opt-out, so the fleet inventory reflects this repo correctly instead of
+  showing a silently dropped PR.
+- Nothing under `src/` or `tests/` changes. There was never a version of the
+  contract that applied to the codebase as it exists today, only to the one
+  168 commits ago.
+
+**What would reopen it.** Not "the fleet standardized and this repo is the
+odd one out" -- that restates the trade-off this entry just made. What would
+reopen it is a contract revision that can carry this repo's own conventions
+(`D#<issue>` numbering, the environment gates, the per-backend mypy split)
+without flattening them into fleet-generic text, cut against `main` as it
+stands rather than against a September snapshot.
+
+**Evidence.** Issue #46; steiner385/claude-config#15; PR #31 (closed, no
+comment, no merge, 2026-09-04); PR #32 (closed as duplicate); branch
+`chore/portable-agent-contract` at `c56aff5`; merge-base `465432b`; `git diff
+--stat origin/main origin/chore/portable-agent-contract` (188 files,
++2894/-24055).
+
+### D#145. The menu's keyboard route confirms each phase, and a result says which routes ran
+
+**Context.** `tests/test_windows_menus.py` began failing intermittently on
+CI with the merge of #139 (D#135), at least ten times in a week, on
+changes that could not reach it. The signature never varied: the item
+resolves, `tier_used` is `None`, no tier's postcondition holds. The ladder
+made it one-way -- `menu_keys` queued a Return and reported delivery; when
+the label had not changed inside the verify window the actuator fell to
+the posted pair, which ends a menu that is not under the pointer (D#135),
+and after that nothing can hold.
+
+**What was measured, and what was not.** Locally the module passed 12 of
+12 runs, and a probe over ten menu openings found the item reading back as
+highlighted after the first `MN_SELECTITEM` every time. So the cause is
+not reproduced on this machine: it needs CI's load. Two candidates stay
+open -- the selection not taking before Return is posted, and Return not
+being consumed (or the owner's handler running late) inside the window.
+The result could not tell them apart, which is the defect that can be
+fixed without knowing which it is (D45).
+
+**Decision.**
+
+- **`menu_keys` confirms each phase and names the one that fails.** The
+  item must read back as highlighted (`MF_HILITE`) before Return is
+  posted; re-selecting while waiting is idempotent. After Return the menu
+  must end, because ending is a menu's answer to Return. Either not
+  happening raises with the count and the milliseconds waited, and the
+  result carries it as `declined`. Return is posted once. This is a wait
+  for a condition, not a retry: nothing is sent twice that could act
+  twice.
+- **The postcondition clock starts when the choice was made.** Because the
+  route returns only once the menu has ended, the verify window no longer
+  begins at "a keystroke was queued". A slow menu costs the time it took
+  and the label still gets its whole window.
+- **A result says which routes ran.** `routes_attempted` rides beside
+  `tiers_attempted` -- two rungs on one tier read `[3, 3]` and said
+  nothing -- and a rung that returned without delivering is recorded in
+  `declined` like one that raised. `declined` is reported on successful
+  results too: a ladder that got there on its second rung says what the
+  first one did.
+- **The tests print the explaining fields.** pytest's truncated repr hid
+  `error` and `declined` in every CI occurrence; the assertions now show
+  them, with the routes and disturbances.
+
+**What this does not claim.** That the flake is fixed. If the cause is the
+handler running late, the second bullet removes it; if it is something
+else, the next occurrence will say so in its own assertion message, which
+is the point.
+
+**Evidence.** `tests/test_windows_menus.py`: Return waits for the
+highlight and is posted once; an item that never highlights is named and
+Return is not posted; a menu that does not end is named; a menu that
+vanishes mid-selection is named; a failed choice reports its routes.
+`tests/test_actuate.py`: routes beside tiers, a quiet decline recorded, an
+unnamed attempt reported by tier. Issue #145; D#135; D45; D28.

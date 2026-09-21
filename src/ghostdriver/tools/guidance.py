@@ -6,6 +6,12 @@ nothing named `probe_grid`. Errors and blocked states are the right place
 to name the tool that addresses them; these are the sentences they use.
 """
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - types only
+    from ..model.window import WindowNode
+    from ..session import Profile
+
 #: Said wherever a block is reported: the moment a caller learns the target
 #: is held is the moment they need the tool that reads what is holding it.
 BLOCKED_HINT = (
@@ -42,6 +48,51 @@ CLIPBOARD_NOT_ALLOWED = (
     "clipboard=true; every format is then saved and put back around each "
     "copy, but choose a moment when they are not copying themselves"
 )
+
+def text_guard(
+    profile: "Profile", node: "WindowNode", locator: str,
+) -> tuple[str | None, str | None]:
+    """Whether a region whose text query answers may be probed anyway.
+
+    Returns `(refusal, waiver)`, at most one of them set. A region `read`
+    already answers is refused, because spending a side effect on something
+    a free call reads is the wrong trade (D46) -- and for a button, whose
+    caption *is* its content, that reasoning holds exactly.
+
+    Measured against a real owner-drawn grid it did not hold (D#1):
+    `WM_GETTEXT` answered `'Character Grid'`, a static accessible name the
+    class sets once, and `read` returned it whatever glyphs were painted
+    inside. The guard refused the very control `probe_grid` exists to
+    reach, and the caller who followed its advice got a plausible,
+    content-free answer with no way to tell it was wrong (#141).
+
+    Nothing available here separates a caption from a label: the text is
+    non-empty in both cases, and a driver that inferred which from the
+    class name would be picking rather than refusing (D33). So the guard
+    stays and the person waives it, per class, in the profile -- a declared
+    fact beating a measured one (D35), the same shape as
+    `posted_click_only` (D#122) and `hover_before_click` (D#133). The
+    waiver is said in the report rather than applied silently: a probe that
+    ran because of a declaration should read as one.
+    """
+    if not node.text:
+        return None, None
+    declared = profile.declares_label_text(node.class_name)
+    if declared is not None:
+        return None, (
+            f"{node.text[:40]!r} is a label, not content: profile "
+            f"text_is_label matches {declared!r}"
+        )
+    named = repr(node.class_name) if node.class_name else "its class"
+    return (
+        f"{locator!r} answers a text query with ({node.text[:40]!r}), so "
+        "probing it would spend a side effect on a region `read` already "
+        "reads. Use `read` -- unless that text is a fixed label the class "
+        "sets once rather than the region's content, which nothing here can "
+        f"measure (D#141). If the operator knows it is, list {named} in the "
+        "profile's `text_is_label` and probe again"
+    ), None
+
 
 #: Carried by a click result when the target's window is not its thread's
 #: active window -- which a second top-level window of the same thread

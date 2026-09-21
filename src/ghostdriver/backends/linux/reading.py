@@ -32,7 +32,7 @@ from typing import Any
 
 from . import protection
 from .deadline import call_with_deadline
-from .tree import _accessible
+from .tree import _accessible, frame_xid_of
 
 
 class CaptureError(RuntimeError):
@@ -170,7 +170,7 @@ def capture_window(
 
     if scale < 1.0:
         raise CaptureError("scale below 1 is not implemented on the Linux backend yet")
-    xid = _toplevel_xid(_accessible(handle))
+    xid = _toplevel_xid(handle)
     if xid is None:
         raise CaptureError(
             "no X window behind this handle. Only a toplevel has one; a "
@@ -208,45 +208,33 @@ def capture_xid(
     return done.stdout, *_png_size(done.stdout)
 
 
-def _toplevel_xid(accessible: Any) -> int | None:
-    """Walk up to the frame, and ask X for the window carrying its pid."""
+def _toplevel_xid(handle: int) -> int | None:
+    """The X window behind the frame holding `handle`, or None (D#101a).
 
-    node = accessible
-    while node is not None:
-        if (call_with_deadline(node.get_role_name) or "") == "frame":
-            break
-        node = call_with_deadline(node.get_parent)
-    if node is None:
-        return None
-    pid = call_with_deadline(node.get_process_id)
-    try:
-        listing = subprocess.run(["xwininfo", "-root", "-children", "-int"],
-                                 capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    for line in listing.stdout.splitlines():
-        parts = line.split()
-        if not parts or not parts[0].isdigit():
-            continue
-        candidate = int(parts[0])
-        if _pid_of(candidate) == pid:
-            return candidate
-    return None
+    This asks the correlation the tree already made when it enumerated the
+    process (`tree.frame_xid_of`, fed by `_correlate_frame`): the frame's
+    accessible name against `_NET_WM_NAME`, and its size where the name
+    alone is ambiguous.
 
+    It used to match on a pid instead -- `xwininfo -root -children`, then
+    `xprop _NET_WM_PID` per candidate -- and that route is wrong in three
+    separate ways, all of them measured rather than reasoned about:
 
-def _pid_of(xid: int) -> int | None:
+    * A sandboxed target's windows carry **no `_NET_WM_PID` at all** (D#101),
+      so every candidate compared `None` and the capture raised "no X window"
+      for a window that was on screen.
+    * The pid it compared against is what AT-SPI reports, which for a Flatpak
+      is the `xdg-dbus-proxy`'s and not the pid the X server knows any window
+      by. Even with the property present the two would not have met.
+    * A pid cannot tell two windows of one process apart, so it returned the
+      first -- and a control inside a modal photographed the window behind it
+      (`tests/linux_xid_probe.py`, the measurement that produced this route).
 
-    try:
-        got = subprocess.run(["xprop", "-id", str(xid), "_NET_WM_PID"],
-                             capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if "=" not in got.stdout:
-        return None
-    try:
-        return int(got.stdout.rsplit("=", 1)[1].strip())
-    except ValueError:
-        return None
+    A frame the tree declined to correlate stays `None` rather than being
+    guessed at (D33); the caller reports "no X window", which is what it
+    already said for a handle with no drawable of its own.
+    """
+    return frame_xid_of(handle)
 
 
 def _png_size(data: bytes) -> tuple[int, int]:
@@ -303,7 +291,7 @@ def ink_fraction(handle: int, *,
     ink. Computed over a downscaled capture so a large region is bounded
     work -- the question is "blank or not", not "what".
     """
-    xid = _toplevel_xid(_accessible(handle))
+    xid = _toplevel_xid(handle)
     if xid is None:
         return 0.0
     return ink_fraction_xid(xid, region=region)

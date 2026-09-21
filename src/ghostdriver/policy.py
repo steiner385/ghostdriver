@@ -136,16 +136,23 @@ def tier_for(tool: str) -> Tier | None:
 class ConsentSource(str, Enum):
     """How a decision about a target was obtained.
 
-    Recorded rather than collapsed to a boolean, because the two carry
+    Recorded rather than collapsed to a boolean, because they carry
     different weight. `elicited` means the server asked and the person
     answered through their own client, which the agent cannot forge.
     `operator_tool` means the agent called `grant_targets` claiming to relay
     an answer — true in practice, since the client shows the call before it
     runs, but an assertion rather than a signature.
+
+    `declared` means the operator wrote the answer into a file in their own
+    directory, ahead of time, about an executable rather than a process
+    (D#125). It is the only source that answers about a target nobody has
+    been asked about *this* run, which is exactly why no tool may write it:
+    the file is the signature.
     """
 
     ELICITED = "elicited"
     OPERATOR_TOOL = "operator_tool"
+    DECLARED = "declared"
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +175,13 @@ class Grant:
     #: Read back from the consent store: made in an earlier server run about
     #: a process that is still running (R1a).
     restored: bool = False
+    #: Set when this decision came from the operator's standing declaration
+    #: rather than from anyone being asked about this running process
+    #: (D#125): the executable path the declaration named. Carried so every
+    #: result that shows the decision also shows that nobody was asked --
+    #: which is the cost D65's "that application, running" promise paid for
+    #: it, and must be visible where it is spent.
+    standing_for: str | None = None
 
     def describe(self) -> str:
         verdict = "allowed" if self.allowed else "restricted"
@@ -175,7 +189,9 @@ class Grant:
         via = (f"via pid {self.inherited_from}, its parent" if self.inherited_from
                else f"via {self.source.value}")
         kept = " [kept from an earlier server run]" if self.restored else ""
-        return f"pid {self.pid} {verdict} {via}{detail}{kept}"
+        standing = (f" [standing declaration for {self.standing_for}; nobody "
+                    "was asked about this process]" if self.standing_for else "")
+        return f"pid {self.pid} {verdict} {via}{detail}{kept}{standing}"
 
     def when(self) -> str:
         return time.strftime("%H:%M:%S", time.localtime(self.at))

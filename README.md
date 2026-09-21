@@ -117,6 +117,31 @@ runs -- across relaunches of the operator app and redeploys of this server
 A restriction is kept the same way. Without an operator directory a
 decision lives for one server run.
 
+**A standing approval, if you want one, is declared by hand.** An
+approval still ends when the target itself restarts -- that is what
+"that application, running" means. For an executable you have already
+decided about for this machine, write
+`standing-consent.json` in the operator directory:
+
+```json
+{
+  "allow": [{"path": "C:\\Program Files\\Vendor\\VendorApp.exe",
+             "note": "the line-of-business client"}],
+  "restrict": ["C:\\Windows\\System32\\mmc.exe"]
+}
+```
+
+**This server reads that file and never writes it, and no tool can** --
+that is the only thing separating an approval you gave from one an agent
+would like you to have given (D#125). It answers *last*: a decision about
+a running pid, or about its parent, always wins, so a declaration cannot
+un-restrict something you ruled out a minute ago. A target approved this
+way says so wherever its grant is shown, because nobody was asked about
+it. Matching is on the executable path alone, so a declaration covers
+every instance of that program -- including one pointed somewhere you
+would not have approved. The path to copy is in the `needs_consent`
+result as `target.exe`.
+
 **Developing it: hot reload.** Set `GHOSTDRIVER_DEV=1` in the server's
 environment and an edit to `tools/` or `backends/` takes effect on the next
 tool call, with open sessions kept. The next result says what reloaded.
@@ -181,7 +206,12 @@ person can see what they are approving. `attach` then asks them directly if
 their client supports elicitation; otherwise it returns `needs_consent` and
 the agent asks in chat and records the answer with `grant_targets`.
 
-Approvals and restrictions last for that session only, can be revised at any
+**How long an approval lasts depends on the configuration, so the tool
+says which case it is in rather than leaving anyone to assume** (#62):
+the elicitation prompt and every `needs_consent` result carry the same
+`lifetime` sentence, naming either "while that process keeps running,
+across restarts of this server" or "this server run only" with the
+environment variable that changes it. A decision can be revised at any
 time, and revoking a target stops a session already using it. A decision
 covers the application's whole process tree: the file dialog a browser
 opens in a helper process is the application the operator approved, not a
@@ -223,7 +253,8 @@ ghostdriver list-workflows
 ghostdriver run-workflow walk-tabs --pid 1234
 ```
 
-The directory holds `profiles/`, `workflows/`, `reports/` and `logs/`,
+The directory holds `profiles/`, `workflows/`, `reports/`, `consent/`,
+the optional `standing-consent.json` described above, and `logs/`,
 where every session's server writes a trace of its tool calls (one JSON
 line per call: session, tool, arguments, outcome, elapsed; pixels left
 out). `ghostdriver trace` prints the recent ones, so what another session

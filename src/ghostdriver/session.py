@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .consent import ConsentStore
+from .consent import ConsentStore, StandingApprovals
 from .ledger import Ledger
 from .model.result import ErrorKind, GhostdriverError
 from .policy import ConsentSource, Grant, Tier, denied, permits, tier_for
@@ -52,11 +52,14 @@ class Profile:
     #: provenance.recorded_against names, so replay can warn on a mismatch (#87).
     profile_id: str = ""
     denylist: tuple[str, ...] = ()
-    #: Denied *places*: {"within": locator, "region": {left, top, right,
+    #: Denied *places*: {"within": locator, "region"?: {left, top, right,
     #: bottom}, "note"?}, the rectangle in the client coordinates of the
     #: window `within` names -- the frame `at` and a capture of it use. A
     #: grid cell or a painted button has no caption and no identity, only a
-    #: place (D72). Any actuation aimed inside one is refused.
+    #: place (D72). Any actuation aimed inside one is refused. An entry
+    #: with no `region` denies the whole of `within` (D#2): the interim
+    #: answer for a control that scrolls, whose content has no fixed
+    #: place a rectangle could hold.
     deny_regions: tuple[dict, ...] = ()
     sensitivity: Sensitivity = field(default_factory=Sensitivity)
     #: What phase 2 is permitted to actuate. Curated only.
@@ -80,6 +83,19 @@ class Profile:
     #: application sets from the real cursor on idle and no posted pair can
     #: create. Declared, because the message is private to one toolkit.
     hover_before_click: tuple[str, ...] = ()
+    #: Control classes (fnmatch patterns) whose window text is a fixed label
+    #: the class sets once, not the region's content (#141). `probe_grid`
+    #: and `grid_seek` refuse a region a text query already answers, because
+    #: spending a side effect on something `read` reads for free is the
+    #: wrong trade (D46) -- and for a button, whose caption *is* its content,
+    #: that holds. Measured against a real owner-drawn grid it did not:
+    #: `WM_GETTEXT` answered with a static accessible name and `read`
+    #: returned it whatever was painted inside, so the guard refused the one
+    #: control the probe exists to reach (D#1). Nothing local tells the two
+    #: apart, and a driver that guessed would be picking rather than
+    #: refusing (D33); a class listed here is declared, and a declared fact
+    #: beats a measured one (D35).
+    text_is_label: tuple[str, ...] = ()
     #: What the operator knows about a control class that a session cannot
     #: measure: {class pattern: note}. Surfaced on every find match and
     #: click result for a matching class (#137). Declared knowledge (D35):
@@ -103,6 +119,16 @@ class Profile:
 
         name = class_name or ""
         return any(fnmatch.fnmatchcase(name, p) for p in self.hover_before_click)
+
+    def declares_label_text(self, class_name: str | None) -> str | None:
+        """The `text_is_label` pattern covering `class_name`, or None."""
+        import fnmatch
+
+        name = class_name or ""
+        for pattern in self.text_is_label:
+            if fnmatch.fnmatchcase(name, pattern):
+                return pattern
+        return None
 
     def pins_to_posted(self, class_name: str | None) -> str | None:
         """The `posted_click_only` pattern that pins `class_name`, or None."""
@@ -147,14 +173,20 @@ class Profile:
                 names.append(entry)
                 continue
             region = entry.get("region") if isinstance(entry, dict) else None
+            # `region` is optional: an entry with none denies the whole of
+            # `within` rather than a rectangle inside it (D#2) -- the
+            # interim answer for a control with no place a fixed rectangle
+            # can hold, because its content scrolls under one.
             if (not isinstance(entry, dict) or not entry.get("within")
-                    or not isinstance(region, dict)
-                    or any(k not in region for k in ("left", "top", "right", "bottom"))):
+                    or (region is not None and (
+                        not isinstance(region, dict)
+                        or any(k not in region for k in ("left", "top", "right", "bottom"))))):
                 raise GhostdriverError(
                     ErrorKind.DENIED_BY_POLICY,
                     f"profile {location} has an unreadable denylist entry {entry!r}: "
-                    "a region entry is {\"within\": <locator>, \"region\": "
-                    "{left, top, right, bottom}, \"note\"?}",
+                    "a place entry is {\"within\": <locator>, \"region\"?: "
+                    "{left, top, right, bottom}, \"note\"?} -- omit \"region\" "
+                    "to deny the whole of \"within\"",
                 )
             regions.append(entry)
         pinned = document.get("posted_click_only") or []
@@ -179,6 +211,13 @@ class Profile:
                 f"profile {location} has an unreadable hover_before_click: a list of "
                 f"window-class patterns, e.g. [\"THtLeftPanel\"]; got {hovered!r}",
             )
+        labelled = document.get("text_is_label") or []
+        if not isinstance(labelled, list) or not all(isinstance(c, str) and c for c in labelled):
+            raise GhostdriverError(
+                ErrorKind.DENIED_BY_POLICY,
+                f"profile {location} has an unreadable text_is_label: a list of "
+                f"window-class patterns, e.g. [\"CharGridWClass\"]; got {labelled!r}",
+            )
         return cls(
             path=location,
             matched_profile=document.get("matched_profile", "unknown"),
@@ -190,6 +229,7 @@ class Profile:
             busy_indicator=document.get("busy_indicator") or None,
             posted_click_only=tuple(pinned),
             hover_before_click=tuple(hovered),
+            text_is_label=tuple(labelled),
             notes=dict(notes),
         )
 
@@ -308,7 +348,8 @@ class SessionManager:
     """
 
     def __init__(self, parent_of: Callable[[int], int | None] = _psutil_parent,
-                 store: ConsentStore | None = None) -> None:
+                 store: ConsentStore | None = None,
+                 standing: StandingApprovals | None = None) -> None:
         self._sessions: dict[str, Session] = {}
         self._grants: dict[int, Grant] = {}
         self._parent_of = parent_of
@@ -318,6 +359,10 @@ class SessionManager:
         self._store = store if store is not None else ConsentStore.from_environment()
         for kept in self._store.load():
             self._grants[kept.pid] = kept
+        # What the operator declared about executables, ahead of time and by
+        # hand (D#125). Read only, and consulted last -- see `grant_for`.
+        self._standing = (standing if standing is not None
+                          else StandingApprovals.from_environment())
         # Approval to *launch* a command, keyed by the command itself --
         # there is no pid to key on until after the launch. Separate from
         # pid grants because launching is a distinct authority from driving
@@ -352,8 +397,21 @@ class SessionManager:
 
     def grant_for(self, pid: int, *,
                   parent_of: Callable[[int], int | None] | None = None) -> Grant | None:
-        """The decision that applies to `pid`: its own, else its nearest
-        decided ancestor's, marked as inherited; None if nobody decided.
+        """The decision that applies to `pid`, in order of specificity:
+        its own, else its nearest decided ancestor's marked as inherited,
+        else the operator's standing declaration about its executable;
+        None if none of the three answers.
+
+        **That order is the decision D#125 settled, and it is here so it is
+        in one place.** D35 says a declared note beats a learned one, which
+        reads at first like the declaration should come first. It does not
+        apply: both sides here are the person, not a person and a
+        measurement. The pid decision is their *later and more specific*
+        answer, about the process actually running, and a file edited last
+        week must never overturn "leave that one alone" said a minute ago --
+        in either direction. So the declaration answers only where nobody
+        answered at all, which is the case it was asked for: a target that
+        restarted while the operator was not looking.
 
         `parent_of` may be supplied for a bulk, informational use -- listing
         every target with its consent -- where one process snapshot answers
@@ -364,22 +422,52 @@ class SessionManager:
         own = self._grants.get(pid)
         if own is not None:
             return own
-        if not self._grants:
-            return None  # nobody has decided anything; no walk can find a decision
-        walk = parent_of or self._parent_of
-        seen = {pid}
-        current = walk(pid)
-        while current is not None and current not in seen:
-            seen.add(current)
-            ancestor = self._grants.get(current)
-            if ancestor is not None:
-                return Grant(pid=pid, allowed=ancestor.allowed, source=ancestor.source,
-                             note=ancestor.note, inherited_from=current)
-            current = walk(current)
-        return None
+        if self._grants:
+            walk = parent_of or self._parent_of
+            seen = {pid}
+            current = walk(pid)
+            while current is not None and current not in seen:
+                seen.add(current)
+                ancestor = self._grants.get(current)
+                if ancestor is not None:
+                    return Grant(pid=pid, allowed=ancestor.allowed,
+                                 source=ancestor.source, note=ancestor.note,
+                                 inherited_from=current)
+                current = walk(current)
+        # Nobody has decided about this process or anything it descends
+        # from. Costs nothing -- and opens no process -- unless the operator
+        # declared something.
+        return self._standing.decide(pid)
 
     def grants(self) -> list[Grant]:
         return list(self._grants.values())
+
+    def consent_lifetime(self) -> str:
+        """How long an approval given now will actually last, on this run.
+
+        One sentence, and it has to be the *true* one. The prompt used to
+        say "this lasts for this session only" whatever was configured,
+        which stopped being true when R1a made approvals outlive the server
+        run -- so half the time the sentence a person read before approving
+        described a different thing from the one they were approving, and
+        the other half it failed to say why they were being asked again
+        (#62). Both halves are the same defect: the lifetime is knowable
+        here, and was not being reported.
+        """
+        if self._store.enabled:
+            return (
+                "This lasts while that process keeps running, including "
+                "across restarts of this server -- and no longer: if the "
+                "application itself restarts, you are asked again."
+            )
+        from .operator import ENV_VAR
+
+        return (
+            "This lasts for this server run only, and will be asked again "
+            "after a restart -- no operator directory is configured, so "
+            f"there is nowhere to keep it. Set {ENV_VAR} to keep approvals "
+            "for as long as the target process runs."
+        )
 
     def record_launch_grant(self, command: list[str], *, allowed: bool,
                             note: str = "") -> None:
@@ -428,14 +516,13 @@ class SessionManager:
         """
         grant = self.grant_for(pid)
         if grant is None:
+            problem = self._standing.problem
             raise ConsentRequired(
                 pid,
                 f"pid {pid} has not been approved for automation in this "
                 "session. Ask the operator which targets to allow, then "
-                "record the answer with grant_targets. (With an operator "
-                "directory configured, approvals are kept while the target "
-                "process lives, across server restarts; without one they "
-                "live for one server run.)",
+                f"record the answer with grant_targets. {self.consent_lifetime()}"
+                + (f" Note: {problem}" if problem else ""),
             )
         if not grant.allowed:
             note = f" ({grant.note})" if grant.note else ""

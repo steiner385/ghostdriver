@@ -172,6 +172,74 @@ def test_no_tool_module_outgrows_the_limit_the_split_set():
     assert not over, f"tool modules over {TOOL_MODULE_LIMIT} lines: {over}"
 
 
+# --- the macro DSL orders tool calls; it does not learn to make them ----------
+
+#: The module that holds the macro/workflow format and its runner.
+RUNNER = "ghostdriver.workflow"
+
+#: What `workflow.py` may import from inside the package, with the reason
+#: beside each. Meant to stay this short. A fourth entry is not forbidden --
+#: it is required to be argued for in docs/DECISIONS.md first, which is what
+#: this list makes unavoidable.
+RUNNER_MAY_IMPORT = {
+    "ghostdriver.tools.stepper": "the shared step gate and dispatch (D#83)",
+    "ghostdriver.tools.recording": "whether a replayed step held now (D#112)",
+    "ghostdriver.policy": "the run recorded as the operator's consent (D57)",
+}
+
+
+def test_the_workflow_runner_reaches_the_target_only_through_its_toolbox():
+    """The guard issue #18 asked for, aimed at the boundary and not the size.
+
+    #18 deferred a "test orchestration and assertion DSL", warning that such
+    a thing "starts as a thin wrapper over the runner and accretes driver
+    logic until the boundary is gone". D#18 found the DSL had been built
+    anyway, as the macro format: `workflow.py` went 297 -> 948 lines over
+    D#84, D#85, D#97, D#106 and D#112, and no commit in that series
+    mentioned the row. The feared creep did not happen -- but the promise
+    that kept it from happening lived in two docstrings, which is exactly
+    where D60 found the module-size promise the day it turned out to be
+    broken.
+
+    The promise, from D57 and from `workflow.py`'s own opening: the runner
+    is *pure with respect to the desktop* -- the toolbox and the watch are
+    handed in. That is what lets it be tested with fakes while the tools are
+    tested against the fixture, and it is what keeps a macro a way to
+    *order* tool calls rather than a second way to make them, outside the
+    allowlist and the per-step re-authorization every leaf goes through.
+
+    A line cap would be the literal reading of #18's analogy and the wrong
+    one: 948 lines of closed-vocabulary parser is not the failure mode. A
+    300-line runner that imported `resolve`, `surface` or a backend is.
+    """
+    modules = _all_modules()
+    assert RUNNER in modules, (
+        f"{RUNNER} is gone or renamed, so this test now checks nothing. The "
+        "macro runner still exists somewhere -- point this at it rather than "
+        "deleting the guard (D#18)."
+    )
+    imported = {m for m in _imported_by(modules[RUNNER], RUNNER) if m in modules}
+
+    extra = sorted(imported - set(RUNNER_MAY_IMPORT))
+    assert not extra, (
+        f"{RUNNER} now imports "
+        + ", ".join(extra)
+        + ". The macro runner reaches the target through the toolbox handed to "
+        "it and through nothing else; an import of its own is the sequencer "
+        "learning to drive. Put it behind the toolbox, or argue for it in "
+        "docs/DECISIONS.md and add it to RUNNER_MAY_IMPORT with its reason."
+    )
+
+    stale = sorted(set(RUNNER_MAY_IMPORT) - imported)
+    assert not stale, (
+        "no longer imported by "
+        + RUNNER
+        + "; remove from RUNNER_MAY_IMPORT: "
+        + ", ".join(stale)
+        + ". The list is only a boundary while every entry is still true."
+    )
+
+
 # --- a test module imports on any host ----------------------------------------
 
 TESTS = Path(__file__).resolve().parent
@@ -180,13 +248,15 @@ TESTS = Path(__file__).resolve().parent
 #: and never imported by the test process, so each is its platform's toolkit at
 #: module scope on purpose.
 IMPORT_TIME_PLATFORM_ALLOWED = {"fixtureapp.py", "fixtureapp_gtk.py",
+                                "fixtureapp_web_gtk.py",
                                 "linux_atspi_probe.py",
                                 "linux_timeout_probe.py",
                                 "linux_tier1_probe.py",
                                 "linux_reading_probe.py",
                                 "linux_watch_probe.py",
                                 "linux_modality_probe.py",
-                                "linux_xid_probe.py"}
+                                "linux_xid_probe.py",
+                                "linux_l8_probe.py"}
 
 #: Test modules that check **platform-neutral policy** and must therefore
 #: run on every platform. A gate on one of these does not skip a Windows
@@ -198,7 +268,9 @@ IMPORT_TIME_PLATFORM_ALLOWED = {"fixtureapp.py", "fixtureapp_gtk.py",
 #: policy is not neutral after all, which is a decision worth writing down.
 MUST_RUN_EVERYWHERE = {"test_tool_contracts.py", "test_modality.py",
                        "test_disturbance.py", "test_backends.py",
-                       "test_mcp_dependency.py"}
+                       "test_mcp_dependency.py", "test_family_watch.py",
+                       "test_lifecycle_policy.py", "test_standing_consent.py",
+                       "test_consent_lifetime.py", "test_grid_label_guard.py"}
 
 
 def _module_level_gate(path) -> str | None:
@@ -438,6 +510,52 @@ def test_numbers_may_skip_and_may_arrive_out_of_order():
     )
 
 
+
+# --- a deferred row that stopped being deferred still says why ----------------
+
+SPEC = (
+    REPO
+    / "docs"
+    / "superpowers"
+    / "specs"
+    / "2026-09-01-desktop-automation-mcp-design.md"
+)
+
+#: A spec section 12 row that no longer defers: `**Answered -- D#19**`, with the
+#: item struck through beside it. The em dash is the one the document uses.
+_ANSWERED_ROW = re.compile(r"\*\*Answered — (D#\d+[a-z]?)\*\*")
+
+
+def test_an_answered_deferred_row_points_at_a_decision_that_exists():
+    """Spec section 12's deferred rows each carried their own reason until
+    they were answered; an answered one carries a pointer instead.
+
+    That trade is only safe while the pointer resolves. D#19 is the case that
+    makes it load-bearing rather than tidy: the `vm` row is *unfired*, not
+    declined, so the trigger that would justify building it now lives in the
+    decision log and nowhere else. A rebase that drops the entry -- and this
+    log conflicts on nearly every rebase, being append-only -- would leave a
+    row reading "answered" with nothing behind it, and the contingency would
+    be gone with no red anywhere.
+
+    D60 is the precedent: a promise kept only in a decision record was broken
+    once, and the repair was to make it a test rather than a convention.
+    """
+    pointers = _ANSWERED_ROW.findall(SPEC.read_text(encoding="utf-8"))
+    assert pointers, (
+        "no answered rows found in spec section 12. Either every deferred row "
+        "is deferred again -- unlikely -- or the row format changed and this "
+        "test now checks nothing. Fix the pattern, do not delete the test."
+    )
+    written = set(_BY_ISSUE.findall(_text()))
+    dangling = sorted({p for p in pointers if p[len("D#") :] not in written})
+    assert not dangling, (
+        "spec section 12 marks a row answered by "
+        + ", ".join(dangling)
+        + ", but docs/DECISIONS.md heads no such entry. The row gave up its "
+        "own reason for that pointer, so an unresolvable one loses the reason "
+        "entirely -- restore the decision rather than the row."
+    )
 
 
 # --- nothing ships a half-finished merge --------------------------------------

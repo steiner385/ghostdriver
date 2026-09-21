@@ -3,7 +3,7 @@
 from ..model.result import ErrorKind, GhostdriverError
 from .acting import _ActingCore
 from .core import _element, _error
-from .guidance import CLIPBOARD_NOT_ALLOWED
+from .guidance import CLIPBOARD_NOT_ALLOWED, text_guard
 
 
 class SeekTools(_ActingCore):
@@ -39,7 +39,10 @@ class SeekTools(_ActingCore):
 
         Full tier, the same rails as `probe_grid`: the region is named by
         the caller and matches exactly one; a denylisted caption, a held
-        application, or a region that already answers `read` is refused.
+        application, or a region that already answers `read` is refused --
+        that last one waived for a class the profile's `text_is_label`
+        names, since a real grid's text query answered with a static label
+        rather than its rows (D#141).
         Paging depends on the grid acting on a posted key, which -- like a
         posted click (D64) -- a control may decline when its window is not
         the thread's active one; a view that never changes says so, and the
@@ -62,9 +65,9 @@ class SeekTools(_ActingCore):
         if session.run(lambda: current().blocking_ancestor(node.handle)) is not None:
             return _error(ErrorKind.NOT_ACTIONABLE,
                           "the application is held by a dialog; deal with it first")
-        if node.text:
-            return _error(ErrorKind.NOT_ACTIONABLE,
-                          f"{locator!r} already answers with text; use `read`, not a seek")
+        refusal, waiver = text_guard(session.profile, node, locator)
+        if refusal is not None:
+            return _error(ErrorKind.NOT_ACTIONABLE, refusal)
         if not session.clipboard:
             return _error(ErrorKind.DENIED_BY_POLICY, CLIPBOARD_NOT_ALLOWED, locator=locator)
         if advance.lower() not in current().NAMED_KEYS:
@@ -118,6 +121,8 @@ class SeekTools(_ActingCore):
             "caveat": caveat or "the clipboard is shared with the person; its "
                       "prior contents were restored after each copy",
         }
+        if waiver is not None:
+            report["text_is_label"] = waiver
         if value is not None:
             report["found"] = match is not None
             if match is not None:
