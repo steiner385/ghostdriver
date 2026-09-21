@@ -438,6 +438,13 @@ MENU_HIGHLIGHT_S = 1.0
 MENU_END_S = 2.0
 MENU_POLL_S = 0.02
 
+#: How long to keep asking a menu window that has not answered *at all*.
+#: Separate from the phases above because it bounds a different thing: not
+#: "has the menu done what was asked" but "has the menu spoken yet". A
+#: loaded machine takes longer to answer without any of it meaning the menu
+#: has gone (#190).
+MENU_ANSWER_S = 1.0
+
 
 def menu_choose(element: AccessibleElement, *, sleep=time.sleep,
                 now=time.monotonic) -> bool:
@@ -466,13 +473,41 @@ def menu_choose(element: AccessibleElement, *, sleep=time.sleep,
     starts when the choice was actually made rather than when a keystroke
     was queued. Not a retry: re-selecting an item is idempotent, and Return
     is posted once.
+
+    **A menu that has not answered is not a menu that has gone (#190).**
+    Every read here goes out as `SendMessageTimeout`, so a machine under
+    load can fail to answer inside the timeout -- which used to read as "no
+    menu" and produced the one diagnosis a caller cannot act on: reopen a
+    menu that never closed. An unanswered read is now waited out against
+    `MENU_ANSWER_S` and counted, and the counts ride in what this raises,
+    because a phase that expired with reads outstanding failed for a
+    different reason than one that expired with the menu answering.
     """
     from . import input as win_input
 
     hwnd = element.host_handle
     index = element.runtime_id[1]
-    state = winapi.popup_menu_item_state(hwnd, index)
-    if state is None:
+    unanswered = 0
+
+    started = now()
+    while True:
+        state = winapi.popup_menu_item_state(hwnd, index)
+        if state is not None:
+            break
+        if not winapi.popup_menu_showing(hwnd):
+            # Silence from a window that is not up is not a late answer.
+            # `IsWindow`/`IsWindowVisible` cost no message and cannot time
+            # out, so they settle the ambiguity the read cannot.
+            state = {"present": False}
+            break
+        unanswered += 1
+        if now() - started >= MENU_ANSWER_S:
+            raise LookupError(
+                f"the menu window did not answer {unanswered} read(s) over "
+                f"{int((now() - started) * 1000)} ms, so whether it is still showing is "
+                "not known; nothing was sent to it")
+        sleep(MENU_POLL_S)
+    if not state["present"]:
         raise LookupError(
             "the menu is no longer showing. If the posted click before this closed it "
             "without acting, this menu hit-tests the real pointer: open it again and "
@@ -483,21 +518,37 @@ def menu_choose(element: AccessibleElement, *, sleep=time.sleep,
     if state["submenu"]:
         return False
     started = now()
-    selects = 0
+    selects = unacknowledged = 0
     while True:
-        winapi.popup_menu_select(hwnd, index)
+        if not winapi.popup_menu_select(hwnd, index):
+            unacknowledged += 1
         selects += 1
         state = winapi.popup_menu_item_state(hwnd, index)
         if state is None:
-            raise LookupError("the menu stopped showing while its item was being selected")
-        if state["highlighted"]:
+            unanswered += 1
+        elif not state["present"]:
+            raise LookupError(
+                f"the menu stopped showing while its item was being selected, after "
+                f"{selects} select(s); nothing was chosen")
+        elif state["highlighted"]:
             break
         if now() - started >= MENU_HIGHLIGHT_S:
             raise LookupError(
                 f"menu item {element.sibling_index} never read back as highlighted: "
-                f"{selects} selects over {int((now() - started) * 1000)} ms, so Return "
-                "was not posted")
+                f"{selects} selects ({unacknowledged} unacknowledged, {unanswered} read(s) "
+                f"unanswered) over {int((now() - started) * 1000)} ms, so Return was not "
+                "posted")
         sleep(MENU_POLL_S)
+
+    if not winapi.popup_menu_showing(hwnd):
+        # The gap the phases left open: the item read as highlighted and the
+        # menu went away before Return could be posted. The menu then ended
+        # with nothing chosen and no keystroke of ours to account for it,
+        # which is what the caller needs told apart from a Return that was
+        # sent and ignored (#190).
+        raise LookupError(
+            f"the menu ended after item {element.sibling_index} read as highlighted and "
+            "before Return was posted, so nothing was chosen")
 
     scan = win_input.user32.MapVirtualKeyW(win_input.VK_RETURN, win_input.MAPVK_VK_TO_VSC)
     down = 1 | (scan << 16)
@@ -513,7 +564,8 @@ def menu_choose(element: AccessibleElement, *, sleep=time.sleep,
         if now() - posted_at >= MENU_END_S:
             raise LookupError(
                 f"Return was posted to highlighted item {element.sibling_index} "
-                f"(after {selects} select(s)) and the menu is still showing "
+                f"(after {selects} select(s), {unanswered} read(s) unanswered) "
+                f"and the menu is still showing "
                 f"{int((now() - posted_at) * 1000)} ms later: its loop has not "
                 "consumed the key")
         sleep(MENU_POLL_S)

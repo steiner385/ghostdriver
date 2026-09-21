@@ -141,12 +141,22 @@ def test_an_item_is_chosen_through_the_menu_s_own_keyboard_route(app):
 # --- each phase of the menu's keyboard route is confirmed (#145) ---------------
 
 class FakeMenu:
-    """The menu as `menu_choose` sees it: when the item starts reading as
-    highlighted, and when the window goes away after Return."""
+    """The menu as `menu_choose` sees it: whether a read is answered at
+    all, when the item starts reading as highlighted, and when the window
+    goes away -- before Return was posted, or after it.
 
-    def __init__(self, *, highlight_after=1, ends_after=1, vanishes=False):
+    `silent_reads` and `silent_selects` are the loaded machine (#190): the
+    window is there and has simply not answered inside the timeout. That
+    is a third thing, distinct from `vanishes` -- the window answering
+    that there is no such menu item -- and from `window_gone`, the window
+    not being up at all."""
+
+    def __init__(self, *, highlight_after=1, ends_after=1, vanishes=False,
+                 silent_reads=0, silent_selects=0, window_gone=False):
         self.highlight_after, self.ends_after, self.vanishes = highlight_after, ends_after, vanishes
-        self.selects = self.showing_reads = self.posted = 0
+        self.silent_reads, self.silent_selects = silent_reads, silent_selects
+        self.window_gone = window_gone
+        self.selects = self.reads = self.showing_reads = self.end_reads = self.posted = 0
         self.t = 0.0
 
     def install(self, monkeypatch):
@@ -161,17 +171,27 @@ class FakeMenu:
 
     def select(self, hwnd, index, **kw):
         self.selects += 1
-        return True
+        return self.selects > self.silent_selects
 
     def state(self, hwnd, index, **kw):
-        if self.vanishes:
+        self.reads += 1
+        if self.reads <= self.silent_reads:
             return None
-        return {"enabled": True, "submenu": False,
+        if self.vanishes:
+            return {"present": False}
+        return {"present": True, "enabled": True, "submenu": False,
                 "highlighted": self.selects >= self.highlight_after}
 
     def showing(self, hwnd):
         self.showing_reads += 1
-        return self.showing_reads < self.ends_after
+        if not self.posted:
+            # Before Return: the reads that ask whether the window is up at
+            # all -- to settle an unanswered read, and once more just before
+            # Return goes out. `ends_after` counts only the reads after it,
+            # as it always did.
+            return not self.window_gone
+        self.end_reads += 1
+        return self.end_reads < self.ends_after
 
     def post(self, hwnd, msg, wparam, lparam):
         self.posted += 1
@@ -229,12 +249,113 @@ def test_a_menu_that_vanishes_mid_selection_is_named(monkeypatch):
     def state(hwnd, index, **kw):
         calls["n"] += 1
         if calls["n"] == 1:
-            return {"enabled": True, "submenu": False, "highlighted": False}
+            return {"present": True, "enabled": True, "submenu": False, "highlighted": False}
         return real_state(hwnd, index, **kw)
 
     monkeypatch.setattr(elements.winapi, "popup_menu_item_state", state)
     with pytest.raises(LookupError, match="stopped showing"):
         elements.menu_choose(item(), sleep=menu.sleep, now=menu.now)
+
+
+# --- a menu that has not answered is not a menu that has gone (#190) ----------
+
+def test_a_menu_that_answers_late_is_waited_for_rather_than_called_gone(monkeypatch):
+    """The read goes out with a timeout, so a loaded machine can fail to
+    answer it. That is what #190 looks like from here, and it must not
+    spend the one diagnosis a caller cannot act on."""
+    menu = FakeMenu(silent_reads=3)
+    elements = menu.install(monkeypatch)
+
+    assert elements.menu_choose(item(), sleep=menu.sleep, now=menu.now) is True
+    assert menu.reads > 3, "it kept asking instead of concluding from silence"
+
+
+def test_a_menu_that_never_answers_is_named_as_unanswered_not_as_gone(monkeypatch):
+    menu = FakeMenu(silent_reads=10**9)
+    elements = menu.install(monkeypatch)
+
+    with pytest.raises(LookupError, match="did not answer") as raised:
+        elements.menu_choose(item(), sleep=menu.sleep, now=menu.now)
+    assert "no longer showing" not in str(raised.value), (
+        "silence is not the menu saying it has gone, and the advice that goes "
+        "with that says to reopen a menu which may never have closed")
+    assert menu.posted == 0, "nothing is sent to a window that has not answered"
+
+
+def test_a_menu_that_answers_that_it_has_gone_says_how_to_ask_for_the_keyboard(monkeypatch):
+    """The other side of the same read: an answer of 'no such item' is the
+    one-way failure D#189 left a way out of, and it is still prompt."""
+    menu = FakeMenu(vanishes=True)
+    elements = menu.install(monkeypatch)
+
+    with pytest.raises(LookupError, match="no longer showing"):
+        elements.menu_choose(item(), sleep=menu.sleep, now=menu.now)
+    assert menu.reads == 1, "an answered read is decisive; there is nothing to wait for"
+
+
+def test_silence_from_a_window_that_is_not_up_is_settled_without_waiting(monkeypatch):
+    """A destroyed window cannot answer a message either, so waiting on it
+    would spend the whole window to reach the wrong conclusion. `IsWindow`
+    needs no message and cannot time out, so it settles what the read
+    cannot -- and the caller gets the answer it can act on."""
+    menu = FakeMenu(silent_reads=10**9, window_gone=True)
+    elements = menu.install(monkeypatch)
+
+    with pytest.raises(LookupError, match="no longer showing"):
+        elements.menu_choose(item(), sleep=menu.sleep, now=menu.now)
+    assert menu.t == 0.0, "it did not wait out MENU_ANSWER_S to say so"
+
+
+def test_a_menu_that_ends_before_return_is_posted_is_named(monkeypatch):
+    """The gap between the phases D#145 added: the item read as highlighted
+    and the menu went away anyway, so it ended with nothing chosen and no
+    keystroke of ours to account for it."""
+    menu = FakeMenu(window_gone=True)
+    elements = menu.install(monkeypatch)
+
+    with pytest.raises(LookupError, match="before Return was posted"):
+        elements.menu_choose(item(), sleep=menu.sleep, now=menu.now)
+    assert menu.posted == 0
+
+
+def test_the_unanswered_reads_and_selects_are_counted_in_what_is_raised(monkeypatch):
+    menu = FakeMenu(highlight_after=10**9, silent_selects=10**9)
+    elements = menu.install(monkeypatch)
+
+    with pytest.raises(LookupError, match="unacknowledged") as raised:
+        elements.menu_choose(item(), sleep=menu.sleep, now=menu.now)
+    assert f"{menu.selects} selects" in str(raised.value)
+
+
+def test_the_read_tells_an_unanswering_window_from_one_with_no_menu(monkeypatch):
+    """The seam the conflation lived at: `send_message_timeout` answers
+    None for a window that did not reply and 0 for one that replied with
+    no menu, and both used to arrive as `None` (#190)."""
+    from ghostdriver.backends.windows import winapi
+
+    monkeypatch.setattr(winapi, "send_message_timeout", lambda *a, **kw: None)
+    assert winapi.popup_menu_item_state(0x1234, 0) is None
+
+    monkeypatch.setattr(winapi, "send_message_timeout", lambda *a, **kw: 0)
+    assert winapi.popup_menu_item_state(0x1234, 0) == {"present": False}
+
+    monkeypatch.setattr(winapi, "send_message_timeout", lambda *a, **kw: 0x99)
+    monkeypatch.setattr(winapi.user32, "GetMenuState", lambda *a: 0xFFFFFFFF)
+    assert winapi.popup_menu_item_state(0x1234, 0) == {"present": False}
+
+    monkeypatch.setattr(winapi.user32, "GetMenuState", lambda *a: winapi.MF_HILITE)
+    assert winapi.popup_menu_item_state(0x1234, 0) == {
+        "present": True, "enabled": True, "submenu": False, "highlighted": True}
+
+
+def test_a_select_the_menu_did_not_acknowledge_is_reported_as_such(monkeypatch):
+    from ghostdriver.backends.windows import winapi
+
+    monkeypatch.setattr(winapi, "send_message_timeout", lambda *a, **kw: None)
+    assert winapi.popup_menu_select(0x1234, 0) is False
+
+    monkeypatch.setattr(winapi, "send_message_timeout", lambda *a, **kw: 0)
+    assert winapi.popup_menu_select(0x1234, 0) is True, "0 is an answer; None is silence"
 
 
 def test_a_failed_choice_says_which_routes_ran(app):

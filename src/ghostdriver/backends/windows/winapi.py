@@ -479,24 +479,39 @@ def to_physical_rect(rect: tuple[int, int, int, int]) -> dict:
 
 def popup_menu_item_state(hwnd: int, index: int, *, timeout_ms: int = 500) -> dict | None:
     """One item's state from the menu a `#32768` window shows: whether it
-    is greyed, and whether it opens a submenu. None when the window no
-    longer shows a menu."""
+    is greyed, and whether it opens a submenu.
+
+    **Three outcomes, not two (#190).** `None` means the window did not
+    answer `MN_GETHMENU` inside `timeout_ms` -- which is what a loaded
+    machine looks like, and says nothing about whether a menu is there.
+    An answer of `{"present": False}` is the window saying there is no
+    such menu item, which is a menu that has ended. Folding the first into
+    the second reported a merely slow menu as a gone one, and sent the
+    caller a message telling it to reopen a menu that was still up.
+    """
     handle = send_message_timeout(hwnd, MN_GETHMENU, 0, 0, timeout_ms=timeout_ms)
-    if not handle:
+    if handle is None:
         return None
+    if not handle:
+        return {"present": False}
     state = user32.GetMenuState(wintypes.HMENU(handle), index, MF_BYPOSITION)
     if state == 0xFFFFFFFF:
-        return None
-    return {"enabled": not (state & MF_DISABLED_OR_GRAYED),
+        return {"present": False}
+    return {"present": True,
+            "enabled": not (state & MF_DISABLED_OR_GRAYED),
             "submenu": bool(state & MF_POPUP),
             "highlighted": bool(state & MF_HILITE)}
 
 
 def popup_menu_select(hwnd: int, index: int, *, timeout_ms: int = 500) -> bool:
     """Highlight item `index` of the popup menu window, the way the arrow
-    keys would; the menu's own selection state, not a pointer."""
-    send_message_timeout(hwnd, MN_SELECTITEM, index, 0, timeout_ms=timeout_ms)
-    return True
+    keys would; the menu's own selection state, not a pointer.
+
+    False when the window did not answer inside `timeout_ms`: a select
+    that was not acknowledged is evidence about the menu's thread, and
+    the caller counts them (#190)."""
+    return send_message_timeout(hwnd, MN_SELECTITEM, index, 0,
+                                timeout_ms=timeout_ms) is not None
 
 
 def popup_menu_showing(hwnd: int) -> bool:

@@ -371,6 +371,35 @@ def test_the_route_of_every_attempt_is_reported_beside_its_tier():
     assert result.declined == {"menu_keys": "returned without delivering"}
 
 
+def test_a_failure_does_not_claim_delivery_its_own_declines_contradict():
+    """The sentence a failed action leads with used to be "every tier
+    delivered" regardless. The two recorded occurrences of #190 are on
+    file described that way, in results whose `declined` said a rung had
+    returned without delivering -- so the first line of the evidence
+    contradicted the fields underneath it."""
+    result = actuator().perform(
+        [Attempt(Tier.WINDOW_MESSAGE, always(False), name="menu_keys"),
+         Attempt(Tier.WINDOW_MESSAGE, always(False), rank=1, name="posted")],
+        expect_after=condition(False, "the label says the item was chosen"),
+    )
+
+    assert not result.ok
+    assert "no route delivered" in result.error["message"]
+    assert "the label says the item was chosen" in result.error["message"]
+    assert "delivered but" not in result.error["message"]
+
+
+def test_a_failure_after_a_route_did_deliver_says_which_one():
+    result = actuator().perform(
+        [Attempt(Tier.WINDOW_MESSAGE, always(True), name="menu_keys"),
+         Attempt(Tier.WINDOW_MESSAGE, always(False), rank=1, name="posted")],
+        expect_after=condition(False, "the label says the item was chosen"),
+    )
+
+    assert "1 of 2 routes delivered (menu_keys)" in result.error["message"]
+    assert "posted: returned without delivering" in result.error["message"]
+
+
 def test_an_unnamed_attempt_is_reported_by_its_tier():
     result = actuator().perform([Attempt(Tier.UIA_PATTERN, always(True))])
     assert result.routes_attempted == ["tier 1"]

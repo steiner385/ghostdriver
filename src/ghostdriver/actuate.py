@@ -191,6 +191,7 @@ class Actuator:
         attempted: list[int] = []
         routes: list[str] = []
         declined: dict[str, str] = {}
+        got_there: list[str] = []
         for attempt in sorted(usable, key=lambda a: (a.rank, a.tier)):
             attempted.append(int(attempt.tier))
             routes.append(attempt.name or f"tier {int(attempt.tier)}")
@@ -208,6 +209,7 @@ class Actuator:
                 declined.setdefault(attempt.name or f"tier {int(attempt.tier)}",
                                     "returned without delivering")
                 continue
+            got_there.append(routes[-1])
 
             if expect_after is None:
                 # Nothing was declared, so nothing is claimed beyond "the
@@ -264,16 +266,33 @@ class Actuator:
                     else ErrorKind.TIER_EXHAUSTED.value
                 ),
                 "message": (
-                    (
-                        "every tier delivered but none produced the expected "
-                        f"result: {expect_after.description if expect_after else '?'}"
-                    )
-                    if failed_after else
-                    f"no tier could act on this element (tried {attempted})"
-                ) + ("; declined: " + "; ".join(f"{k}: {v}" for k, v in declined.items())
-                     if declined else ""),
+                    self._why_not(expect_after, routes, got_there, attempted)
+                    + ("; declined: " + "; ".join(f"{k}: {v}" for k, v in declined.items())
+                       if declined else "")
+                ),
             },
         )
+
+    @staticmethod
+    def _why_not(expect_after: Condition | None, routes: list[str],
+                 got_there: list[str], attempted: list[int]) -> str:
+        """The sentence a failed action leads with.
+
+        It used to read "every tier delivered but none produced the
+        expected result" whatever happened, including in results whose own
+        `declined` said a rung had returned without delivering. Two
+        recorded occurrences of the menu flake are on file described that
+        way. An occurrence that misdescribes itself is worse evidence than
+        none, because this sentence is the one that gets read (#190).
+        """
+        if expect_after is None:
+            return f"no tier could act on this element (tried {attempted})"
+        if not got_there:
+            return ("no route delivered, so nothing could have produced the "
+                    f"expected result: {expect_after.description}")
+        return (f"{len(got_there)} of {len(routes)} routes delivered "
+                f"({', '.join(got_there)}) and none produced the expected "
+                f"result: {expect_after.description}")
 
     def _verified(self, condition: Condition) -> bool:
         """Poll `condition` until it holds or the deadline passes.

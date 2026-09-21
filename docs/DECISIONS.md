@@ -7895,3 +7895,93 @@ two routes flips with `menu_by_keyboard`; the profile key is read and a
 non-boolean refused; a failed choice reports `posted` as its first route;
 the keyboard-route collector test as described. The phase tests from
 D#145 are unchanged. Issue #189; #145; #190; D#135; D#145; D35; D45.
+
+### D#190. A menu that has not answered is not a menu that has gone
+
+**Context.** `menu_keys` failed on CI in about one run in three while
+D#135 made it the first rung, and passes every local run. D#189 moved it
+back to second and put the one fixture test that still drives it behind a
+warning-and-xfail, so the evidence keeps arriving without every session's
+run going red (#190). The cause is still not established, and this record
+is about what the two occurrences on file *do* settle, and about the two
+places the evidence was contradicting itself.
+
+**What the occurrences rule out.** Both showed the menu gone by the time
+the second rung ran, and the label never updated. That kills one of the
+two live hypotheses on its own: if `menu_keys` had merely *mis-read* a
+slow menu as an absent one, the posted pair running immediately afterwards
+would have found the menu still up and chosen the item, because the posted
+pair is what works on this fixture's menus. It did not -- it returned
+without delivering, which on a `#32768` element means the rectangle could
+not be converted through the host window. So in those two runs the menu
+really had ended, with nothing chosen. What remains open is whether Return
+ended it and chose nothing, or whether something else ended it before
+Return could.
+
+**What was wrong with the evidence itself.**
+
+- **A read could not tell silence from an answer.** Every read of a menu
+  goes out as `SendMessageTimeout` with a 500 ms bound, and
+  `popup_menu_item_state` mapped both "the window did not answer" and "the
+  window says there is no such item" onto `None`. `menu_choose` reported
+  that as "the menu is no longer showing", with advice to reopen the menu
+  and ask for the keyboard route -- which is the one instruction a caller
+  cannot act on if the menu never closed. On a loaded runner a late answer
+  is exactly what you expect, so the diagnosis most likely to be wrong was
+  also the one load makes most likely to be given.
+- **A failed action claimed delivery its own fields denied.** The
+  actuator's message read "every tier delivered but none produced the
+  expected result" whatever happened, including in the two #190
+  occurrences, whose `declined` said in the next field along that a rung
+  had returned without delivering. An occurrence that misdescribes itself
+  is worse than no occurrence: it is read first and believed.
+
+**Decision.**
+
+- **The read has three outcomes, not two.** `None` is silence and says
+  nothing about whether a menu is there; `{"present": False}` is the
+  window answering that there is not. Silence is waited out against its
+  own bound, `MENU_ANSWER_S` -- a bound on "has the menu spoken yet",
+  which is a different question from the phases' "has the menu done what
+  was asked" and deserves its own clock.
+- **Silence from a window that is not up is settled without waiting.**
+  `IsWindow`/`IsWindowVisible` send no message and cannot time out, so
+  they answer what the read could not. A menu closed by the posted pair
+  still reports D#189's way out, at once; only a window that is up and
+  quiet pays the wait.
+- **What the phases could not acknowledge, they now count.** An
+  unacknowledged `MN_SELECTITEM` and an unanswered read are tallied and
+  ride in every message the route raises. A highlight phase that expired
+  with reads outstanding failed for a different reason than one that
+  expired with the menu answering promptly, and until now they read the
+  same.
+- **The gap between the phases is closed.** The menu is confirmed still
+  showing immediately before Return is posted. Between the item reading as
+  highlighted and the keystroke going out, the menu could end and the
+  route would blame a Return it had not sent yet. That is named now, and
+  it is one of the two shapes the open cause can take.
+- **A failure says how many routes delivered, and which.** None delivering
+  reads as "no route delivered, so nothing could have produced the
+  expected result"; some delivering names them.
+
+**What this does not claim.** That the flake is fixed. Nothing here has
+been reproduced on a Linux box, and the mechanism that ends the menu with
+nothing chosen is still unidentified. What changed is that the next
+occurrence can say which of the two remaining shapes it is -- the menu
+ending before Return, or Return going out and the menu ending without the
+command -- instead of arriving as a sentence that contradicts the fields
+below it. #190 stays open until an occurrence does that, or until the
+route has been quiet long enough to call it load.
+
+**Evidence.** `tests/test_windows_menus.py`: a menu that answers late is
+waited for rather than called gone; one that never answers is named as
+unanswered and nothing is sent to it; one that answers that it has gone
+still says how to ask for the keyboard route, on the first read; silence
+from a window that is not up is settled with no wait at all; a menu that
+ends between the highlight and Return is named; unacknowledged selects and
+unanswered reads appear in what is raised; the three outcomes of the read
+and the two of the select are pinned at the `winapi` seam. The D#145 phase
+tests are unchanged and still pass. `tests/test_actuate.py`: a failure
+does not claim delivery its own declines contradict, and one that follows
+a route that did deliver names it. Issue #190; #189; #145; D#189; D#145;
+D#135; D45; D10.
