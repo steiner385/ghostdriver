@@ -7623,3 +7623,52 @@ against a 200 ms timeout leaves the clipboard holding exactly what it held
 before (`env: windows`). The fixture now opens the clipboard with its main
 window, as an application does, so the owner names its process. Issue
 #186; D70; D#182.
+### D#182. A copy that did not work is not a page of no rows
+
+**The field report.** `test_a_grid_that_does_not_page_says_the_view_did_not_change`
+failed once on CI with `assert True is False`: `advanced` came back true
+on a fixture grid that ignores PageDown. Same commit, same runner image,
+passed on the attempts either side. The assertion discarded both reads,
+which were the whole of the finding.
+
+**What was found in the code.** `grid_seek` compares each copy with the
+one before it. The copy route can fail without the grid having changed:
+the control did not change the clipboard inside its 1.5 s, or another
+program held the clipboard when it was read. `grid_seek` turned that
+failure into `[]` -- a page of no rows. An empty page followed by the
+real one is two *different* reads, so the loop went round again, found
+the third equal to the second, and reported `reached_end` with
+`pages_read == 3`: exactly the shape `advanced` reads as "the view
+changed". On a loaded runner the first copy timing out is the ordinary
+way to get there. Not proven to be what happened in that run -- the run
+kept nothing to prove it with -- but it is a defect on its own terms: the
+tool said a grid had paged when a copy had failed.
+
+**Decision.**
+
+- **A failed copy is not a page.** It does not count toward `pages_read`,
+  never becomes the page the next one is compared with, and sends no key.
+  The view has not moved, so the same copy is asked for again; two
+  failures running stop the seek, which then says `copy_stopped` and why,
+  with `reached_end: false` -- "the route stopped answering" is not "the
+  value is not in the grid".
+- **Nothing is absorbed.** Every failed copy is listed in `copies_failed`
+  with the route's own reason, including the one a second attempt got
+  past. The clipboard is shared with the person and every other program,
+  so a copy that does not land is an ordinary event, handled the way a
+  postcondition is polled; what D45 forbids is losing the evidence, and
+  the result keeps it.
+- **The result carries what it decided from.** `page_rows`, the row count
+  of each page as read, rides beside `pages_read`. The test prints those
+  fields, so the next occurrence -- if this was not the cause -- shows its
+  reads.
+
+**Not addressed here.** A copy the control answers *after* the timeout
+changes the clipboard once the prior contents have been put back. That is
+the person's clipboard, and it is its own issue.
+
+**Evidence.** `tests/test_windows_grid_seek.py`: a copy that fails once is
+listed and the grid still reads as not advanced, `page_rows == [3, 3]`; a
+route that never answers stops after two, says so, and does not claim the
+end or the value's absence (`env: windows`, the fixture grid, the
+backend's copy route made to fail). Issue #182; D63; D64; D45.

@@ -47,6 +47,8 @@ _STEP_FIELDS = (
     # target unblocked. Dropped once, so a typed value that dismissed its
     # dialog reported only "2 other change(s)" and nothing to act on (#117).
     "disturbances", "live_aborted",
+    # A seek whose copy route failed says so on its step line too (#182).
+    "copies_failed", "copy_stopped",
 )
 
 

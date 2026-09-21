@@ -12,6 +12,11 @@ class SeekTools(_ActingCore):
     #: How many rows a single copy is expected to yield before it is treated
     #: as runaway. A grid page is tens of rows, not thousands.
     _SEEK_MAX_ROWS = 5000
+    #: Copies in a row that may fail before the seek stops and says so. The
+    #: clipboard is shared with the person and with every other program, so
+    #: one copy that did not land is an ordinary event; two running is the
+    #: route not answering (#182).
+    _SEEK_MAX_FAILED_COPIES = 2
 
     def grid_seek(
         self,
@@ -77,12 +82,14 @@ class SeekTools(_ActingCore):
         copy_route = current().copy_route
         verbs = current().verbs
 
-        def copy_rows() -> tuple[list[str], str]:
+        def copy_rows() -> tuple[list[str] | None, str, str]:
+            """The rows in view, or None when the copy did not work -- which
+            is not the same as a page with no rows in it (#182)."""
             result = copy_route(node, want_text=True)
             if not result.worked:
-                return [], result.caveat
+                return None, result.caveat, str(result.detail or "the copy did not work")
             lines = [ln for ln in (result.detail or "").replace("\r\n", "\n").split("\n") if ln]
-            return lines, result.caveat
+            return lines, result.caveat, ""
 
         rows: list[str] = []
         seen: set[str] = set()
@@ -91,10 +98,29 @@ class SeekTools(_ActingCore):
         reached_end = False
         last_page: list[str] | None = None
         caveat = ""
+        page_rows: list[int] = []
+        copies_failed: list[str] = []
+        failed_running = 0
+        copy_stopped = ""
 
         while pages_read < max_pages:
-            page, caveat = session.run(copy_rows)
+            page, caveat, why = session.run(copy_rows)
+            if page is None:
+                # A copy that did not work used to become a page of no rows,
+                # and an empty page followed by the real one read as "the
+                # view changed": `advanced: true` on a grid that cannot page
+                # (#182). It is not a page. The view has not moved -- no key
+                # was sent -- so the same copy is asked for again, and every
+                # failure is kept in the result rather than absorbed.
+                copies_failed.append(why)
+                failed_running += 1
+                if failed_running >= self._SEEK_MAX_FAILED_COPIES:
+                    copy_stopped = why
+                    break
+                continue
+            failed_running = 0
             pages_read += 1
+            page_rows.append(len(page))
             if page == last_page:
                 reached_end = True
                 break
@@ -116,11 +142,22 @@ class SeekTools(_ActingCore):
             "rows": rows,
             "row_count": len(rows),
             "pages_read": pages_read,
+            #: Rows in each page as it was read: what `advanced` and
+            #: `reached_end` were decided from.
+            "page_rows": page_rows,
             "reached_end": reached_end,
             "advance": advance,
             "caveat": caveat or "the clipboard is shared with the person; its "
                       "prior contents were restored after each copy",
         }
+        if copies_failed:
+            report["copies_failed"] = copies_failed
+        if copy_stopped:
+            report["copy_stopped"] = (
+                f"the copy route stopped answering ({copy_stopped}), so the seek "
+                "stopped without reaching the end; what was read before it is in "
+                "rows. The clipboard may be held by another program, or the grid "
+                "may not be answering its Copy command right now")
         if waiver is not None:
             report["text_is_label"] = waiver
         if value is not None:
@@ -133,7 +170,7 @@ class SeekTools(_ActingCore):
                     "appeared on none. To act on a row, capture the page it is "
                     "on and click at its offset, or hand the selection to a person"
                 )
-            else:
+            elif not copy_stopped:
                 report["note"] = (
                     f"stopped at max_pages={max_pages} without finding {value!r} "
                     "or reaching the end; raise max_pages, or the grid may not be "
