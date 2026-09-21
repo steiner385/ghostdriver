@@ -7985,3 +7985,59 @@ tests are unchanged and still pass. `tests/test_actuate.py`: a failure
 does not claim delivery its own declines contradict, and one that follows
 a route that did deliver names it. Issue #190; #189; #145; D#189; D#145;
 D#135; D45; D10.
+
+### D#29. Closed on fixture coverage: the silent-control branch is proven, not observed live
+
+**Context.** D76's Gate 5 ran all six validation gates against a real
+Profile L1 target and found every control on it answered --
+`unresponsive_count` was 0 and nothing reported `<no answer>`. So the one
+branch the gate exists to exercise -- a control that never answers at all,
+as against one that answers with nothing -- had never run against a real
+target. Issue #29 opened to track closing that gap, and named its own
+legitimate way out in advance: observe it opportunistically on a real
+target, "or decide the fixture coverage is sufficient and close this
+saying so, which is a legitimate answer and better than leaving it open
+forever as a reproach."
+
+**Why this session takes that way out.** Manufacturing a genuinely wedged
+control needs a real Win32 application caught at the moment it is hung,
+which cannot be scheduled -- and `env: windows` / `real-target` mean it
+can only be attempted from a Windows box with an operator session, which
+this session does not have (`docs/win-host` is offline). Re-parking the
+issue changes nothing about those odds: a future session with the same
+constraint would face the identical deadlock, on an outcome the issue text
+already treats as acceptable.
+
+**What already stands as proof of the code path.**
+`tests/test_windows_unresponsive.py` exercises a fixture window whose
+owning thread never calls `GetMessage`, so a cross-process `WM_GETTEXT`
+against it hits its own timeout rather than the target answering empty --
+a fixture built specifically because, per its own docstring, "every
+control on every real target measured so far... answers." Three tests
+cover the full path this issue is about: `read_window_text` returns `None`
+rather than `""` for the silent control; `build_tree` marks the node
+`responsive is False` while still carrying `text == ""`; and the CLI
+prints `<no answer>` rather than a blank line. `test_the_window_is_
+otherwise_entirely_normal` confirms the fixture is a faithful stand-in --
+class name and rect answer normally from the kernel, and only the
+message-based read times out, which is exactly the shape of a hung real
+target.
+
+**Decision.** Close #29 on fixture coverage. The code path, the tree flag
+and the CLI rendering are asserted end to end against a deliberately
+silent target built to reproduce the one condition no live target has
+shown yet. What remains unconfirmed is only whether `read`'s timeout is
+tuned correctly for a real application under real load -- not whether the
+branch exists, is reachable, or is reported correctly when reached. That
+narrower question is left open for whoever next has operator access to a
+Windows target and happens to catch one wedged.
+
+**What this does not claim.** That a real control has ever failed to
+answer, or that the timeout value is validated against real load. D76's
+Gate 5 finding stands as written: the `responsive=False` path has run in
+the fixture and nowhere else. This decision closes the issue on the
+fixture being sufficient evidence that the path works, not on the live
+observation having happened.
+
+**Evidence.** `tests/test_windows_unresponsive.py`; `tests/conftest.py`
+(`silent_target`); D76 (Gate 5). Issue #29.
