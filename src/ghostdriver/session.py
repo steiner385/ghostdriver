@@ -102,6 +102,11 @@ class Profile:
     #: "this bar is a mouse affordance for keys the editor binds; use
     #: send_keys on the edit box" is worth more than another hour of clicks.
     notes: dict[str, str] = field(default_factory=dict)
+    #: This target's popup menus hit-test the real pointer, so a posted click
+    #: on an item closes the menu without acting: choose items through the
+    #: menu's own keyboard route first (#189). Declared, because an ordinary
+    #: menu answers the posted pair and that is the default.
+    menus_by_keyboard: bool = False
 
     def note_for(self, class_name: str | None) -> str | None:
         """The operator's note for this class, or None."""
@@ -204,6 +209,13 @@ class Profile:
                 f"profile {location} has an unreadable notes: an object of "
                 f"{{\"<class pattern>\": \"<note>\"}}; got {notes!r}",
             )
+        by_keyboard = document.get("menus_by_keyboard", False)
+        if not isinstance(by_keyboard, bool):
+            raise GhostdriverError(
+                ErrorKind.DENIED_BY_POLICY,
+                f"profile {location} has an unreadable menus_by_keyboard: true or "
+                f"false; got {by_keyboard!r}",
+            )
         hovered = document.get("hover_before_click") or []
         if not isinstance(hovered, list) or not all(isinstance(c, str) and c for c in hovered):
             raise GhostdriverError(
@@ -231,6 +243,7 @@ class Profile:
             hover_before_click=tuple(hovered),
             text_is_label=tuple(labelled),
             notes=dict(notes),
+            menus_by_keyboard=by_keyboard,
         )
 
     @classmethod

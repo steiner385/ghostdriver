@@ -863,11 +863,19 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "foreground. Default (null) lets the profile's hover_before_click "
             "decide; true to try it on a control before listing its class."
         ))] = None,
+        menu_by_keyboard: Annotated[bool | None, Field(description=(
+            "For a popup-menu item (class #32768): choose it through the menu's "
+            "own keyboard route -- select by position, Return to the menu -- "
+            "before the posted click. For a target whose menus close without "
+            "acting on a posted click, because their loop hit-tests the real "
+            "pointer. Default (null) lets the profile's menus_by_keyboard "
+            "decide; an ordinary menu answers the posted click, which goes first."
+        ))] = None,
     ) -> dict[str, Any]:
         return box.click(session_ref, locator, all_windows=all_windows,
                          expect=expect, button=button, modifiers=modifiers,
                          at=at, count=count, frame=frame, require_active=require_active,
-                         hover=hover)
+                         hover=hover, menu_by_keyboard=menu_by_keyboard)
 
     @server.tool(annotations=ACTUATES, description=(
         "Replace a field's contents by typing them. Always reads the field "

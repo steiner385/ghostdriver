@@ -47,7 +47,8 @@ def click(hwnd: int, *, button: str = "left", modifiers=(), at=None,
 
 def click_element(element: AccessibleElement, *, button: str = "left",
                   modifiers=(), at=None, count: int = 1,
-                  hover: bool = False) -> list[Attempt]:
+                  hover: bool = False,
+                  menu_by_keyboard: bool = False) -> list[Attempt]:
     """Actuate an element that is not a window.
 
     **The posted click goes first, and the pattern is the fallback.** That
@@ -74,13 +75,18 @@ def click_element(element: AccessibleElement, *, button: str = "left",
     if button != "left" or modifiers or at is not None or count != 1:
         return [posted]
     if element.class_name == winapi.POPUP_MENU_CLASS:
-        # A menu chooses its own item (#135): the posted pair is hit-tested
-        # against the real pointer by the menu loop and closes the menu
-        # instead. The menu's keyboard route first; the pair only for what
-        # it declines (a submenu).
-        return [Attempt(Tier.WINDOW_MESSAGE, lambda: elements.menu_choose(element),
-                        name="menu_keys"),
-                Attempt(Tier.WINDOW_MESSAGE, posted.run, rank=1, name="posted")]
+        # Two routes into a popup-menu item, and which goes first is a fact
+        # about the target (#189). An ordinary Win32 menu answers the posted
+        # pair, and that is the default: it was stable for weeks, where the
+        # keyboard route put first for everyone (D#135) failed about one CI
+        # run in three for a reason not yet found (#190). A menu whose loop
+        # hit-tests the real pointer closes on the posted pair instead; for
+        # that target the keyboard route goes first, when asked.
+        keys = Attempt(Tier.WINDOW_MESSAGE, lambda: elements.menu_choose(element),
+                       rank=0 if menu_by_keyboard else 1, name="menu_keys")
+        pair = Attempt(Tier.WINDOW_MESSAGE, posted.run,
+                       rank=1 if menu_by_keyboard else 0, name="posted")
+        return [keys, pair]
     return [
         posted,
         Attempt(Tier.UIA_PATTERN, lambda: elements.act_via_pattern(element),

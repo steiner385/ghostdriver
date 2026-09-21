@@ -28,6 +28,7 @@ class ActuationTools(_ActingCore):
         frame: str = "logical",
         require_active: bool = False,
         hover: bool | None = None,
+        menu_by_keyboard: bool | None = None,
     ) -> dict:
         """Actuate one control.
 
@@ -42,6 +43,9 @@ class ActuationTools(_ActingCore):
         `hover` posts the VCL mouse-enter notification before the pair, for
         a control that acts on a click only while it believes the mouse is
         over it; None lets the profile's `hover_before_click` decide (#133).
+        `menu_by_keyboard` chooses a popup-menu item through the menu's own
+        keyboard route before the posted pair, for a menu that hit-tests the
+        real pointer; None lets the profile's `menus_by_keyboard` decide (#189).
         """
         prepared, failure = self._prepared(
             session_id, "click", locator, all_windows, None
@@ -89,8 +93,11 @@ class ActuationTools(_ActingCore):
         node_class = getattr(prepared.node, "class_name", None)
         hover_on = (bool(hover) if hover is not None
                     else prepared.session.profile.wants_hover(node_class))
+        keys_first = (bool(menu_by_keyboard) if menu_by_keyboard is not None
+                      else prepared.session.profile.menus_by_keyboard)
         attempts = (verbs.click_element(prepared.node, button=button, modifiers=held,
-                                        at=point, count=count, hover=hover_on)
+                                        at=point, count=count, hover=hover_on,
+                                        menu_by_keyboard=keys_first)
                     if isinstance(prepared.node, AccessibleElement)
                     else verbs.click(prepared.node.handle, button=button, modifiers=held,
                                      at=point, count=count, hover=hover_on))
