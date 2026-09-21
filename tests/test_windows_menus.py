@@ -59,11 +59,14 @@ def session_for(pid):
                                     tier=Tier.INTERACTIVE).session_id
 
 
-def explain(result: dict) -> dict:
+def explain(result: dict) -> str:
     """The fields that say why a choice failed, for the assertion message:
     pytest truncates the whole result and hid exactly these (#145)."""
-    return {k: result.get(k) for k in ("error", "declined", "tiers_attempted",
-                                       "routes_attempted", "disturbances")}
+    # Text, not a dict: pytest abbreviates a dict in an assertion message
+    # with '...', and hid the one field that mattered on the first CI
+    # occurrence after this was added (#145).
+    return json.dumps({k: result.get(k) for k in ("error", "declined", "tiers_attempted",
+                                       "routes_attempted", "disturbances")}, indent=1, default=str)
 
 
 def open_menu(box, session):

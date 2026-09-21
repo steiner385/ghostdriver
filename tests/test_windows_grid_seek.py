@@ -43,13 +43,16 @@ def stop(proc, handles):
     proc.wait(timeout=5)
 
 
-def explain(read: dict) -> dict:
+def explain(read: dict) -> str:
     """What a seek decided from, for the assertion message: `advanced` is a
     comparison of reads, and a bare `assert True is False` discards both
     (#182)."""
-    return {k: read.get(k) for k in ("advanced", "reached_end", "pages_read", "page_rows",
+    # Text, not a dict: pytest abbreviates a dict in an assertion message
+    # with '...', and hid the one field that mattered on the first CI
+    # occurrence after this was added (#145).
+    return json.dumps({k: read.get(k) for k in ("advanced", "reached_end", "pages_read", "page_rows",
                                      "row_count", "rows", "copies_failed", "copy_stopped",
-                                     "note", "error")}
+                                     "note", "error")}, indent=1, default=str)
 
 
 def full_session(pid):
