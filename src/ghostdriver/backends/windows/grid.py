@@ -30,6 +30,7 @@ posting is fine (contrast D19).
 """
 
 import ctypes
+import threading
 import time
 from ctypes import wintypes
 
@@ -74,6 +75,20 @@ OPEN_RETRY_S = 0.01
 #: How long to wait for the control to answer WM_COPY. It is posted, so the
 #: control handles it on its own thread when it gets to it.
 COPY_TIMEOUT_S = 1.5
+
+#: How long a copy that timed out is still watched for. A posted WM_COPY is
+#: not withdrawn by giving up on it: a control that gets to it late writes
+#: the person's clipboard *after* this route has returned, and nothing used
+#: to put it back (#186).
+LATE_COPY_WATCH_S = 10.0
+LATE_COPY_POLL_S = 0.05
+
+user32.GetClipboardOwner.argtypes = []
+user32.GetClipboardOwner.restype = wintypes.HWND
+
+#: What late answers did, kept until the next copy can say so in its caveat.
+_late_copies: list[str] = []
+_late_lock = threading.Lock()
 
 SHARED_CLIPBOARD_CAVEAT = (
     "the clipboard is the person's: the target's Copy wrote it, and every "
@@ -173,6 +188,61 @@ def focus_route(node: WindowNode) -> RouteResult:
     )
 
 
+def _clipboard_owner_pid() -> int:
+    owner = user32.GetClipboardOwner()
+    return winapi.window_pid(owner) if owner else 0
+
+
+def drain_late_copies() -> list[str]:
+    """What late answers to earlier copies did, once."""
+    with _late_lock:
+        found, _late_copies[:] = list(_late_copies), []
+    return found
+
+
+def watch_for_a_late_answer(target_pid: int, prior: dict, seq: int, *,
+                            watch_s: float | None = None,
+                            sequence=None, owner_pid=None, snapshot=None,
+                            restore=None, sleep=time.sleep, now=time.monotonic) -> str | None:
+    """After a copy timed out: if the target answers late, put the clipboard back.
+
+    The clipboard changing is attributed by its owner. A change owned by
+    the target's process is the late answer, so what was there before is
+    restored and that is recorded. A change owned by anyone else is the
+    person's (or another program's) and is theirs to keep -- it becomes the
+    new "before", because it is what a late answer would now destroy.
+    Returns what was recorded, or None when nothing arrived in time.
+    """
+    sequence = sequence or user32.GetClipboardSequenceNumber
+    owner_pid = owner_pid or _clipboard_owner_pid
+    snapshot = snapshot or snapshot_clipboard
+    restore = restore or restore_clipboard
+    deadline = now() + (LATE_COPY_WATCH_S if watch_s is None else watch_s)
+    while now() < deadline:
+        current = sequence()
+        if current != seq:
+            if owner_pid() == target_pid:
+                try:
+                    restore(prior)
+                    note = ("an earlier copy the target answered late wrote the "
+                            "clipboard after the route had given up; what it held "
+                            "before was put back")
+                except OSError:
+                    note = ("an earlier copy the target answered late wrote the "
+                            "clipboard after the route had given up, and what it "
+                            "held before could NOT be put back")
+                with _late_lock:
+                    _late_copies.append(note)
+                return note
+            try:
+                prior = snapshot()
+            except OSError:
+                pass
+            seq = current
+        sleep(LATE_COPY_POLL_S)
+    return None
+
+
 def copy_route(node: WindowNode, *, want_text: bool = False) -> RouteResult:
     """Ask the region to copy itself, read what it produced, put things back.
 
@@ -205,7 +275,17 @@ def copy_route(node: WindowNode, *, want_text: bool = False) -> RouteResult:
         restore_clipboard(prior)
     except OSError:
         restored = False
+    if text is None:
+        # Nothing arrived in time, which does not mean nothing will (#186).
+        threading.Thread(
+            target=watch_for_a_late_answer,
+            args=(winapi.window_pid(node.handle), prior,
+                  user32.GetClipboardSequenceNumber()),
+            name=f"late-copy-watch-{node.handle:#x}", daemon=True,
+        ).start()
     caveat = SHARED_CLIPBOARD_CAVEAT
+    for late in drain_late_copies():
+        caveat += "; " + late
     if prior["lost"]:
         caveat += (f"; {len(prior['lost'])} format(s) it held (a bitmap or metafile) "
                    "could not be copied from here and are gone")
@@ -221,7 +301,9 @@ def copy_route(node: WindowNode, *, want_text: bool = False) -> RouteResult:
         detail=(
             ((text or "") if want_text else f"{lines} line(s) of tab-delimited text")
             if ok else
-            ("the control did not change the clipboard" if text is None
+            ("the control did not change the clipboard within "
+             f"{COPY_TIMEOUT_S:g}s; it is watched for a late answer for "
+             f"{LATE_COPY_WATCH_S:g}s and put back if one arrives" if text is None
              else "the control copied something, but not grid-shaped text")
         ),
     )

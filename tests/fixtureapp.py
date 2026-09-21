@@ -445,8 +445,10 @@ GMEM_MOVEABLE = 0x0002
 
 
 def _put_text_on_clipboard(text: str) -> None:
-    """Own the clipboard briefly and leave `text` on it, as a grid would."""
-    if not user32.OpenClipboard(None):
+    """Own the clipboard briefly and leave `text` on it, as a grid would.
+    Opened with the main window, the way an application does, so the
+    clipboard's owner names this process (#186)."""
+    if not user32.OpenClipboard(wintypes.HWND(_STATE.get("main") or 0)):
         return
     try:
         user32.EmptyClipboard()
@@ -545,6 +547,18 @@ def _grid_proc(hwnd, msg, wparam, lparam):
             _STATE["grid_offset"] = min(_STATE.get("grid_offset", 0) + GRID_PAGE_SIZE, last)
         elif wparam == VK_PRIOR:
             _STATE["grid_offset"] = max(_STATE.get("grid_offset", 0) - GRID_PAGE_SIZE, 0)
+        return 0
+    if msg == WM_COPY and _STATE.get("grid_copy_after_ms") and not _STATE.get("grid_copy_due"):
+        # A grid that gets to its Copy command late (#186): the rows land on
+        # the clipboard this many ms after they were asked for.
+        _STATE["grid_copy_due"] = True
+        user32.SetTimer(wintypes.HWND(hwnd), ctypes.c_void_p(7),
+                        int(_STATE["grid_copy_after_ms"]), None)
+        return 0
+    if msg == WM_TIMER and wparam == 7:
+        user32.KillTimer(wintypes.HWND(hwnd), ctypes.c_void_p(7))
+        _put_text_on_clipboard("\r\n".join("\t".join(row) for row in GRID_ROWS) + "\r\n")
+        _STATE["grid_copy_due"] = False
         return 0
     if msg == WM_COPY and _STATE.get("grid_copies", True):
         # Section 10 item 3, the other half: an owner-drawn grid that will
@@ -904,6 +918,7 @@ def build(options) -> dict:
     _STATE["grid_copies"] = options.grid_copies
     _STATE["grid_needs_active"] = options.grid_needs_active
     _STATE["grid_pages"] = options.grid_pages
+    _STATE["grid_copy_after_ms"] = options.grid_copy_after
     _STATE["grid_offset"] = 0
 
     def child(cls, text, sx, sy, w, h, parent=main, extra=0, exstyle=0):
@@ -1080,6 +1095,8 @@ def main(argv=None) -> None:
                         help="also show an owner-drawn grid whose class answers "
                              "a text query with a fixed label, the way a real "
                              "one does (#141)")
+    parser.add_argument("--grid-copy-after", type=int, default=0, metavar="MS",
+                        help="the grid answers WM_COPY this many ms late (#186)")
     parser.add_argument("--grid-no-copy", dest="grid_copies",
                         action="store_false",
                         help="Make the grid ignore WM_COPY, so the probe's "
