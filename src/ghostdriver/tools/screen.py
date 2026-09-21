@@ -7,11 +7,43 @@ forward on request (D73), the pair to isolation=minimized.
 
 import base64
 
-from ..backends import current
+from ..backends import UnsupportedPlatform, current
 from ..model.element import AccessibleElement
 from ..model.result import ErrorKind, GhostdriverError
+from ..model.window import WindowNode
+from ..surface import Access, SurfaceKind, classify_node
 from .core import _error, _physical, _ToolboxCore
 from .geometry import _top_level_holding, _top_level_overlapping
+
+
+def _judge_by_pixels(node: WindowNode) -> dict | None:
+    """This control's "state unknowable from window messages, judge by
+    pixels" verdict -- absent unless it is exactly that (D#63).
+
+    `capture` has already resolved one node for a locator; classifying it
+    costs one region's worth of evidence, not a walk over the whole tree,
+    which is why `find` does not do this for every row of a listing (D#51)
+    but a single captured control can. Silent for every other verdict --
+    native, web, unknown -- because those are not the case `enabled` gets
+    wrong (D#51) and flagging them here would be noise with no caller to
+    read it, the `actionable`-only-when-False discipline (D66) applied to a
+    second field.
+    """
+    try:
+        gather = current().region_evidence
+    except UnsupportedPlatform:
+        return None
+    region = classify_node(node, gather)
+    if region.kind is not SurfaceKind.OWNER_DRAWN or region.access is not Access.PIXELS:
+        return None
+    return {
+        "kind": region.kind.value,
+        "access": region.access.value,
+        "reason": region.reason,
+        "note": "state is unknowable from window messages here -- `enabled` "
+                "is not proof of anything (D#51) -- so judge this control by "
+                "the pixels above",
+    }
 
 
 class ScreenTools(_ToolboxCore):
@@ -85,7 +117,13 @@ class ScreenTools(_ToolboxCore):
         frame: str = "logical",
         scale: float = 1.0,
     ) -> dict:
-        """A PNG of the target's window, or of one region of it."""
+        """A PNG of the target's window, or of one region of it.
+
+        Given `locator`, the result carries `surface` when -- and only when
+        -- the located control paints its own contents: `enabled` cannot
+        answer for such a control (D#51), and this says so on the one
+        result where classifying it costs nothing extra (D#63).
+        """
         try:
             session = self.sessions.authorize(session_id, "capture")
         except GhostdriverError as exc:
@@ -113,6 +151,10 @@ class ScreenTools(_ToolboxCore):
                           f"pid {session.pid} has no windows on this desktop")
         main = self._trees(session, all_windows=False)
         target, crop = (main[0] if main else trees[0]), None
+        # Set only for a located WindowNode -- the one case classifying it
+        # costs nothing extra: `capture` already resolved exactly this node
+        # and nothing else (D#63).
+        pixel_judged_node: WindowNode | None = None
 
         if locator:
             try:
@@ -130,6 +172,8 @@ class ScreenTools(_ToolboxCore):
                     locator=locator,
                 )
             match = matches[0]
+            if not isinstance(match, AccessibleElement):
+                pixel_judged_node = match
             holder = _top_level_holding(trees, match.handle)
             if holder is None:
                 return _error(ErrorKind.NOT_FOUND,
@@ -182,6 +226,10 @@ class ScreenTools(_ToolboxCore):
             },
             "base64": base64.b64encode(png).decode("ascii"),
         }
+        if pixel_judged_node is not None:
+            surface = _judge_by_pixels(pixel_judged_node)
+            if surface is not None:
+                result["surface"] = surface
         if scale < 1:
             # Said in the result, because every other rect this tool reports
             # is still full size: a pixel here is at (x / scale, y / scale)

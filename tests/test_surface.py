@@ -14,6 +14,7 @@ from ghostdriver.surface import (
     Region,
     RegionEvidence,
     SurfaceKind,
+    classify_node,
     classify_region,
     map_digest,
     needs_other_mechanism,
@@ -297,6 +298,52 @@ def test_the_actionable_subset_is_chosen_by_access_not_by_kind():
     ])
     regions = surface_map(tree)
     assert [r.class_name for r in needs_other_mechanism(regions)] == ["Canvas"]
+
+
+# --- classifying one already-resolved node, without a tree walk (D#63) ----
+
+def test_classify_node_agrees_with_surface_map_for_the_same_node():
+    """`capture`, given a locator, holds one already-resolved node -- not a
+    tree to walk. `classify_node` has to answer that node the same way
+    `surface_map` would if it walked past it."""
+    canvas = node(class_name="Canvas", handle=2, w=900, h=600)
+    tree = node(class_name="Shell", handle=1, children=[canvas])
+
+    def gather(n):
+        return RegionEvidence(accessible_elements=0)
+
+    (walked,) = [r for r in surface_map(tree, gather) if r.class_name == "Canvas"]
+    resolved = classify_node(canvas, gather)
+
+    assert (resolved.kind, resolved.access, resolved.reason) == (
+        walked.kind, walked.access, walked.reason)
+
+
+def test_classify_node_gathers_only_when_undecided():
+    """The single-node path pays the same cost `surface_map` does: a node a
+    window tree alone decides never reaches `gather`."""
+    asked = []
+
+    def gather(n):
+        asked.append(n.class_name)
+        return RegionEvidence(accessible_elements=0)
+
+    decided = node(class_name="Decided_HasText", text="Save", w=900, h=600)
+    assert classify_node(decided, gather).kind is SurfaceKind.NATIVE
+    assert asked == []
+
+    undecided = node(class_name="Undecided_BigAndSilent", w=900, h=600)
+    classify_node(undecided, gather)
+    assert asked == ["Undecided_BigAndSilent"]
+
+
+def test_classify_node_without_gather_can_only_over_report_owner_drawn():
+    """No `gather` at all -- the honest degradation `surface_map` already
+    promises -- still returns a verdict, just the conservative one."""
+    silent_big = node(class_name="Canvas", w=900, h=600)
+    region = classify_node(silent_big)
+    assert region.kind is SurfaceKind.OWNER_DRAWN
+    assert region.access is Access.PIXELS
 
 
 # --- change detection -----------------------------------------------------
