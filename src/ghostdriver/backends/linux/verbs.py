@@ -170,7 +170,8 @@ def set_text_element(element: AccessibleElement, text: str, *,
 
 def click_element(element: AccessibleElement, *, button: str = "left",
                   modifiers=(), at=None, count: int = 1,
-                  hover: bool = False) -> list[Attempt]:
+                  hover: bool = False,
+                  menu_by_keyboard: bool = False) -> list[Attempt]:
     """The element form of `click`, and the same refusal for the variants."""
     return click(element.handle, button=button, modifiers=modifiers,
                  at=at, count=count)

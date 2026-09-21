@@ -473,7 +473,10 @@ def menu_choose(element: AccessibleElement, *, sleep=time.sleep,
     index = element.runtime_id[1]
     state = winapi.popup_menu_item_state(hwnd, index)
     if state is None:
-        raise LookupError("the menu is no longer showing; open it again before choosing")
+        raise LookupError(
+            "the menu is no longer showing. If the posted click before this closed it "
+            "without acting, this menu hit-tests the real pointer: open it again and "
+            "click with menu_by_keyboard=true, or set menus_by_keyboard in the profile")
     if not state["enabled"]:
         raise LookupError(f"menu item {element.sibling_index} is greyed out; the "
                           "application is not offering it right now")

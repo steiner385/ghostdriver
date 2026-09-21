@@ -7849,3 +7849,49 @@ against a 200 ms timeout leaves the clipboard holding exactly what it held
 before (`env: windows`). The fixture now opens the clipboard with its main
 window, as an application does, so the owner names its process. Issue
 #186; D70; D#182.
+
+### D#189. A menu item: the posted pair first, the menu's keyboard route on request
+
+**Context.** D#135 put the menu's keyboard route (`menu_keys`: select by
+position, Return to the menu window) first for every `#32768` item, on
+the strength of one target whose menus close on a posted click. From the
+merge of that change, `tests/test_windows_menus.py` failed on CI in about
+one run in three, on changes that could not reach it, and was the main
+source of red runs for every session for a week (#145). The route passes
+every local run. Instrumented in D#145, the two occurrences that followed
+showed the menu already gone when the second rung ran and the handler
+never having updated the label; why is still not known (#190).
+
+**What was wrong with D#135 as a default.** It generalised a fact about
+one target to all of them. An ordinary Win32 menu answers the posted pair
+at an item's rectangle -- the fixture's does, and did, stably, for weeks.
+A menu whose modal loop hit-tests the real pointer is the exception, and
+an exception is what a profile is for (D35).
+
+**Decision.**
+
+- **The posted pair is the first rung again**, and `menu_keys` the second.
+- **The keyboard route goes first when asked:** per call with
+  `menu_by_keyboard: true`, or declared for the target with
+  `menus_by_keyboard: true` in its profile.
+- **The one-way failure says how to get out of it.** When the posted pair
+  has closed a menu that needed the keyboard, `menu_keys` finds no menu;
+  its decline reason now says that this is what that looks like, and to
+  open the menu again and ask for the keyboard route.
+- **The route's CI failures are recorded, not blocking.** One fixture test
+  still drives the keyboard route. When it fails it raises a pytest
+  warning carrying the full explanation and xfails: a warning reaches the
+  log under `-q` where an xfail reason does not, so the evidence D45 says
+  to keep is kept, without every other session's run going red for a
+  route that is no longer the default. Tracked in #190.
+
+**What this costs.** On the target that motivated D#135, a first click on
+a menu item now closes the menu and fails, once, with the message telling
+the caller what to set. After that the profile carries it.
+
+**Evidence.** `tests/test_windows_menus.py`: an ordinary menu is chosen by
+the posted pair with `routes_attempted == ["posted"]`; the order of the
+two routes flips with `menu_by_keyboard`; the profile key is read and a
+non-boolean refused; a failed choice reports `posted` as its first route;
+the keyboard-route collector test as described. The phase tests from
+D#145 are unchanged. Issue #189; #145; #190; D#135; D#145; D35; D45.

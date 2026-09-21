@@ -170,6 +170,21 @@ foreground, nothing the operator notices. Declared rather than automatic
 because the message is private to one toolkit; `click` also takes a
 per-call `hover` to try it before listing a class.
 
+## `menus_by_keyboard` (D#189)
+
+```json
+"menus_by_keyboard": true
+```
+
+For a target whose popup menus hit-test the real pointer: a posted click
+on an item lands "outside" the menu and closes it without acting. With this
+set, a menu item is chosen through the menu's own keyboard route first
+(select by position, Return to the menu window) and the posted pair only
+second. The default is the other way round, because an ordinary menu
+answers the posted pair. `click` takes a per-call `menu_by_keyboard` to try
+it before declaring it. Set it after seeing a menu close with no effect
+and `routes_attempted` starting with `posted`.
+
 ## `notes` (D#137)
 
 What the operator knows about a control class that a session cannot
