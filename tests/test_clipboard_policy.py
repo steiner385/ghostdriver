@@ -150,3 +150,83 @@ def test_a_snapshot_round_trips_every_global_format():
     assert restored == len(before["formats"])
     assert [f for f, _ in after["formats"]] == [f for f, _ in before["formats"]]
     assert [d for _, d in after["formats"]] == [d for _, d in before["formats"]]
+
+
+# --- a copy answered after the route gave up (#186) ----------------------------
+
+def test_a_late_answer_owned_by_the_target_is_put_back():
+    from ghostdriver.backends.windows.grid import drain_late_copies, watch_for_a_late_answer
+
+    drain_late_copies()
+    seqs = iter([5, 5, 6])
+    restored = []
+    note = watch_for_a_late_answer(
+        42, {"formats": ["prior"]}, 5, watch_s=1.0,
+        sequence=lambda: next(seqs), owner_pid=lambda: 42,
+        snapshot=lambda: {"formats": ["other"]}, restore=restored.append,
+        sleep=lambda s: None)
+
+    assert restored == [{"formats": ["prior"]}]
+    assert "put back" in note and drain_late_copies() == [note]
+
+
+def test_a_change_the_target_does_not_own_is_left_alone_and_becomes_the_new_before():
+    """The person copied something while the late answer was pending: it is
+    theirs, and it is what a late answer would now destroy."""
+    from ghostdriver.backends.windows.grid import drain_late_copies, watch_for_a_late_answer
+
+    drain_late_copies()
+    seqs = iter([6, 7])            # the person's copy, then the target's late answer
+    owners = iter([999, 42])
+    restored = []
+    watch_for_a_late_answer(
+        42, {"formats": ["prior"]}, 5, watch_s=1.0,
+        sequence=lambda: next(seqs), owner_pid=lambda: next(owners),
+        snapshot=lambda: {"formats": ["the person's copy"]}, restore=restored.append,
+        sleep=lambda s: None)
+
+    assert restored == [{"formats": ["the person's copy"]}], "their copy is what is put back"
+
+
+def test_nothing_arriving_in_time_records_nothing():
+    from ghostdriver.backends.windows.grid import drain_late_copies, watch_for_a_late_answer
+
+    drain_late_copies()
+    clock = iter(x * 0.5 for x in range(100))
+    assert watch_for_a_late_answer(
+        42, {}, 5, watch_s=1.0, sequence=lambda: 5, owner_pid=lambda: 0,
+        snapshot=dict, restore=lambda p: None, sleep=lambda s: None,
+        now=lambda: next(clock)) is None
+    assert drain_late_copies() == []
+
+
+def test_a_grid_that_answers_after_the_timeout_does_not_keep_the_clipboard(monkeypatch):
+    """End to end against a fixture grid that copies 600 ms late, with the
+    route giving up at 200 ms: the rows land after the route returned, and
+    the clipboard ends up holding what it held before."""
+    from ghostdriver.backends.windows import grid
+    from ghostdriver.backends.windows.enumerate import enumerate_process
+
+    monkeypatch.setattr(grid, "COPY_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(grid, "LATE_COPY_WATCH_S", 4.0)
+    proc, handles = start("--grid-copy-after", "600")
+    try:
+        node = next(n for tree in enumerate_process(handles["pid"]) for n in tree.walk()
+                    if n.class_name == "GhostFixtureDataGrid")
+        grid.drain_late_copies()
+        before = grid.snapshot_clipboard()
+
+        result = grid.copy_route(node, want_text=True)
+
+        assert not result.worked and "late answer" in result.detail
+        deadline = time.monotonic() + 4.0
+        late: list[str] = []
+        while not late and time.monotonic() < deadline:
+            late = grid.drain_late_copies()
+            time.sleep(0.05)
+        after = grid.snapshot_clipboard()
+
+        assert late and "put back" in late[0], late
+        assert [d for _, d in after["formats"]] == [d for _, d in before["formats"]]
+    finally:
+        stop(proc, handles)
