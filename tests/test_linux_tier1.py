@@ -21,11 +21,11 @@ import shutil
 import signal
 import subprocess
 import sys
-import time
 
 import pytest
 
 from tests.conftest import on_linux
+from tests.linux_probe_support import collect, describe
 
 pytestmark = [on_linux, pytest.mark.slow]
 
@@ -52,14 +52,13 @@ def tier1():
         env=dict(os.environ, DISPLAY=DISPLAY, GSETTINGS_BACKEND="memory",
                  GDK_BACKEND="x11", PYTHONPATH="src"),
     )
-    line, deadline = None, time.monotonic() + 180
+    # `collect` reads on a thread against a real deadline and keeps the
+    # streamed timing records, so a probe that stalls still leaves a trace
+    # and a probe that goes silent does not block the run (#163). The loop
+    # this replaces checked its deadline inside `for out in probe.stdout:`,
+    # which only expires when a line arrives.
     try:
-        for out in probe.stdout:
-            if out.startswith("{") and '"drawn_button"' in out:
-                line = out
-                break
-            if time.monotonic() > deadline:
-                break
+        line, trace = collect(probe.stdout, '"drawn_button"', 180)
     finally:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(os.getpgid(probe.pid), signal.SIGTERM)
@@ -69,8 +68,24 @@ def tier1():
         server.wait(timeout=10)
 
     if line is None:
-        pytest.skip("the tier-1 probe produced no report")
-    return json.loads(line)
+        pytest.skip("the tier-1 probe produced no report. What it did get through:\n"
+                    + describe(trace))
+    report = json.loads(line)
+
+    # #163. The probe used to reach for the fixture's accessible after a flat
+    # `sleep(3)`, and `next()` over an empty match raises `StopIteration` --
+    # inside a probe whose stderr is `DEVNULL`, that surfaced as the report
+    # never arriving, which reads the same as the whole AT-SPI stack being
+    # absent. It now waits for the application and says so when it never came.
+    if report.get("aborted"):
+        pytest.skip(report["aborted"] + "\n" + describe(report.get("timing")))
+    return report
+
+
+def _why(report):
+    """What the probe's clock says, appended to the assertions a slow pipe
+    can starve (#163)."""
+    return "\nprobe timings:\n" + describe(report.get("timing"))
 
 
 def test_a_real_button_is_driven_by_the_accessibility_api(tier1):
@@ -79,6 +94,7 @@ def test_a_real_button_is_driven_by_the_accessibility_api(tier1):
     assert tier1["real_button"]["do_action"] is True
     assert any(e.get("event") == "applied" for e in tier1["real_button"]["events"]), (
         "the action reported success without the application doing anything"
+        + _why(tier1)
     )
 
 
@@ -106,11 +122,13 @@ def test_writing_a_value_goes_through_the_toolkit_not_around_it(tier1):
     assert "EditableText" in entry["interfaces"]
     assert entry["set_text"] is True
     assert entry["before"] == "original"
-    assert entry["after"] == "written-by-atspi"
+    assert entry["after"] == "written-by-atspi", _why(tier1)
 
     changed = [e for e in entry["events"] if e.get("event") == "bound_changed"]
-    assert changed, "the binding never heard of the write -- this is D21's split"
-    assert changed[-1]["text"] == "written-by-atspi"
+    assert changed, (
+        "the binding never heard of the write -- this is D21's split" + _why(tier1)
+    )
+    assert changed[-1]["text"] == "written-by-atspi", _why(tier1)
 
 
 def test_the_write_is_a_delete_then_an_insert_and_a_binding_sees_both(tier1):
@@ -124,9 +142,10 @@ def test_the_write_is_a_delete_then_an_insert_and_a_binding_sees_both(tier1):
     """
     changed = [e for e in tier1["bound_entry"]["events"]
                if e.get("event") == "bound_changed"]
-    assert len(changed) >= 2, changed
+    assert len(changed) >= 2, str(changed) + _why(tier1)
     assert changed[0]["text"] == "", (
         "expected the clear-then-insert to show an empty intermediate state"
+        + _why(tier1)
     )
 
 

@@ -6429,6 +6429,193 @@ Linux; the trimmed modules still collect cleanly.
 `tests/test_structure.py`'s `MUST_RUN_EVERYWHERE`; `tests/test_tool_contracts.py`;
 `tests/test_family_watch.py`; `tests/test_lifecycle_policy.py`.
 
+### D#163. The Linux flake was fixed sleeps racing undeclared fixture timers, and the timers are now declared
+
+**Context.** Across three full-suite runs on one Linux box, one session, one
+interpreter, the failing set was different every time: `restore`×1 /
+`restore`×1+`slice3`×4+`tier1`×1+`watch`×2 / `restore`×1+`watch`×4, over an
+identical 1309 collected. Run duration for identical work varied 387s-681s.
+The four modules run *alone* gave a fourth distinct set, `3 failed, 17
+passed`, which said the preceding ~1300 tests were changing the outcome.
+
+D45 is the standing rule: an intermittent failure gets instrumented, never
+retried, because a retry takes the evidence with it. The sample assertion in
+#163 is what that rule was asking for and not getting:
+
+```
+>       assert watched["any_capture"] is True, watched["events"]
+E       AssertionError: []
+```
+
+It reports *that* nothing arrived and not *why* -- no window id, no timings,
+no indication whether the watch was even running when the target moved.
+
+**What it was.** Not four flakes; one mistake made in four places. Every
+nested-display probe bounded its steps with a fixed `sleep`, and two
+different guesses hide under that word.
+
+*A dwell after an action.* `xdotool windowactivate` then `sleep 2`, then read
+`_NET_ACTIVE_WINDOW`. Under load GNOME Shell has not finished, so the probe
+photographs the previous state and the assertion reports a window manager
+that did not activate. This is `test_restoring_a_window_necessarily_focuses_it`
+-- the one constant failure, and constant because a full suite is reliably
+slower than a lone module. `linux_l7_probe.sh` already contained the right
+shape one function above the bug: `focus()` polls until `_NET_ACTIVE_WINDOW`
+agrees, and never flaked.
+
+Worth being exact about what was reproduced: the manufactured load below
+bites one step earlier, on the `sleep 2.5` after `windowminimize`, and
+aborts the control rather than failing the measurement. Same script, same
+mistake, different sleep -- which is the argument for fixing the pattern
+rather than the one line #163 happened to name.
+
+*A budget before a timer.* `tests/fixtureapp_gtk.py` arms its disruptions with
+`GLib.timeout_add(options.modal_after, ...)` -- absolute, from the app's own
+start. A probe sampling the calm state *before* the disruption is racing that
+timer with its own setup work, and nothing in the probes said so. Slice 3 had
+9s to do three contract calls and a full `enumerate_process` AT-SPI tree walk;
+when the walk overran, the modal was already up, and the four tests that read
+`before` failed on "a modal before one was raised". They were right. There
+was one. That `slice3`×4 is exactly the four tests reading `before` is what
+identified the mechanism.
+
+**Decision.** `tests/linux_probe_support.py`, and four probes rewritten
+against it.
+
+1. **Where a condition exists, wait for it and record the wait.** `settle()`
+   polls, stops the moment the condition holds, and returns a record: `ok`,
+   `seconds`, `timeout`, `polls`, last error. Not a retry under D45 -- the
+   condition is the window manager finishing the action just requested, and
+   the measurement is still taken exactly once, afterwards. What the fixed
+   sleep threw away was the number, and the number is the diagnosis.
+
+2. **Where no condition exists, say so.** A negative claim -- "a bare map does
+   *not* un-hide the window", "an owner-drawn control emits *no* event" --
+   cannot be polled for. Waiting is the only way to ask and the length of the
+   wait is part of what the answer means. Those stay fixed and are recorded as
+   `dwell`, so a reader can see which two steps are still guessing on purpose.
+
+3. **A budget that is raced is declared, and its margin reported.** `Budget`
+   names the fixture timer a probe runs against and reports what the setup
+   spent against it. A negative margin means the harness lost the race, and
+   the fixtures **skip** on it rather than failing -- the precedent
+   `test_linux_restore.py` already sets, where the L7 harness skips if it
+   could not hide a focused window, "so nothing it says about restoring one
+   means anything". A probe that never reached the state a test is about has
+   measured nothing, and nothing is not a defect. Skipped *loudly*, with the
+   margin in the message, because the way this goes wrong is a budget that
+   quietly stops being met and takes the coverage with it.
+
+**The distinction in point 3 is the reusable part.** "The harness could not
+set the scenario up" and "the scenario ran and the promise broke" are
+different findings, and a suite that renders both as the same red line
+teaches people to stop reading it -- the same argument #161 makes about a
+permanently-red mypy pair, arriving from the other direction.
+
+**Two harness faults found while building this, both of them the same
+failure of instrumentation one level up.**
+
+*The report was all-or-nothing.* Every timing was assembled into one JSON
+line printed at the end, so a probe that stalled produced nothing and the
+fixture could say only "the probe produced no report" -- which is the
+uninformative failure #163 is about, reached from the other side. Measured
+here: a probe whose fixture application had already exited sat for over 200s
+and emitted not one usable fact. Records are now streamed as `TIMING <json>`
+the moment they are taken, so whatever the probe does next, the steps it
+finished are already out.
+
+*The fixture's read deadline could not fire.* `line, deadline = None,
+time.monotonic() + 240` then `for out in probe.stdout:` with the clock
+checked *inside* the loop -- so the deadline only expires when a line
+arrives. It bounded a slow probe and not a silent one, which is the wrong
+half, and a silent probe blocked the run indefinitely. `collect()` reads on a
+thread against a real deadline and keeps the streamed trace. **The same
+pattern is still in `test_linux_slice4.py` and `test_linux_reading_wired.py`,
+which are outside this issue's failing set and are left for their own** --
+noted here rather than fixed quietly, because two modules that can hang a
+local run are worth an issue of their own.
+
+*Stale fixed paths.* `linux_l7_probe.sh` wrote `/tmp/gd-l7.json`. Once the
+announce wait became a condition on file *contents* rather than a sleep, a
+previous run's leftovers satisfied it instantly and handed the measurement
+two window ids that no longer existed -- observed aborting a control that had
+nothing wrong with it. It uses `mktemp -d` now. Separately, the announce line
+is printed on a 120ms timer, well before GNOME Shell has adopted the window,
+so the probe also waits for the id to appear in `_NET_CLIENT_LIST` before
+asking the window manager to activate it. The old `sleep 5` had been covering
+both by accident.
+
+**Measured**, on linux-host-a, GNOME Shell 46.0, the four modules in one run,
+`origin/main` at 5402b23 in a detached worktree against this branch:
+
+| box | `origin/main` | this branch |
+|---|---|---|
+| quiet-ish (load avg 4-6) | 20 passed | 20 passed |
+| 24 busy loops on 16 cores (load avg 20-31) | **7 skipped**, 13 passed | **20 passed** |
+
+The load had to be manufactured. #163's three runs were a full suite and its
+own failing sets did not reproduce on demand today at natural load, which is
+the property that made the bug expensive in the first place; 24 spinning
+processes stand in for the ~1300 tests that used to precede these four.
+
+Under that load `origin/main` does not *fail*. It stops measuring, and says
+almost nothing about it:
+
+```
+SKIPPED tests/test_linux_restore.py:105: the L7 harness could not hide a
+  focused window, so nothing it says about restoring one means anything:
+CONTROL focus A ok active=0xa00004
+ABORT A did not hide
+SKIPPED tests/test_linux_watch.py:103: the watch probe produced no report
+```
+
+`ABORT A did not hide` is the `sleep 2.5` after `windowminimize`, named
+exactly. "The watch probe produced no report" is the other four, and carries
+nothing whatsoever -- which is #163's complaint arriving in its purest form.
+Seven of twenty measurements gone, and a run that reads as green.
+
+Runtime, same modules alone: `test_linux_restore.py` 20.70s → **5.48s**,
+`test_linux_tier1.py` → 5.84s. The fall is the same fact read forwards: a
+fixed sleep pays its full cost on every run including the fast ones, and
+these `slow`-marked modules are themselves part of the load that made the
+others flake.
+
+**What the instrumentation has already ruled out**, which is the point of
+having it. The watch's setup budget was the obvious suspect for `watch`×2 and
+`watch`×4, and the measurement says it is not the one:
+
+```
+TIMING {"what": "window_mapped", "ok": true, "polls": 1, "seconds": 0.03, ...}
+TIMING {"what": "watch_ready", "ok": true, "budget": 29.88, "spent": 0.12, "margin": 29.76}
+TIMING {"what": "escape_seen", "ok": true, "polls": 121, "seconds": 30.01, "timeout": 60, ...}
+TIMING {"what": "put_back", "ok": true, "polls": 1, "seconds": 0.0, ...}
+```
+
+The watch is in place having spent 0.12s of a 29.88s budget, and the escape
+lands at 30.01s against a grab due at 30.00s. So the original 12s was never
+close on this box, and if `events` comes back empty again the answer is *not*
+"the watch was late" -- it is a real question about the escape path, and the
+report says which. The budgets were raised anyway (slice 3's modal 9s → 30s,
+the watch's grab 12s → 30s), but a larger number alone is only a better
+guess. The recorded margin is what makes the next overrun name itself.
+
+**Not claimed.** The full suite was run, minus the two modules named above
+that still hold the unbounded pipe read -- three of the five that used to
+hang a local run are fixed here by `collect()`, as a side effect of needing
+the trace. But it was not run against the *original* conditions of #163,
+because those three runs are not reproducible on demand; they are the
+evidence for the mechanism, not something re-measured after the change. A future run where every step settled in a fraction of its
+limit and the assertion still failed is a real change in behaviour rather
+than a busy box; that distinction did not exist before and is the point.
+
+**Evidence.** Issue #163; D45 (instrument, never retry); D#13/D#14 (hidden,
+and no quiet un-hide); `tests/linux_probe_support.py`;
+`tests/linux_l7_probe.sh`; `tests/linux_slice3_probe.py`;
+`tests/linux_watch_probe.py`; `tests/linux_tier1_probe.py`;
+`src/ghostdriver/backends/linux/isolate.py`'s `SETTLE_S`, whose comment
+records this same lesson already learned once inside the backend --
+"code written from the Windows shape reads the state back too early".
+
 ### D#15. An embedded document: WebKitGTK's two GTK bindings gave opposite answers, and neither needed a wake
 
 **Context.** L8, last in the Linux measurement chain (#6, #7-#14, #21 all

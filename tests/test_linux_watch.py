@@ -19,11 +19,11 @@ import shutil
 import signal
 import subprocess
 import sys
-import time
 
 import pytest
 
 from tests.conftest import on_linux
+from tests.linux_probe_support import collect, describe
 
 pytestmark = [on_linux, pytest.mark.slow]
 
@@ -51,14 +51,16 @@ def watched():
         env=dict(os.environ, DISPLAY=DISPLAY, GSETTINGS_BACKEND="memory",
                  GDK_BACKEND="x11", PYTHONPATH="src"),
     )
-    line, deadline = None, time.monotonic() + 240
+    # The deadline is raised with the probe's grab budget (#163): the
+    # fixture now waits 30s before grabbing the foreground rather than 12s.
+    #
+    # `collect` reads on a thread against a real deadline and keeps the
+    # streamed timing records, so a probe that stalls still leaves a trace
+    # and a probe that goes silent does not block the run (#163). The loop
+    # this replaces checked its deadline inside `for out in probe.stdout:`,
+    # which only expires when a line arrives.
     try:
-        for out in probe.stdout:
-            if out.startswith("{") and '"kinds"' in out:
-                line = out
-                break
-            if time.monotonic() > deadline:
-                break
+        line, trace = collect(probe.stdout, '"kinds"', 280)
     finally:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(os.getpgid(probe.pid), signal.SIGTERM)
@@ -68,14 +70,49 @@ def watched():
         server.wait(timeout=10)
 
     if line is None:
-        pytest.skip("the watch probe produced no report")
-    return json.loads(line)
+        pytest.skip("the watch probe produced no report. What it did get through:\n"
+                    + describe(trace))
+    report = json.loads(line)
+
+    # #163. The fixture grabs the foreground on an absolute timer from its
+    # own start, and the watch has to exist before that. If it did not, the
+    # grab happened with nothing watching and the run measured no escape --
+    # which is not the same fact as the watch failing to notice one, though
+    # the assertions below cannot tell them apart on their own.
+    #
+    # Skipped rather than failed, on `test_linux_restore.py`'s precedent: a
+    # harness that never reached the state a test is about has measured
+    # nothing. The margin is in the message, because the failure mode this
+    # replaces was four tests failing with an empty `events` list and no way
+    # to tell whether the box was loaded.
+    budget = next((t for t in report.get("timing", []) if "budget" in t), None)
+    if budget is not None and not budget["ok"]:
+        pytest.skip(
+            "the watch started after the fixture's grab was due, so this run never "
+            "had a watch in place when the target got out:\n"
+            + describe(report["timing"])
+        )
+    return report
+
+
+def _why(report):
+    """The probe's clock, appended to every assertion here.
+
+    #163 named this as the gap to close first: `assert watched["any_capture"]
+    is True, watched["events"]` failed with `AssertionError: []`, which says
+    that nothing arrived and not why -- no window id, no timings, no
+    indication whether the watch started before the target moved. All three
+    are now in the report, and this is what puts them in the message.
+    """
+    return (f"\nxid {report.get('xid')}, pid {report.get('pid')}"
+            f"\nevents {report.get('events')}"
+            "\nprobe timings:\n" + describe(report.get("timing")))
 
 
 def test_starting_the_watch_puts_the_target_away(watched):
     """`start` establishes the state it is there to keep, rather than waiting
     for the first sample to notice the target is on screen."""
-    assert watched["hidden_after_start"] is True
+    assert watched["hidden_after_start"] is True, _why(watched)
 
 
 #: The two ways the policy names an escape. Which one fires is not the
@@ -97,7 +134,7 @@ def test_a_target_that_gets_out_is_reported(watched):
     that run, which is neither stable nor this backend's decision: the
     policy that tells the two apart is platform-neutral and already tested.
     """
-    assert set(watched["kinds"]) & ESCAPES, watched["events"]
+    assert set(watched["kinds"]) & ESCAPES, _why(watched)
 
 
 def test_the_escape_is_photographed_before_it_is_put_back(watched):
@@ -105,11 +142,11 @@ def test_the_escape_is_photographed_before_it_is_put_back(watched):
     has to happen first or the picture is of a hidden window. Asserted
     because "captured" is the difference between telling a caller *that*
     something appeared and telling them *what*."""
-    assert watched["any_capture"] is True, watched["events"]
+    assert watched["any_capture"] is True, _why(watched)
 
 
 def test_the_target_is_put_back_after_the_grab(watched):
     """The housekeeping half. Measured on Linux this is load-bearing in a way
     it is not on Windows: there is no quiet un-hide (D#14), so a target left
     out is a target holding the foreground."""
-    assert watched["hidden_at_end"] is True
+    assert watched["hidden_at_end"] is True, _why(watched)
