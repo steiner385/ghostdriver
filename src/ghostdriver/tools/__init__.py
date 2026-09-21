@@ -167,7 +167,7 @@ def _result_summary(result):
             "found", "row_count", "pages_read", "reached_end", "advanced",
             "delivered_to", "hit_container", "warning", "until_change",
             "still_arriving", "idle", "polls", "outside_container",
-            "took_foreground", "physical_rect")
+            "took_foreground", "physical_rect", "copies_failed", "copy_stopped")
     return {k: result[k] for k in keep if k in result}
 
 

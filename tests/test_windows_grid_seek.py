@@ -43,6 +43,15 @@ def stop(proc, handles):
     proc.wait(timeout=5)
 
 
+def explain(read: dict) -> dict:
+    """What a seek decided from, for the assertion message: `advanced` is a
+    comparison of reads, and a bare `assert True is False` discards both
+    (#182)."""
+    return {k: read.get(k) for k in ("advanced", "reached_end", "pages_read", "page_rows",
+                                     "row_count", "rows", "copies_failed", "copy_stopped",
+                                     "note", "error")}
+
+
 def full_session(pid):
     box = Toolbox(SessionManager(store=ConsentStore(None)))
     box.sessions.record_grant(pid, allowed=True, source=ConsentSource.ELICITED)
@@ -104,10 +113,10 @@ def test_a_grid_that_does_not_page_says_the_view_did_not_change():
 
         read = box.grid_seek(session, GRID)
 
-        assert read["ok"] and read["reached_end"] is True
-        assert read["advanced"] is False
-        assert read["row_count"] == 3
-        assert "did not change when advanced" in read["note"]
+        assert read["ok"] and read["reached_end"] is True, explain(read)
+        assert read["advanced"] is False, explain(read)
+        assert read["row_count"] == 3, explain(read)
+        assert "did not change when advanced" in read["note"], explain(read)
     finally:
         stop(proc, handles)
 
@@ -136,5 +145,64 @@ def test_grid_seek_refuses_an_unknown_advance_key():
         refused = box.grid_seek(session, GRID, advance="wheeee")
 
         assert not refused["ok"] and "named key" in refused["error"]["message"]
+    finally:
+        stop(proc, handles)
+
+
+# --- a copy that did not work is not a page (#182) --------------------------------
+
+def failing_first(monkeypatch, failures: int):
+    """Make the backend's copy route fail its first `failures` calls, the
+    way a held clipboard or a slow WM_COPY does, then behave."""
+    from ghostdriver.backends import current
+    from ghostdriver.gridstrategy import RouteResult, Strategy
+
+    real = current().copy_route
+    calls = {"n": 0}
+
+    def copy_route(node, *, want_text=False):
+        calls["n"] += 1
+        if calls["n"] <= failures:
+            return RouteResult(strategy=Strategy.CLIPBOARD_COPY, worked=False,
+                               detail="the control did not change the clipboard")
+        return real(node, want_text=want_text)
+
+    monkeypatch.setattr(current(), "copy_route", copy_route)
+    return calls
+
+
+def test_a_copy_that_fails_once_is_not_read_as_an_empty_page(monkeypatch):
+    """An empty page followed by the real one used to read as the view
+    changing: advanced=True on a grid that cannot page."""
+    proc, handles = start()
+    try:
+        box, session = full_session(handles["pid"])
+        failing_first(monkeypatch, 1)
+
+        read = box.grid_seek(session, GRID)
+
+        assert read["ok"] and read["reached_end"] is True, explain(read)
+        assert read["advanced"] is False, explain(read)
+        assert read["row_count"] == 3 and read["page_rows"] == [3, 3], explain(read)
+        assert read["copies_failed"] == ["the control did not change the clipboard"]
+        assert "copy_stopped" not in read
+    finally:
+        stop(proc, handles)
+
+
+def test_a_copy_route_that_stops_answering_is_said_not_read_as_the_end(monkeypatch):
+    proc, handles = start()
+    try:
+        box, session = full_session(handles["pid"])
+        failing_first(monkeypatch, 10**6)
+
+        read = box.grid_seek(session, GRID, value="PART-0001")
+
+        assert read["ok"], explain(read)
+        assert read["reached_end"] is False and read["advanced"] is False, explain(read)
+        assert read["pages_read"] == 0 and read["rows"] == [], explain(read)
+        assert len(read["copies_failed"]) == 2, "two in a row, then it stops"
+        assert "stopped answering" in read["copy_stopped"]
+        assert read["found"] is False
     finally:
         stop(proc, handles)
