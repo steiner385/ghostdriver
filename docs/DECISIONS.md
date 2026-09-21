@@ -7224,6 +7224,67 @@ merely cite the gap D46 left.
 **Evidence.** Issue #17; spec §12; `docs/product/features/deferred-scope-tracking.md`;
 D59; D46; D1; D#16 (the sibling decision this one parallels).
 
+### D#63. The pixel-judged flag rides on `capture`, where classifying a control is free
+
+**Context.** #51/D#51 made `enabled` honest in prose: `find`/`describe` and
+the `WindowNode`/`AccessibleElement` docstrings now say it is the
+`WS_DISABLED` bit (or UIA's `IsEnabled`), not proof a control will act, and
+an owner-drawn control can report it while painting its own greyed,
+do-nothing state. What #51 explicitly left out was a *per-control* verdict,
+because that needs the `surfaces` classification -- reading
+`RegionEvidence` off the live target thread -- which `find` deliberately
+does not run per element: a listing would turn into a per-node round trip
+for an answer that is usually "native, ignore this."
+
+**The question was where a per-element verdict could be free.** #63 asked
+for a cheap proxy: only when a control already resolved through the
+pixels/owner-drawn path, or is being captured. `capture`, given a `locator`,
+already resolves exactly one node to render it -- that resolution is the
+whole cost `find` avoids paying per row. Classifying that one node is one
+region's worth of evidence, not a walk, so `capture` is where the flag
+lives, not `find`, `describe`, or a new tool.
+
+**What changed.** `surface_map`'s per-node classification was factored out
+into `classify_node(node, gather)` (`surface.py`) -- unchanged behaviour,
+same "gather only when undecided" rule, just callable on one resolved node
+instead of a walked tree. `capture`, given a `locator` that resolved to a
+`WindowNode` (not an `AccessibleElement` -- those already carry UIA's own,
+more honest `enabled`, per D#51's docstring), classifies it and adds a
+`surface` field to the result: `kind`, `access`, `reason`, and a `note`
+pointing back at D#51. On any other backend classification -- native, web,
+unknown -- the field is absent, the `actionable`-only-when-False rule (D66)
+applied a second time: every other verdict is not the case `enabled` gets
+wrong, and stamping it on every capture would be noise nobody reads.
+
+**Absent, not erroring, off Windows.** `region_evidence` is not wired up on
+the Linux backend yet (`backends/linux/__init__.py`, D#15's own note).
+`capture` already works on both backends; this flag being Windows-only
+must not make it work on neither. `current().region_evidence` raising
+`UnsupportedPlatform` is caught, and the field is simply left off --
+consistent with "the flag appears where it is free and is simply absent
+otherwise," the option #63 asked to weigh.
+
+**No target knowledge added.** `classify_node` uses the same structural
+evidence `classify_region` always has -- child windows, text, the
+accessibility element count and budget -- and the caller-visible field
+carries no class list, matching the constraint #51 and #63 both hold to.
+
+**Verification.** `classify_node` is tested platform-neutral in
+`test_surface.py`, against fakes, the same way the rest of `surface.py`
+always has been: it agrees with `surface_map` on the same node, gathers
+only when undecided, and degrades the same way without a `gather`. The
+`capture`-level wiring (`_judge_by_pixels`) is tested the same way in
+`test_capture_pixel_judged.py`, including the `UnsupportedPlatform`
+degradation no Windows box is needed to exercise. `test_windows_grid.py`
+adds the one measurement that does need Win32: capturing the fixture's
+painted grid (no children, no text, nothing beneath it on the
+accessibility surface) carries `surface.kind == "owner-drawn"`; capturing a
+real button next to it carries no `surface` field at all.
+
+**Evidence.** Issue #63 (follow-up to #51/#52, D#51); `src/ghostdriver/
+surface.py` (`classify_node`); `src/ghostdriver/tools/screen.py`
+(`_judge_by_pixels`, `capture`); `tests/test_surface.py`;
+`tests/test_capture_pixel_judged.py`; `tests/test_windows_grid.py`.
 ### D#19. The `vm` trigger has not fired, and it now says where a firing gets written
 
 **Context.** Issue #19 is the fourth of the five spec §12 rows

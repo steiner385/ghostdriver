@@ -250,6 +250,48 @@ def walk_regions(
     yield from visit(tree)
 
 
+def classify_node(
+    node: WindowNode,
+    gather: Callable[[WindowNode], RegionEvidence] | None = None,
+) -> Region:
+    """Classify one region, gathering extra evidence only if it is undecided.
+
+    Factored out of `surface_map` so a caller holding a single already-
+    resolved node -- `capture`, given a locator -- can classify it without
+    walking a tree, at the same per-node cost `surface_map` pays for each of
+    its regions: no `gather` call for a node a window tree alone decides.
+    """
+    base = RegionEvidence(
+        child_windows=len(node.children),
+        answers_text=node.responsive,
+        has_own_text=bool(node.text),
+    )
+    # A web host is probed even though it has child windows and would
+    # otherwise be "decided". Its identity is settled by class, but its
+    # readability is not settled at all -- an embedded engine's
+    # document tree comes and goes -- so it is the one region where
+    # the evidence changes the advice rather than the classification.
+    undecided = node.responsive and (
+        is_web_host(node.class_name)
+        or (
+            not node.children
+            and not node.text
+            and _area(node) >= MIN_REGION_AREA
+        )
+    )
+    evidence = gather(node) if (undecided and gather) else base
+    kind, access, reason = classify_region(node, evidence)
+    return Region(
+        class_name=node.class_name,
+        rect=node.rect,
+        kind=kind,
+        access=access,
+        reason=reason,
+        handle=node.handle,
+        evidence=evidence,
+    )
+
+
 def surface_map(
     tree: WindowNode,
     gather: Callable[[WindowNode], RegionEvidence] | None = None,
@@ -265,40 +307,10 @@ def surface_map(
     an answer that cannot change. Without `gather`, regions are classified
     on tree evidence alone, which can only over-report OPAQUE.
     """
-    regions: list[Region] = []
-    for node in walk_regions(tree, visible_only=visible_only):
-        base = RegionEvidence(
-            child_windows=len(node.children),
-            answers_text=node.responsive,
-            has_own_text=bool(node.text),
-        )
-        # A web host is probed even though it has child windows and would
-        # otherwise be "decided". Its identity is settled by class, but its
-        # readability is not settled at all -- an embedded engine's
-        # document tree comes and goes -- so it is the one region where
-        # the evidence changes the advice rather than the classification.
-        undecided = node.responsive and (
-            is_web_host(node.class_name)
-            or (
-                not node.children
-                and not node.text
-                and _area(node) >= MIN_REGION_AREA
-            )
-        )
-        evidence = gather(node) if (undecided and gather) else base
-        kind, access, reason = classify_region(node, evidence)
-        regions.append(
-            Region(
-                class_name=node.class_name,
-                rect=node.rect,
-                kind=kind,
-                access=access,
-                reason=reason,
-                handle=node.handle,
-                evidence=evidence,
-            )
-        )
-    return regions
+    return [
+        classify_node(node, gather)
+        for node in walk_regions(tree, visible_only=visible_only)
+    ]
 
 
 def needs_other_mechanism(regions: list[Region]) -> list[Region]:

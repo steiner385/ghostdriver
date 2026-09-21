@@ -385,3 +385,51 @@ def test_a_declaration_does_not_waive_the_guard_for_another_class(tmp_path):
         assert "Use `read`" in report["error"]["message"]
     finally:
         stop(proc, handles)
+
+
+# --- capture's per-control pixel-judged flag (D#63, issue #63) -----------
+
+def test_capturing_the_painted_grid_is_flagged_judge_by_pixels():
+    """The grid paints its own rows and exposes no accessibility tree
+    beneath it -- exactly the shape D#51 found `enabled` lying about.
+    `capture`, given the grid's own locator, already resolved this one
+    node; classifying it costs nothing extra, so the result says so."""
+    from ghostdriver.session import SessionManager
+    from ghostdriver.tools import Toolbox
+
+    proc, handles = start()
+    try:
+        box = Toolbox(SessionManager())
+        session = full_session(box, handles["pid"])
+
+        result = box.capture(
+            session,
+            locator='class=GhostFixtureDataGrid '
+                    'within=(class=GhostFixturePage text="Operations")')
+
+        assert result["ok"], result
+        assert result["surface"]["kind"] == "owner-drawn"
+        assert result["surface"]["access"] == "pixels"
+        assert "pixels" in result["surface"]["note"]
+    finally:
+        stop(proc, handles)
+
+
+def test_capturing_a_real_button_carries_no_pixel_judged_flag():
+    """A control a window tree already answers for is not the case D#51
+    named -- the field would be noise with nothing to warn about."""
+    from ghostdriver.session import SessionManager
+    from ghostdriver.tools import Toolbox
+
+    proc, handles = start()
+    try:
+        box = Toolbox(SessionManager())
+        session = full_session(box, handles["pid"])
+
+        result = box.capture(
+            session, locator='class=GhostFixtureCommandButton text="Expand All"')
+
+        assert result["ok"], result
+        assert "surface" not in result
+    finally:
+        stop(proc, handles)
