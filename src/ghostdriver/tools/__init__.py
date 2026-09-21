@@ -80,7 +80,9 @@ def _traced_and_reporting(fn, *, session_tool: bool):
     def wrapper(self, *args, **kwargs):
         started = time.monotonic()
         try:
-            bound = signature.bind_partial(self, *args, **kwargs).arguments
+            # A plain dict on both branches: BoundArguments.arguments is typed
+            # OrderedDict in newer typeshed, and the fallback below is not one (#161).
+            bound = dict(signature.bind_partial(self, *args, **kwargs).arguments)
             bound.pop("self", None)
         except TypeError:
             bound = {"args": list(args), **kwargs}
