@@ -6336,6 +6336,50 @@ that the awkwardness of the current strategy is not theirs.
 `docs/product/features/deferred-scope-tracking.md`; D1; D33; D58; D59; R4;
 `tests/test_mcp_server.py::EXPECTED_TOOLS`.
 
+### D#115. Linux backend scope: EditableText writes only, owner-drawn controls are screenshot-only
+
+**Context.** Driving Bambu Studio 02.08 (wxGTK3) on GNOME/X11 over the a11y bus
+(`gi` `Atspi 2.0`; no `pyatspi`) on 2026-09-11 measured what the bus reaches
+and what it does not. Text fields read with `Atspi.Text.get_text` and write
+through `Atspi.EditableText.set_text_contents` followed by a real `Return`,
+which Studio's modified marker confirms -- and this works even while the
+window is minimized (`showing=False`). Real widgets (toggle/radio/check
+buttons, GTK dialogs) expose an `Action` with `click`, and two instances of
+one app are told apart by `get_process_id()` (the bus may report a sibling
+pid a few off the launch pid). Owner-drawn controls -- Bambu's toolbar
+Slice/Print buttons, sidebar parameter labels, custom dialog buttons -- are
+not reachable at all: they report empty names and `INT_MIN` extents, so they
+cannot be located or identified through the bus by any means. D#10 already
+measured this same negative on the GTK4 fixture; this session confirms it
+holds on wxGTK3 too. The only way to drive one is screenshot plus coordinate
+click, and only while the window is actually mapped on screen -- scripted
+un-minimizing or raising is not a fallback, because mutter refuses
+non-interactive activation (a zero-timestamp `_NET_ACTIVE_WINDOW` logs as a
+buggy client); D#13's nested-display foreground guarantee is the only robust
+answer to that.
+
+**The decision: reading is in scope now; writing is in scope only for
+`EditableText`, located by place plus value, never by label.** Slices 1-2 of
+#40 landed reading. Writing goes no further than fields that implement
+`EditableText`, and -- because Studio's fields carry no exposed label -- a
+target is located by screen position and its current displayed value (the
+D#105 place-plus-value locator), never by name. Everything owner-drawn stays
+out of scope for the bus entirely; if it is ever exposed at all, it is as an
+explicit screenshot-and-click tier gated on a mapped-window precondition, not
+folded into the `EditableText` path. `src/ghostdriver/backends/linux/verbs.py`
+already matches this: `set_text` offers only the `EditableText` tier-1 rung
+(or the consented tier-4 live-commit rung), and `click` only drives a control
+through its `Action` interface -- there is no rung anywhere that reaches an
+owner-drawn control, so no code changes followed from this decision, only the
+record of it.
+
+**This backend is a research track, not the production tuning path.** For
+Bambu Studio specifically, tuning goes through `x2d-pro/bambu-studio/tune.py`
+(edit the project file directly) and `verify.py` (gate on the sliced gcode),
+then open the result in Studio -- this backend does not grow
+Studio-specific tuning of its own. See `docs/linux-backend-scope.md` for the
+full reachable/not-reachable table this decision is drawn from. Evidence:
+issue #115; issue #40; D#10; D#13; D#101; D#105.
 ### D#157. The test bed's autologon is removed, and Session 0 is refused as its replacement
 
 **Context.** The Windows test bed signed `gdrunner` into the physical console
