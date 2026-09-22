@@ -116,12 +116,16 @@ class SetValueTools(_ActingCore):
             from ..actuate import Tier
             tiers = (Tier.UIA_PATTERN, Tier.SYNTHETIC_INPUT)
 
+        insert_first = prepared.session.profile.inserts_first(
+            getattr(prepared.node, "class_name", None))
         attempts = (
             verbs.set_text_element(element, text, cadence=prepared.cadence,
-                                   allow_pattern=commit is not None, **live_kw)
+                                   allow_pattern=commit is not None,
+                                   insert_first=insert_first, **live_kw)
             if element is not None else
             verbs.set_text(handle, text, cadence=prepared.cadence,
-                           allow_pattern=commit is not None, **live_kw)
+                           allow_pattern=commit is not None,
+                           insert_first=insert_first, **live_kw)
         )
 
         watch = None

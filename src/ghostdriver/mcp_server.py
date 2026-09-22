@@ -576,8 +576,14 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     ))
     def wait_idle(session_ref: SessionId,
                   timeout_s: Annotated[float, Field(description="Seconds; default 30.")] = 30.0,
+                  settle_s: Annotated[float, Field(description=(
+                      "When the profile names no busy_indicator: how long the "
+                      "surface shape must hold still to count as idle (default 1). "
+                      "Weaker evidence than an indicator clearing; the result says "
+                      "which it waited on."
+                  ))] = 1.0,
                   ) -> dict[str, Any]:
-        return box.wait_idle(session_ref, timeout_s=timeout_s)
+        return box.wait_idle(session_ref, timeout_s=timeout_s, settle_s=settle_s)
 
     @server.tool(annotations=READS, description=(
         "Dwell for a fixed number of seconds, then return. A deliberate "
@@ -613,7 +619,9 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     ))
     def batch(session_ref: SessionId,
               steps: Annotated[list[dict], Field(description=(
-                  "The steps to run in order, each {tool, args}. args omits "
+                  "The steps to run in order, each {tool, args}. args are the "
+                  "standalone tool's own parameters by name -- locator, expect, "
+                  "at, keys, text, and so on -- and args omits "
                   "the session. Example: [{\"tool\": \"click\", \"args\": "
                   "{\"locator\": \"type=TabItem name=Parts\", \"expect\": "
                   "{\"locator\": \"type=TabItem name=Parts\", \"selected\": "

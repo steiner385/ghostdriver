@@ -78,22 +78,6 @@ WM_MOUSEMOVE = 0x0200
 #: is in the WM_APP range, and another toolkit could mean something else
 #: by it.
 CM_MOUSEENTER = 0xB013
-#: The VCL's private "the mouse entered you" notification (CM_BASE + 19).
-#: A VCL control's belief that the mouse is over it is set by the
-#: application on idle from the real cursor, not from mouse messages, and
-#: delivered as this; a control that acts on a click only in that state
-#: has to be told first (#133). Only posted where asked for -- the value
-#: is in the WM_APP range, and another toolkit could mean something else
-#: by it.
-CM_MOUSEENTER = 0xB013
-#: The VCL's private "the mouse entered you" notification (CM_BASE + 19).
-#: A VCL control's belief that the mouse is over it is set by the
-#: application on idle from the real cursor, not from mouse messages, and
-#: delivered as this; a control that acts on a click only in that state
-#: has to be told first (#133). Only posted where asked for -- the value
-#: is in the WM_APP range, and another toolkit could mean something else
-#: by it.
-CM_MOUSEENTER = 0xB013
 WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
 WM_RBUTTONDOWN = 0x0204
@@ -303,10 +287,32 @@ def click(hwnd: int, *, button: str = "left", modifiers=(), at=None,
     own rows and exposes none of them -- a capture says where the row is,
     and this clicks there, still without activating anything.
     """
-    x, y = client_centre(hwnd) if at is None else (int(at[0]), int(at[1]))
+    x, y = client_centre(hwnd) if at is None else client_point(hwnd, at)
     target, tx, ty = deepest_child_at(hwnd, x, y)
     return post_click(target, tx, ty, button=button, modifiers=modifiers, count=count,
                       hover=hover)
+
+
+def client_offset(hwnd: int) -> tuple[int, int]:
+    """Where the client area starts inside the window rectangle: (0, 0) for
+    a child control, the frame and title bar for a top-level window."""
+    origin = wintypes.POINT(0, 0)
+    user32.ClientToScreen(wintypes.HWND(hwnd), ctypes.byref(origin))
+    left, top, _right, _bottom = winapi.window_rect(hwnd)
+    return (origin.x - left, origin.y - top)
+
+
+def client_point(hwnd: int, at) -> tuple[int, int]:
+    """`at`, given from the window's top-left as `find` reports it and a
+    capture of it shows, as the client point the message needs.
+
+    They differ by the frame: a dialog's client area starts below its title
+    bar, so an offset measured on a dialog's capture landed ~30px low when
+    it was handed over as a client point (#203). A child control has no
+    frame, which is why the same `at` was right there and wrong on a
+    top-level window."""
+    dx, dy = client_offset(hwnd)
+    return (int(at[0]) - dx, int(at[1]) - dy)
 
 
 #: `ChildWindowFromPointEx` flags: skip children that are hidden, or that

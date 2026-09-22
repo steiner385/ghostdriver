@@ -261,7 +261,7 @@ class StatusTools(_ToolboxCore):
         return report
 
     def wait_idle(self, session_id: str, *, timeout_s: float = 30.0,
-                  poll_s: float = 0.5) -> dict:
+                  poll_s: float = 0.5, settle_s: float = 1.0) -> dict:
         """Wait until the target's profile-declared busy indicator clears.
 
         On a target where "the action completed" and "the screen shows the
@@ -274,14 +274,15 @@ class StatusTools(_ToolboxCore):
             session = self.sessions.authorize(session_id, "wait_idle")
         except GhostdriverError as exc:
             return _error(exc.kind, exc.message)
-        if not session.profile.busy_indicator:
-            return _error(
-                ErrorKind.NOT_ACTIONABLE,
-                "this session's profile names no busy_indicator, so there is "
-                "nothing to wait on. Add one to the profile ({\"locator\": ...} "
-                "present while busy, or {\"region\": ..., \"ink_above\": ...}), "
-                "or use wait_for with condition=settled on the control you need")
         import time as _time
+
+        if not session.profile.busy_indicator:
+            # No indicator declared: wait for the surface to hold still
+            # instead of refusing (#205), and say that is what was waited
+            # on -- a settled shape is not the same evidence as an
+            # indicator that cleared.
+            return self._wait_surface_settled(session, timeout_s=timeout_s,
+                                              poll_s=poll_s, settle_s=settle_s)
 
         started = _time.monotonic()
         deadline = started + max(0.0, timeout_s)
@@ -299,6 +300,38 @@ class StatusTools(_ToolboxCore):
                                          "be stuck, or the indicator may stay on -- capture "
                                          "to see"}}
         return {"ok": True, "idle": True, "waited_ms": waited_ms, "polls": polls}
+
+    def _wait_surface_settled(self, session, *, timeout_s: float, poll_s: float,
+                              settle_s: float) -> dict:
+        import time as _time
+
+        def digest():
+            return self.surfaces(session.session_id).get("shape_digest")
+
+        started = _time.monotonic()
+        deadline = started + max(0.0, timeout_s)
+        last, still_since, polls = digest(), _time.monotonic(), 1
+        while _time.monotonic() - still_since < settle_s:
+            if _time.monotonic() >= deadline:
+                waited_ms = int((_time.monotonic() - started) * 1000)
+                return {"ok": False, "idle": False, "waited_on": "surface",
+                        "waited_ms": waited_ms, "polls": polls,
+                        "error": {"kind": ErrorKind.TIMEOUT.value,
+                                  "message": f"the surface kept changing for {waited_ms}ms; "
+                                             "the target may still be filling, or something "
+                                             "animates -- capture to see"}}
+            _time.sleep(min(poll_s, settle_s))
+            polls += 1
+            now = digest()
+            if now != last:
+                last, still_since = now, _time.monotonic()
+        return {"ok": True, "idle": True, "waited_on": "surface",
+                "waited_ms": int((_time.monotonic() - started) * 1000), "polls": polls,
+                "note": (f"no busy_indicator in the profile, so this waited for the "
+                         f"surface shape to hold still for {settle_s:g}s. That is weaker "
+                         "evidence than an indicator clearing: a grid filling rows without "
+                         "changing shape looks settled. Declare a busy_indicator for "
+                         "this target when one is known.")}
 
     def restore(self, session_id: str) -> dict:
         """Un-minimize the target, reporting whether that took the foreground.
