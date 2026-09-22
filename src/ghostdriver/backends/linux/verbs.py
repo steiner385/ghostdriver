@@ -50,7 +50,8 @@ def click(handle: int, *, button: str = "left", modifiers=(), at=None,
 def set_text(handle: int, text: str, *,
              cadence: Cadence = ROBOT,
              allow_pattern: bool = True,
-             live_window: int = 0) -> list[Attempt]:
+             live_window: int = 0,
+             insert_first: bool = False) -> list[Attempt]:
     """Replace a control's text, through `EditableText`.
 
     **`live_window` chooses the ladder, because the commit differs by
@@ -154,7 +155,8 @@ def unblocked(handle: int) -> Condition:
 def set_text_element(element: AccessibleElement, text: str, *,
                      cadence: Cadence = ROBOT,
                      allow_pattern: bool = True,
-                     live_window: int = 0) -> list[Attempt]:
+                     live_window: int = 0,
+                     insert_first: bool = False) -> list[Attempt]:
     """The element form of `set_text`.
 
     On Windows an element is something inside a web document, reached

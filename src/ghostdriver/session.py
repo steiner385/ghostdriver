@@ -107,7 +107,19 @@ class Profile:
     #: menu's own keyboard route first (#189). Declared, because an ordinary
     #: menu answers the posted pair and that is the default.
     menus_by_keyboard: bool = False
+    #: Control classes (fnmatch patterns) whose value is delivered whole
+    #: through the control's own edit path first, typing second (#207): a
+    #: masked date edit or a combo edit that swallows typed characters.
+    #: set_value falls through to the insert on its own; this saves the
+    #: typed attempt and its read-back on a class known to need it.
+    insert_first: tuple[str, ...] = ()
 
+    def inserts_first(self, class_name: str | None) -> bool:
+        """Whether `insert_first` names this class."""
+        import fnmatch
+
+        name = class_name or ""
+        return any(fnmatch.fnmatchcase(name, p) for p in self.insert_first)
     def note_for(self, class_name: str | None) -> str | None:
         """The operator's note for this class, or None."""
         import fnmatch
@@ -216,6 +228,13 @@ class Profile:
                 f"profile {location} has an unreadable menus_by_keyboard: true or "
                 f"false; got {by_keyboard!r}",
             )
+        inserted = document.get("insert_first") or []
+        if not isinstance(inserted, list) or not all(isinstance(c, str) and c for c in inserted):
+            raise GhostdriverError(
+                ErrorKind.DENIED_BY_POLICY,
+                f"profile {location} has an unreadable insert_first: a list of "
+                f"window-class patterns, e.g. [\"TsfDBInputEdit\"]; got {inserted!r}",
+            )
         hovered = document.get("hover_before_click") or []
         if not isinstance(hovered, list) or not all(isinstance(c, str) and c for c in hovered):
             raise GhostdriverError(
@@ -244,6 +263,7 @@ class Profile:
             text_is_label=tuple(labelled),
             notes=dict(notes),
             menus_by_keyboard=by_keyboard,
+            insert_first=tuple(inserted),
         )
 
     @classmethod
@@ -290,10 +310,16 @@ class Session:
         return self.runner(fn) if self.runner is not None else fn()
 
     def summary(self) -> dict:
+        from .policy import Tier, tools_for
+
+        # Said at attach, not on first use: grid_seek needs full, and a
+        # session opened at interactive found out one round trip later (#204).
+        excluded = sorted(tools_for(Tier.FULL) - tools_for(self.tier))
         described = {
             "session_id": self.session_id,
             "pid": self.pid,
             "tier": self.tier.value,
+            **({"not_at_this_tier": excluded} if excluded else {}),
             "matched_profile": self.profile.matched_profile,
             "consent": {
                 "source": self.grant.source.value,

@@ -9,6 +9,7 @@ from .core import (
     _error,
 )
 from .expect import verify_window
+from .guidance import REQUIRE_ACTIVE_REFUSAL, TYPE_TEXT_MISS_HINT
 
 
 class ActuationTools(_ActingCore):
@@ -110,12 +111,8 @@ class ActuationTools(_ActingCore):
         if require_active:
             before = self._focus_report(prepared)
             if before.get("target_window_active") is False:
-                refusal = _error(
-                    ErrorKind.NOT_ACTIONABLE,
-                    "require_active: the target's window is not active, so a "
-                    "focus-checking control would ignore this click; nothing "
-                    "delivered. Hand it to a person (await_human) or a tool that "
-                    "activates windows, or drop require_active.", locator=locator)
+                refusal = _error(ErrorKind.NOT_ACTIONABLE, REQUIRE_ACTIVE_REFUSAL,
+                                 locator=locator)
                 refusal["focus"] = before
                 return refusal
         delivered = self._delivery(prepared, point)
@@ -212,12 +209,15 @@ class ActuationTools(_ActingCore):
             verify_timeout_s=verify_window(expect),
         )
         self._remember(session_id, "type_text", locator, prepared, result)
-        return self._reported(
+        reported = self._reported(
             result, prepared, locator,
             verified=("effect" if after is not None and result.ok
                       else "delivery_only"),
             expected=described,
         )
+        if not result.ok:
+            reported["hint"] = TYPE_TEXT_MISS_HINT
+        return reported
 
     def send_keys(
         self,

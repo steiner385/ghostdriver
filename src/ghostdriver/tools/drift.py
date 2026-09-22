@@ -29,3 +29,22 @@ def note_index_drift(seen: dict, pending: dict, session_id: str, expression: str
             "moved -- a toolkit reorders siblings as controls take focus. Anchor "
             "this field by text= or by region= from an earlier find instead of "
             "index=.")
+
+
+def whitespace_note(locator: str) -> str:
+    """text= matches exactly, whitespace included, and stays so: trimming
+    would silently change which control a locator names. A pattern with
+    leading or trailing whitespace that did not match is told (#206)."""
+    import re
+
+    from ..model.locator import Locator
+
+    try:
+        text = Locator.parse(locator).text
+    except Exception:
+        return ""
+    if not text or text == text.strip():
+        return ""
+    return (f"; text= is an exact match including the leading/trailing whitespace "
+            f"in {text!r} -- a /regex/ can match without it, e.g. "
+            f"text=/{re.escape(text.strip())}/")

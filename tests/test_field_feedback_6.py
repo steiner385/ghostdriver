@@ -112,14 +112,17 @@ def test_a_region_that_renders_ink_can_be_the_indicator(tmp_path):
         stop(proc, handles)
 
 
-def test_wait_idle_without_an_indicator_says_how_to_add_one():
+def test_wait_idle_without_an_indicator_waits_on_the_surface_and_says_how_to_add_one():
+    """It used to refuse; now it waits for the surface to hold still (#205)
+    and says that is the weaker evidence, and what to declare instead."""
     proc, handles = start()
     try:
         box, session = session_for(handles["pid"])
 
-        refused = box.wait_idle(session)
+        idle = box.wait_idle(session, timeout_s=5, settle_s=0.3)
 
-        assert not refused["ok"] and "busy_indicator" in refused["error"]["message"]
+        assert idle["ok"] and idle["waited_on"] == "surface"
+        assert "busy_indicator" in idle["note"]
     finally:
         stop(proc, handles)
 

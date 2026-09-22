@@ -20,6 +20,7 @@ from .core import (
     _Prepared,
 )
 from .deny import _DenyCore
+from .drift import whitespace_note
 from .expect import _ExpectCore
 from .guidance import FOCUS_NOTE
 
@@ -52,7 +53,8 @@ class _ActingCore(_DenyCore, _ExpectCore):
                 f"no element matches {locator!r}"
                 + ("" if all_windows else
                    "; menus, dropdowns and dialogs are separate top-level "
-                   "windows, so try all_windows=true"),
+                   "windows, so try all_windows=true")
+                + whitespace_note(locator),
                 locator=locator,
             )
         if len(matches) > 1:

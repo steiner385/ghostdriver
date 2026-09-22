@@ -8230,3 +8230,98 @@ the old promise is gone, the check is named, both answers are present,
 and the second names `capture` and the application's own interface
 (`env: any`, the result built by hand). README's "What it does not do"
 carries the limit. Issue #199; D#195; D53; D33.
+
+### D#203. `at` is pixels from the window's top-left, on a framed window too
+
+**The field report.** `at` read as screen-absolute on the main window and
+client-relative on dialogs, and a point measured on `capture(locator=...)`
+-- documented as needing no arithmetic -- landed low on a dialog. Several
+misfires.
+
+**What was measured.** `at` has one meaning: pixels from the element's
+top-left as `find` reports it, which is also pixel (x, y) of a capture of
+that element. The backend handed it to the click as a *client* point. A
+child control's client area is its whole rectangle, so the two agree
+there; a top-level window's client area starts below its title bar and
+inside its border, so on a dialog the click landed a frame's height low.
+The main window sits at the screen origin, which is what made its `at`
+look screen-absolute.
+
+**Decision.** The backend converts `at` from window-rect-relative to
+client-relative (the client origin's offset inside the window rectangle)
+before posting, so the documented frame is true on every window. Nothing
+changes for a child control, where the offset is zero.
+
+**Evidence.** `tests/test_windows_at_frame.py`: the fixture shell's client
+area starts inside its rectangle and the conversion subtracts exactly
+that; a child control has no offset; the grid's row 1 aimed *through the
+shell* with an `at` taken from the shell's own rectangle lands on the grid
+and is verified (`env: windows`). Issue #203; D66; D73.
+
+### D#204. `attach` names the tools the tier excludes
+
+**Context.** `grid_seek` needs `full`; a session opened at `interactive`
+found out on first use, one round trip later.
+
+**Decision.** The attach summary carries `not_at_this_tier`, from the same
+table the refusal reads, when the tier excludes anything. Issue #204; D9.
+
+### D#205. `wait_idle` with no indicator waits for the surface to hold still, and says so
+
+**Context.** `wait_idle` refused when the profile named no
+`busy_indicator`, and a sensible default was asked for.
+
+**Decision.** With no indicator, it waits for the surface-shape digest to
+hold still for `settle_s` (default 1 s) and reports `waited_on: surface`
+with a note that this is weaker evidence than an indicator clearing -- a
+grid filling rows without changing shape looks settled -- and that a
+`busy_indicator` should be declared when one is known. A timeout says the
+surface kept changing. The `batch` description now says a step's `args`
+are the standalone tool's own parameters by name.
+
+**Evidence.** `tests/test_feedback_2026_09_22b.py`: settles and says so;
+never settles and times out honestly (`env: any`, the digest stood in
+for). `tests/test_field_feedback_6.py`: the old refusal test now proves
+the fallback against the fixture. Issue #205; D69; D77.
+
+### D#206. A `text=` locator with surrounding whitespace is told the match is exact
+
+**Decision.** Matching stays exact, whitespace included: trimming would
+silently change which control a locator names (D33). When a `text=`
+pattern with leading or trailing whitespace matches nothing, the error
+says the match is exact including that whitespace and shows the `/regex/`
+form. Issue #206; D33.
+
+### D#207. A profile can put the insert route first; a typing miss points at `set_value`
+
+**Context.** Masked date edits and combo edits swallowed `type_text` and
+`send_keys`; `set_value`'s insert route worked, discovered per field.
+
+**Decision.** `set_value` already falls through from typing to the insert
+when the read-back shows the typed value arrived short. The profile key
+`insert_first` (class patterns, declared, D35) puts the insert route first
+for a class known to swallow typing, so the typed attempt and its
+read-back are not paid. `type_text` has no fallback of its own, and a miss
+now carries a hint saying so and naming `set_value` and the key. Typing
+stays the default elsewhere: it is the toolkit's own keyboard path, which
+is what a bound field commits on (D70).
+
+**Evidence.** `tests/test_feedback_2026_09_22b.py`: the key is read and
+matched, a non-list refused, the ladder order flips (`env: windows` for
+the ladder), the hint text. Issue #207; D70; D35.
+
+### D#208. The first-click trap is named; a menu form's refusal names the menu routes
+
+**Context.** A first click on a fresh VCL grid is consumed by focus, and
+an automatic repeat was asked for. `require_active` can never be satisfied
+on a popup menu form, and a `foreground` that makes one active was asked
+for.
+
+**Decision.** No automatic repeat: a repeated click is a retry, which
+takes the evidence with it (D45), and on a control that took the first
+click it acts twice. The `delivered_no_effect` hint (D#195) gains one
+sentence: on a VCL grid the first click may only give it the focus, and a
+second explicit click on the same cell is the expected next step, not a
+retry. No activation either (D64): the `require_active` refusal now says
+that on a popup menu window it can never clear and names the menu's own
+routes, `menu_by_keyboard` and `send_keys`. Issue #208; D45; D64; D#189.

@@ -97,7 +97,8 @@ def click_element(element: AccessibleElement, *, button: str = "left",
 def set_text(hwnd: int, text: str, *,
              cadence: Cadence = ROBOT,
              allow_pattern: bool = True,
-             live_window: int = 0) -> list[Attempt]:
+             live_window: int = 0,
+             insert_first: bool = False) -> list[Attempt]:
     """Replace a control's text.
 
     **`live_window` is accepted and ignored here.** It is the Linux
@@ -153,6 +154,10 @@ def set_text(hwnd: int, text: str, *,
     # toolkit's own keyboard path, which is what a bound field commits on.
     inserted = Attempt(Tier.WINDOW_MESSAGE,
                        lambda: win_input.insert_text(hwnd, text), rank=1, name="inserted")
+    if insert_first:
+        # The profile says this class swallows typing (#207): the insert
+        # goes first, typing stays as the fallback.
+        typed.rank, inserted.rank = 1, 0
     if not cadence.is_robot or not allow_pattern:
         return [typed, inserted]
     return [
@@ -205,7 +210,8 @@ def unblocked(hwnd: int) -> Condition:
 def set_text_element(element: AccessibleElement, text: str, *,
                      cadence: Cadence = ROBOT,
                      allow_pattern: bool = True,
-                     live_window: int = 0) -> list[Attempt]:
+                     live_window: int = 0,
+                     insert_first: bool = False) -> list[Attempt]:
     """Replace an element's value: the same ladder and the same rule as
     `set_text`. Typing through the host is what runs the page's own input
     handling; the Value pattern is offered first only when a commit
@@ -214,7 +220,7 @@ def set_text_element(element: AccessibleElement, text: str, *,
 
     `live_window` is accepted and ignored, as in `set_text`: it is the Linux
     live gate (D#111) and Windows has no need of it."""
-    del live_window
+    del live_window, insert_first  # an element has one typed route; nothing to reorder
     typed = Attempt(
         Tier.WINDOW_MESSAGE,
         lambda: elements.replace_value(element, text, cadence=cadence),

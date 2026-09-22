@@ -185,6 +185,48 @@ answers the posted pair. `click` takes a per-call `menu_by_keyboard` to try
 it before declaring it. Set it after seeing a menu close with no effect
 and `routes_attempted` starting with `posted`.
 
+## `insert_first` (D#207)
+
+```json
+"insert_first": ["TsfDBInputEdit"]
+```
+
+`fnmatch` patterns against the control's window class. `set_value` types
+first and, when the field shows the value arrived short, delivers it whole
+through the control's own edit path (the insert route). A masked date edit
+or a combo edit swallows typed characters every time, so for a class listed
+here the insert route goes first and the typed attempt and its read-back
+are not paid. `type_text` and `send_keys` have no such fallback: on such a
+field, use `set_value`.
+
+## `insert_first` (D#207)
+
+```json
+"insert_first": ["TsfDBInputEdit"]
+```
+
+`fnmatch` patterns against the control's window class. `set_value` types
+first and, when the field shows the value arrived short, delivers it whole
+through the control's own edit path (the insert route). A masked date edit
+or a combo edit swallows typed characters every time, so for a class listed
+here the insert route goes first and the typed attempt and its read-back
+are not paid. `type_text` and `send_keys` have no such fallback: on such a
+field, use `set_value`.
+
+## `insert_first` (D#207)
+
+```json
+"insert_first": ["TsfDBInputEdit"]
+```
+
+`fnmatch` patterns against the control's window class. `set_value` types
+first and, when the field shows the value arrived short, delivers it whole
+through the control's own edit path (the insert route). A masked date edit
+or a combo edit swallows typed characters every time, so for a class listed
+here the insert route goes first and the typed attempt and its read-back
+are not paid. `type_text` and `send_keys` have no such fallback: on such a
+field, use `set_value`.
+
 ## `notes` (D#137)
 
 What the operator knows about a control class that a session cannot

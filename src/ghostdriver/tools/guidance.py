@@ -135,6 +135,29 @@ NO_EFFECT_HINT = (
     "the application's own interface or a person -- do not keep trying "
     "keys. A popup-menu item takes menu_by_keyboard=true. A control that "
     "checks that its window is active before acting ignores a posted click "
-    "while another window is active -- see focus. Otherwise this is a step "
+    "while another window is active -- see focus. On a VCL grid the first "
+    "click may only give it the focus: a second, explicit click on the same "
+    "cell is the expected next step, not a retry. Otherwise this is a step "
     "for a person: await_human."
+)
+
+#: Said when require_active refused a click (#208). A popup menu window is
+#: never its thread's active window in the sense a form is, so on one this
+#: refusal can never clear; the menu's own routes do not need it.
+REQUIRE_ACTIVE_REFUSAL = (
+    "require_active: the target's window is not active, so a focus-checking "
+    "control would ignore this click; nothing delivered. On a popup menu "
+    "window (a TMenuForm, a #32768) this can never clear: choose the item "
+    "with menu_by_keyboard=true, or send_keys to it. Otherwise hand it to a "
+    "person (await_human) or a tool that activates windows, or drop "
+    "require_active."
+)
+
+#: Said when type_text did not take (#207). It has no fallback of its own;
+#: set_value does.
+TYPE_TEXT_MISS_HINT = (
+    "if the field took none of the text, it swallows typed characters (a "
+    "masked date edit and a combo edit do): set_value delivers the value "
+    "whole through the control's own edit path when typing falls short, and "
+    "a profile can put that route first for this class (insert_first)."
 )
