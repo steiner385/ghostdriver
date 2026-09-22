@@ -367,7 +367,7 @@ class _ActingCore(_DenyCore, _ExpectCore):
             "cadence": prepared.cadence.name,
             "elapsed_ms": result.elapsed_ms,
             "disturbances": result.disturbances,
-            **({"index_drift": prepared.drift} if prepared.drift else {}),
+            **({"index_drift": prepared.drift} if getattr(prepared, "drift", None) else {}),
             **extra,
         }
         if result.error is not None:

@@ -9,6 +9,7 @@ from .core import (
     _error,
     _ToolboxCore,
 )
+from .dialogtext import _dialog_text  # noqa: F401  (its old home; tests import it here)
 from .guidance import BLOCKED_HINT, HUNG_HINT, PIXELS_HINT
 
 

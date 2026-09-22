@@ -151,7 +151,7 @@ def test_find_carries_a_physical_rect_when_the_display_is_scaled(app):
 # --- modals returns the dialog's whole text (D73) --------------------------------------
 
 def test_dialog_text_reads_child_controls_top_to_bottom(app):
-    from ghostdriver.tools.status import _dialog_text
+    from ghostdriver.tools.dialogtext import _dialog_text
 
     _box, _session = session_for(app["pid"])  # keeps the target process alive
 
