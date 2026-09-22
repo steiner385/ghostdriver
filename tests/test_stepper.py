@@ -24,6 +24,10 @@ class FakeBox:
         self.calls.append(("describe", session_id))
         return {"ok": True, "verified": "effect"}
 
+    def capture(self, session_id, locator=None, scale=1.0):
+        self.calls.append(("capture", session_id, locator))
+        return {"ok": True, "width": 8, "height": 4, "base64": f"PNG-{locator}"}
+
     def find(self, session_id, locator, all_windows=False):
         self.calls.append(("find", session_id, locator))
         if locator == "MISS":
@@ -155,3 +159,24 @@ def test_a_step_line_keeps_the_disturbances_by_name():
 def test_a_step_line_without_disturbances_carries_no_empty_key():
     line = step_summary(0, "find", {"ok": True, "match_count": 1})
     assert "disturbances" not in line
+
+
+# --- capture images ride on the batch result (#197) ----------------------------
+
+def test_a_capture_step_s_image_rides_beside_the_result_not_in_the_step_line():
+    from ghostdriver.tools.stepper import MAX_BATCH_IMAGES
+
+    steps = [{"tool": "capture", "args": {"locator": f"shot{i}"}} for i in range(MAX_BATCH_IMAGES + 1)]
+    out = run_steps(FakeBox(), "sid", steps)
+
+    assert out["ok"]
+    assert [i["step"] for i in out["images"]] == list(range(MAX_BATCH_IMAGES))
+    assert out["images"][0]["base64"] == "PNG-shot0" and out["images"][0]["width"] == 8
+    assert all("base64" not in line for line in out["steps"])
+    assert out["steps"][0]["image"] == "attached"
+    assert out["steps"][MAX_BATCH_IMAGES]["image"].startswith("dropped")
+
+
+def test_a_batch_without_captures_carries_no_images_key():
+    out = run_steps(FakeBox(), "sid", [{"tool": "describe", "args": {}}])
+    assert "images" not in out

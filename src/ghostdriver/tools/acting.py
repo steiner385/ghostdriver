@@ -92,7 +92,8 @@ class _ActingCore(_DenyCore, _ExpectCore):
         except ValueError as exc:
             return None, _error(ErrorKind.DENIED_BY_POLICY, str(exc))
 
-        return _Prepared(session=session, node=node, cadence=pace), None
+        return _Prepared(session=session, node=node, cadence=pace,
+                         drift=self._drift_note(session, locator)), None
 
     def _refuse_if_protected(self, node, what: str) -> dict | None:
         """Never put characters into a field that hides its contents.
@@ -320,6 +321,7 @@ class _ActingCore(_DenyCore, _ExpectCore):
             "cadence": prepared.cadence.name,
             "elapsed_ms": result.elapsed_ms,
             "disturbances": result.disturbances,
+            **({"index_drift": prepared.drift} if prepared.drift else {}),
             **extra,
         }
         if result.error is not None:

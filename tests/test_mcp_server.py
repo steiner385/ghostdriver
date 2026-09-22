@@ -389,3 +389,17 @@ def test_find_and_describe_disclaim_enabled_as_availability(server):
         assert "IsWindowEnabled" in description, name
         assert "owner-drawn" in description, name
 
+
+def test_batch_images_go_out_as_image_blocks():
+    """The pixels never go into the JSON text (#197): each image is a block
+    before it, and the structured result keeps the dimensions only."""
+    from ghostdriver.mcp_server import _with_images
+
+    out = _with_images({"ok": True, "steps": [{"i": 0, "tool": "capture", "image": "attached"}],
+                        "images": [{"step": 0, "base64": "QUJD", "width": 8, "height": 4}]})
+
+    kinds = [c.type for c in out.content]
+    assert kinds == ["image", "text"]
+    assert out.content[0].data == "QUJD"
+    assert "QUJD" not in out.content[1].text
+    assert out.structured_content["images"] == [{"step": 0, "width": 8, "height": 4}]

@@ -121,7 +121,11 @@ LocatorArg = Annotated[
         "and/or name= to name an element that is not a window (a tab "
         "item, a toolbar button) on the accessibility surface. Prefer "
         "these over handles: handles are recycled by "
-        "the OS and are valid only within one result."
+        "the OS and are valid only within one result. index= counts "
+        "siblings in the tree's own order, which a toolkit reorders as "
+        "controls take focus (a result says index_drift when that has "
+        "happened): anchor a form field by text= where it has one, or by "
+        "region= copied from an earlier find."
     )),
 ]
 AllWindows = Annotated[
@@ -542,8 +546,14 @@ def build_server(sessions: SessionManager | None = None) -> Any:
         "held window refuses all input by design — that is not a hang, and "
         "retrying will not help."
     ))
-    def modals(session_ref: SessionId) -> dict[str, Any]:
-        return box.modals(session_ref)
+    def modals(session_ref: SessionId,
+               full_text: Annotated[bool, Field(description=(
+                   "Return every text control whole. By default each control is "
+                   "cut to its first 600 characters, so an error dialog's message "
+                   "arrives without the stack trace in the memo beside it; the "
+                   "result says how much was cut."
+               ))] = False) -> dict[str, Any]:
+        return box.modals(session_ref, full_text=full_text)
 
     @server.tool(annotations=READS, description=(
         "The child windows inside a native container -- a panel of "
@@ -612,8 +622,8 @@ def build_server(sessions: SessionManager | None = None) -> Any:
               stop_on_failure: Annotated[bool, Field(description=(
                   "Stop at the first step that does not verify (default). "
                   "false runs every step regardless, for independent reads."
-              ))] = True) -> dict[str, Any]:
-        return box.batch(session_ref, steps, stop_on_failure=stop_on_failure)
+              ))] = True) -> CallToolResult:
+        return _with_images(box.batch(session_ref, steps, stop_on_failure=stop_on_failure))
 
     @server.tool(annotations=READS, description=(
         "Save a step-list as a named macro under the operator directory, so a "
@@ -1153,6 +1163,27 @@ def build_server(sessions: SessionManager | None = None) -> Any:
 
     _refuse_unknown_arguments(server)
     return server
+
+
+def _with_images(result: dict) -> Any:
+    """A result whose `images` ride out as image blocks, each before the
+    JSON, the way a standalone `capture` returns its picture (#197). The
+    base64 never goes into the text: unreadable and enormous there."""
+    import json
+
+    from mcp.types import CallToolResult, ImageContent, TextContent
+
+    images = result.pop("images", None) or []
+    content: list[Any] = [
+        ImageContent(type="image", data=image["base64"], mime_type="image/png")
+        for image in images
+    ]
+    for image in images:
+        image.pop("base64", None)
+    if images:
+        result["images"] = images
+    content.append(TextContent(type="text", text=json.dumps(result, indent=2)))
+    return CallToolResult(content=content, structured_content=result)
 
 
 def _refuse_unknown_arguments(server: Any) -> None:
