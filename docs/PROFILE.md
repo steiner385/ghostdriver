@@ -130,46 +130,6 @@ foreground, nothing the operator notices. Declared rather than automatic
 because the message is private to one toolkit; `click` also takes a
 per-call `hover` to try it before listing a class.
 
-## `hover_before_click` (D#133)
-
-Window classes whose posted click is preceded by the VCL mouse-enter
-notification:
-
-```json
-"hover_before_click": ["THtLeftPanel"]
-```
-
-`fnmatch` patterns against the control's window class. A VCL control's
-belief that the mouse is over it is set by the application on idle from
-the real cursor, not from mouse messages, and handed to the control as a
-private notification (`CM_MOUSEENTER`). A control that acts on a click only
-in that state never answers the posted pair alone -- `delivered_to` right,
-no effect, every time. Listed here, the notification is posted first, and
-the click result says so (`hover`). Still a posted route: no pointer, no
-foreground, nothing the operator notices. Declared rather than automatic
-because the message is private to one toolkit; `click` also takes a
-per-call `hover` to try it before listing a class.
-
-## `hover_before_click` (D#133)
-
-Window classes whose posted click is preceded by the VCL mouse-enter
-notification:
-
-```json
-"hover_before_click": ["THtLeftPanel"]
-```
-
-`fnmatch` patterns against the control's window class. A VCL control's
-belief that the mouse is over it is set by the application on idle from
-the real cursor, not from mouse messages, and handed to the control as a
-private notification (`CM_MOUSEENTER`). A control that acts on a click only
-in that state never answers the posted pair alone -- `delivered_to` right,
-no effect, every time. Listed here, the notification is posted first, and
-the click result says so (`hover`). Still a posted route: no pointer, no
-foreground, nothing the operator notices. Declared rather than automatic
-because the message is private to one toolkit; `click` also takes a
-per-call `hover` to try it before listing a class.
-
 ## `menus_by_keyboard` (D#189)
 
 ```json
@@ -184,34 +144,6 @@ second. The default is the other way round, because an ordinary menu
 answers the posted pair. `click` takes a per-call `menu_by_keyboard` to try
 it before declaring it. Set it after seeing a menu close with no effect
 and `routes_attempted` starting with `posted`.
-
-## `insert_first` (D#207)
-
-```json
-"insert_first": ["TsfDBInputEdit"]
-```
-
-`fnmatch` patterns against the control's window class. `set_value` types
-first and, when the field shows the value arrived short, delivers it whole
-through the control's own edit path (the insert route). A masked date edit
-or a combo edit swallows typed characters every time, so for a class listed
-here the insert route goes first and the typed attempt and its read-back
-are not paid. `type_text` and `send_keys` have no such fallback: on such a
-field, use `set_value`.
-
-## `insert_first` (D#207)
-
-```json
-"insert_first": ["TsfDBInputEdit"]
-```
-
-`fnmatch` patterns against the control's window class. `set_value` types
-first and, when the field shows the value arrived short, delivers it whole
-through the control's own edit path (the insert route). A masked date edit
-or a combo edit swallows typed characters every time, so for a class listed
-here the insert route goes first and the typed attempt and its read-back
-are not paid. `type_text` and `send_keys` have no such fallback: on such a
-field, use `set_value`.
 
 ## `insert_first` (D#207)
 

@@ -78,22 +78,6 @@ WM_MOUSEMOVE = 0x0200
 #: is in the WM_APP range, and another toolkit could mean something else
 #: by it.
 CM_MOUSEENTER = 0xB013
-#: The VCL's private "the mouse entered you" notification (CM_BASE + 19).
-#: A VCL control's belief that the mouse is over it is set by the
-#: application on idle from the real cursor, not from mouse messages, and
-#: delivered as this; a control that acts on a click only in that state
-#: has to be told first (#133). Only posted where asked for -- the value
-#: is in the WM_APP range, and another toolkit could mean something else
-#: by it.
-CM_MOUSEENTER = 0xB013
-#: The VCL's private "the mouse entered you" notification (CM_BASE + 19).
-#: A VCL control's belief that the mouse is over it is set by the
-#: application on idle from the real cursor, not from mouse messages, and
-#: delivered as this; a control that acts on a click only in that state
-#: has to be told first (#133). Only posted where asked for -- the value
-#: is in the WM_APP range, and another toolkit could mean something else
-#: by it.
-CM_MOUSEENTER = 0xB013
 WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
 WM_RBUTTONDOWN = 0x0204
