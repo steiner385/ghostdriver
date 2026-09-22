@@ -8178,3 +8178,55 @@ count on the second inert delivery; a route that never delivered is not
 called inert; a miss with other changes keeps the plain suffix; a success
 carries no outcome; the function keys resolve (`env: any`). Issue #195;
 D#133; D64; D45.
+
+### D#199. A grid cell's editor is a question the hint asks, not a fact it states
+
+**The field report.** A Change Number cell in an owner-drawn grid took
+neither a posted key nor a real keystroke -- the latter swallowed by the
+application's own barcode-scan handler -- and the value went in through
+the application's REST interface instead.
+
+**What was wrong here.** D#195, written a day earlier, had the failed
+click name the routes still inside the contract, and one of them read:
+"an editable grid cell opens its editor on f2 or a double-click
+(count=2), and then takes set_value on the editor window it shows". Two
+promises in one clause -- that the editor exists, and that it is a
+window -- and neither had been measured on anything. A hint that asserts
+is followed; the operator above followed it into the retries D#195 exists
+to stop.
+
+**The measurement this decision does not have.** The question is one
+call: post `f2` or a double-click on the cell, `find` again, and see
+whether a window appeared that was not there before. It has to be taken
+on the grid in question -- whether a cell edits through a window is a
+property of that grid, not of grids -- and nothing here can substitute
+for it. It was not taken: this was written on Linux, and the target is a
+live line-of-business application in the maintainer's own session. Issue
+#199 carries the procedure for whoever is in front of it.
+
+**Decision: the hint asks instead.** It now names the check (`f2` or a
+double-click, then `find` again -- an edit under the grid, *or* a popup,
+which needs `all_windows=true`) and both answers. A window appeared: an
+ordinary control, `set_value` reaches it, nothing new is needed. Nothing
+appeared: the cell is painted rather than a window, `capture` shows it,
+there is nothing for `set_value` to address, and the value goes in
+through the application's own interface or a person -- said in those
+words, with "do not keep trying keys", because the answer that ends an
+attempt has to end it.
+
+**Why not build the primitive and find out.** Because the two answers
+need different code and only one of them needs any: the window case is
+`set_value` on a control that already resolves. An `edit_cell` written
+before the measurement would be a wrapper around the branch that needs no
+wrapper, and a lie in the branch that has no window -- exactly the
+promise this issue was opened to stop. The second answer is not a gap to
+close later either: no window means no locator, and D53 says a target the
+strategy cannot fit is reported as such rather than worked around. So the
+out-of-band route is named in the tool's own words rather than left for
+the caller to think of after the seventh key.
+
+**Evidence.** `tests/test_outcomes.py::test_the_grid_cell_editor_is_a_check_not_a_promise`:
+the old promise is gone, the check is named, both answers are present,
+and the second names `capture` and the application's own interface
+(`env: any`, the result built by hand). README's "What it does not do"
+carries the limit. Issue #199; D#195; D53; D33.

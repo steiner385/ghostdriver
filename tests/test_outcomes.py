@@ -61,6 +61,25 @@ def test_a_delivered_click_that_changed_nothing_names_the_routes_left(box):
     assert "computer-use" not in message and "real input" not in message
 
 
+def test_the_grid_cell_editor_is_a_check_not_a_promise(box):
+    """D#199: whether a cell edits through a window is the grid's property.
+
+    The clause promised one ("the editor window it shows") on a cell that
+    then took neither posted keys nor real ones. It now says how to find
+    out, and what each of the two answers means -- including that the
+    second one ends the attempt rather than inviting more keys.
+    """
+    reported = box._reported(missed(), prepared(), "class=TsfDBInputEdit index=3")
+    message = reported["error"]["message"]
+
+    assert "the editor window it shows" not in message, "that was the promise"
+    assert "f2" in message and "count=2" in message, "the check is still named"
+    assert "If one appeared" in message and "If nothing appeared" in message, (
+        "both answers, or the caller has to guess which one they got")
+    assert "capture" in message and "the application's own interface" in message
+    assert "do not keep trying keys" in message
+
+
 def test_the_second_inert_delivery_on_the_same_control_says_so(box):
     locator = "class=TsfDBInputEdit index=3"
     for _ in range(2):

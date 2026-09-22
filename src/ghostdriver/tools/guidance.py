@@ -115,14 +115,26 @@ FOCUS_NOTE = (
 #: click were made against a verdict that read "try again"; the routes
 #: named here are the ones still inside the contract, in the order to try
 #: them. Never a pointer tool (D#133).
+#:
+#: The grid-cell clause is a check, not a promise (D#199). It read "opens
+#: its editor on f2 or a double-click, and then takes set_value on the
+#: editor window it shows" -- an editor window nobody had measured, on a
+#: cell that then took neither posted keys nor real ones. Whether a cell
+#: edits through a window is a property of the grid, so the hint says how
+#: to find out and what each answer means.
 NO_EFFECT_HINT = (
     "Delivered to the control and nothing changed: it may act only on a "
     "route this did not take. Still inside the contract: a combo or "
-    "dropdown opens from the keyboard (send_keys [\"f4\"] to the field); an "
-    "editable grid cell opens its editor on f2 or a double-click (count=2), "
-    "and then takes set_value on the editor window it shows (find with "
-    "all_windows=true); a popup-menu item takes menu_by_keyboard=true. A "
-    "control that checks that its window is active before acting ignores a "
-    "posted click while another window is active -- see focus. Otherwise "
-    "this is a step for a person: await_human."
+    "dropdown opens from the keyboard (send_keys [\"f4\"] to the field); a "
+    "grid cell may edit through a window -- post f2 or a double-click "
+    "(count=2), then `find` again and look for what was not there before, "
+    "an edit under the grid or a popup (all_windows=true). If one appeared, "
+    "it is an ordinary control and set_value reaches it. If nothing "
+    "appeared, the cell is painted rather than a window: `capture` shows "
+    "it, nothing addresses it for set_value, and its value goes in through "
+    "the application's own interface or a person -- do not keep trying "
+    "keys. A popup-menu item takes menu_by_keyboard=true. A control that "
+    "checks that its window is active before acting ignores a posted click "
+    "while another window is active -- see focus. Otherwise this is a step "
+    "for a person: await_human."
 )

@@ -294,6 +294,17 @@ platform-neutral, and a test keeps it that way.
   finds which route does -- a focus-revealed accessibility surface, or the
   control's own clipboard copy -- and records it; `capture` remains the way
   to look.
+- **Put a value into an owner-drawn grid cell.** A grid that edits through
+  a window -- an edit appearing under it, or a popup -- hands `set_value` an
+  ordinary control, and that case needs nothing new. A grid that paints its
+  editing the way it paints its rows offers no window to address, and there
+  is no primitive here that sets such a cell. Which one a grid is has not
+  been measured on a real target; the one field report is of a cell that
+  took neither a posted key nor a real one. So the tool says how to tell
+  the two apart (post `f2` or a double-click, then `find` again) instead of
+  promising the first, and says plainly what the second means: the value
+  goes in through the application's own interface, or a person does it
+  (D#199).
 - **No role mapping.** `Locator` carries a `role` field for profiles to
   populate later, but nothing resolves it, so `Locator.parse` rejects
   `role=` outright rather than accepting a query that would match nothing.
