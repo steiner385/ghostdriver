@@ -67,3 +67,23 @@ def test_a_missing_file_is_an_error(tmp_path, capsys):
 
     assert code == 2
     assert "could not be read" in capsys.readouterr().err
+
+
+def test_the_class_hints_are_summarised(tmp_path, capsys):
+    """A profile's author sees the tool read what they declared."""
+    import json
+
+    from ghostdriver.cli import cmd_check_profile
+
+    path = tmp_path / "hints.json"
+    path.write_text(json.dumps({
+        "posted_click_only": ["TsfCommandButton"], "insert_first": ["TsfDBInputEdit"],
+        "menus_by_keyboard": True, "notes": {"THtLeftPanel": "use the keys"}}))
+
+    assert cmd_check_profile(str(path)) == 0
+    out = capsys.readouterr().out
+    assert "posted_only     : TsfCommandButton" in out
+    assert "insert_first    : TsfDBInputEdit" in out
+    assert "menus           : chosen by the menu's keyboard route first" in out
+    assert "notes           : 1 class(es): THtLeftPanel" in out
+    assert "wait_idle waits for the surface" in out

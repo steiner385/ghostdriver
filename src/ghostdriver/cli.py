@@ -680,13 +680,26 @@ def cmd_check_profile(profile: str, operator_dir: str | None = None) -> int:
     print(f"sensitivity     : {len(loaded.sensitivity.notes)} note(s)")
     busy = loaded.busy_indicator
     if not busy:
-        print("busy_indicator  : none (actuation results will not say still_arriving; wait_idle is refused)")
+        print("busy_indicator  : none (actuation results will not say still_arriving; "
+              "wait_idle waits for the surface to hold still, weaker evidence)")
     elif busy.get("locator"):
         print(f"busy_indicator  : locator {busy['locator']!r}")
     else:
         r = busy.get("region") or {}
         print(f"busy_indicator  : region ({r.get('left')},{r.get('top')})-({r.get('right')},{r.get('bottom')}) ink_above {busy.get('ink_above', 0.02)}")
     print(f"safe_controls   : {len(loaded.safe_controls)}")
+    # The class-level hints (D#122, D#133, D#141, D#189, D#207, D#137): said
+    # here, so a profile's author can see the tool read what they declared.
+    for label, patterns in (("posted_only     ", loaded.posted_click_only),
+                            ("hover_first     ", loaded.hover_before_click),
+                            ("insert_first    ", loaded.insert_first),
+                            ("text_is_label   ", loaded.text_is_label)):
+        if patterns:
+            print(f"{label}: {', '.join(patterns)}")
+    if loaded.menus_by_keyboard:
+        print("menus           : chosen by the menu's keyboard route first")
+    if loaded.notes:
+        print(f"notes           : {len(loaded.notes)} class(es): {', '.join(loaded.notes)}")
     from .probe.profile import ProfileDocument
 
     # The probe writes evidence keys (Phase1Profile.OBSERVED) the tools do not
