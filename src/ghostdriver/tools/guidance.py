@@ -108,3 +108,21 @@ FOCUS_NOTE = (
     "cannot name what will appear) or for a tool that does activate windows, "
     "such as computer use, given the coordinates this tool found."
 )
+
+
+#: Said when a route delivered, the named expectation did not hold, and
+#: nothing changed around the action (#195). Seven retries of the same
+#: click were made against a verdict that read "try again"; the routes
+#: named here are the ones still inside the contract, in the order to try
+#: them. Never a pointer tool (D#133).
+NO_EFFECT_HINT = (
+    "Delivered to the control and nothing changed: it may act only on a "
+    "route this did not take. Still inside the contract: a combo or "
+    "dropdown opens from the keyboard (send_keys [\"f4\"] to the field); an "
+    "editable grid cell opens its editor on f2 or a double-click (count=2), "
+    "and then takes set_value on the editor window it shows (find with "
+    "all_windows=true); a popup-menu item takes menu_by_keyboard=true. A "
+    "control that checks that its window is active before acting ignores a "
+    "posted click while another window is active -- see focus. Otherwise "
+    "this is a step for a person: await_human."
+)

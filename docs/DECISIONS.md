@@ -8107,3 +8107,74 @@ which sat at the tool-module limit (D60).
 reported once with both handles; a control that went away is not drift;
 a locator without `index` never is (`env: any`, trees built by hand).
 Issue #198; D33.
+### D#194. A window that appeared is what the action did, and `changed` sees it
+
+**The field report.** A click on Ok raised a validation Error dialog. The
+result was `ok: false`, `postcondition_failed`, against `expect:
+{changed: true}` -- while `disturbances` carried `window_appeared: Error`.
+The click very much did something; the top line said it had not.
+
+**What was wrong.** `changed` compared the main window's surface-shape
+digest, and only that. A dialog is a separate top-level window, so the
+one effect the action produced was not a change to the thing being
+compared. And the sentence a failed action leads with said nothing about
+the dialog either; the diagnosis was in the detail, one layer down, under
+a verdict that read "try again".
+
+**Decision, in two parts.**
+
+- **`changed` also holds when the target's set of top-level windows
+  changes or it becomes held.** The backend snapshot the actuator already
+  takes carries both; the baseline is the digest, the windows and the
+  block state together, and any of the three moving is the surface
+  changing. Where a dialog appears in answer to a click, `changed` now
+  verifies it, as its name always promised.
+- **When a named expectation did not hold and a window appeared or the
+  target became held, the outcome says so.** `outcome:
+  delivered_raised_window`, `raised: [captions]`, and the error message
+  leads with "delivered, and a window appeared (Error); the named
+  expectation did not hold. Read it with modals and deal with it before
+  retrying." `ok` stays false: a disturbance is information, never a
+  verdict (D28), and a named expectation that did not hold did not hold.
+  The retry the flat sentence invited is the thing this stops.
+
+**Evidence.** `tests/test_outcomes.py`: the raised-window outcome, and
+`changed` holding on a window appearing and on the target becoming held,
+with the desktop stood in for (`env: any`).
+`tests/test_changed_postcondition.py`: a fixture modal raised during the
+verify window makes `{changed: true}` hold, with `window_appeared` in the
+disturbances (`env: windows`). Issue #194; D77; D28.
+
+### D#195. A delivered click that changed nothing is its own outcome, and the second one says so
+
+**The field report.** Seven Create Plan attempts against a VCL combo
+dropdown and an owner-drawn grid cell, every one `delivered_to` the right
+window with `postcondition_failed`, and a wrong hand-off to a pointer tool
+at the end. The tool knew: a route delivered, nothing changed, and the
+focus block's note explained why a VCL control ignores a posted click.
+The verdict did not say it.
+
+**Decision.** When a route delivered, the named expectation did not hold,
+and *nothing* changed around the action -- no window, no block, no
+foreground move -- the result carries `outcome: delivered_no_effect` and
+leads with the routes still inside the contract, in the order to try
+them: the keyboard for a combo (`send_keys ["f4"]`), the in-place editor
+for a grid cell (`f2` or a double-click, then `set_value` on the editor
+window it shows), the menu's keyboard route for a popup item, and then a
+step for a person. It never names a pointer tool (D#133).
+
+**The second time is said to be the second.** The ledger already records
+every actuation's outcome per session (D45). The report counts the failed
+actuations on the same locator in this session, this one included, and
+from the second onward leads with "this is delivery #N to this control
+with no effect; the same route will not act on a retry." That is the
+sentence that would have stopped attempt three.
+
+**The function keys are named keys.** `f1`..`f12` join `send_keys` on
+both backends, because a hint that names `f4` must be followable.
+
+**Evidence.** `tests/test_outcomes.py`: the outcome and its hint; the
+count on the second inert delivery; a route that never delivered is not
+called inert; a miss with other changes keeps the plain suffix; a success
+carries no outcome; the function keys resolve (`env: any`). Issue #195;
+D#133; D64; D45.

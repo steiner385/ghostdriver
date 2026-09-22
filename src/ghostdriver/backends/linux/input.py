@@ -46,6 +46,7 @@ NAMED_KEYS: dict[str, str] = {
     "home": "Home", "end": "End", "left": "Left", "up": "Up",
     "right": "Right", "down": "Down", "pageup": "Prior", "pagedown": "Next",
     "insert": "Insert",
+    **{f"f{n}": f"F{n}" for n in range(1, 13)},
 }
 
 #: Editing actions a control performs on a keystroke, named so `send_keys`

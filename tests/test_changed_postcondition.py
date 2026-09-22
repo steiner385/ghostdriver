@@ -109,3 +109,28 @@ def test_the_inactive_warning_is_suppressed_when_a_window_vanishes(app):
     kinds = {d["change"] for d in result["disturbances"]}
     assert "window_disappeared" in kinds, result["disturbances"]
     assert "warning" not in result, "a click that closed a window is not 'maybe ignored'"
+
+
+def test_a_dialog_that_appears_counts_as_changed(app):
+    """A click that raises a dialog did something. The digest is blind to a
+    new top-level window, so {changed: true} used to read as a flat miss
+    while disturbances said window_appeared (#194)."""
+    import ctypes
+    import threading
+    from ctypes import wintypes
+
+    from tests.fixtureapp import WM_FIXTURE_RAISE_MODAL
+
+    box, session = session_for(app["pid"])
+
+    def raise_the_modal_shortly():
+        time.sleep(0.5)
+        ctypes.windll.user32.PostMessageW(wintypes.HWND(app["main"]),
+                                          WM_FIXTURE_RAISE_MODAL, 0, 0)
+
+    threading.Thread(target=raise_the_modal_shortly, daemon=True).start()
+    result = box.click(session, GRID, at={"x": 40, "y": 25},
+                       expect={"changed": True, "timeout_s": 4})
+
+    assert result["ok"] and result["verified"] == "effect", result
+    assert any(d["change"] == "window_appeared" for d in result["disturbances"]), result["disturbances"]

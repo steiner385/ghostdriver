@@ -112,10 +112,22 @@ class _ExpectCore(_ToolboxCore):
             # holds when the shape digest surfaces already computes moves.
             surfaces = self.surfaces  # type: ignore[attr-defined]
             all_windows = bool(expect.get("all_windows", False))
-            baseline = surfaces(session.session_id, all_windows=all_windows).get("shape_digest")
+            snapshot = current().snapshot
+
+            def look() -> tuple:
+                # The shape digest is blind to a *new* top-level window: a
+                # dialog is not part of the main window's shape. A click
+                # that raised a validation error read as a flat failure
+                # against {changed: true} (#194). So the top-level windows
+                # and whether the target is held are part of "changed" too.
+                digest = surfaces(session.session_id, all_windows=all_windows).get("shape_digest")
+                seen = session.run(lambda: snapshot(session.pid))
+                return (digest, frozenset(seen.windows), tuple(seen.blocked_by))
+
+            baseline = look()
 
             def moved() -> bool:
-                return surfaces(session.session_id, all_windows=all_windows).get("shape_digest") != baseline
+                return look() != baseline
 
             return Condition(moved, "the target's surface changed"), "the target's surface changed"
 

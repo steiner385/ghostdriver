@@ -161,6 +161,9 @@ NAMED_KEYS = {
     # are refused.
     "home": 0x24, "end": 0x23, "left": 0x25, "up": 0x26, "right": 0x27,
     "down": 0x28, "pageup": 0x21, "pagedown": 0x22, "insert": 0x2D,
+    # The function keys: f4 opens a combo's list, f2 a grid cell's editor,
+    # on most toolkits (#195). Named keys carry nothing.
+    **{f"f{n}": 0x6F + n for n in range(1, 13)},
 }
 
 user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT,
