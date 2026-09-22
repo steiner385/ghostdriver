@@ -52,6 +52,12 @@ _STEP_FIELDS = (
 )
 
 
+#: How many capture images one batch result carries. Each is a couple of
+#: thousand tokens as an image block; a loop that captures every step
+#: would otherwise return a wall of pictures (#197).
+MAX_BATCH_IMAGES = 4
+
+
 def step_summary(index: int, tool: str, result: dict) -> dict:
     """One step's line in the run result: what it was and how it went."""
     out: dict = {"i": index, "tool": tool, "ok": bool(result.get("ok"))}
@@ -115,6 +121,7 @@ def run_steps(toolbox, session_id: str, steps, *, stop_on_failure: bool = True,
                       "steps must be a non-empty list of {tool, args}")
 
     ran: list[dict] = []
+    images: list[dict] = []
     stopped_at: int | None = None
     all_ok = True
 
@@ -130,7 +137,20 @@ def run_steps(toolbox, session_id: str, steps, *, stop_on_failure: bool = True,
             return _error(ErrorKind.NOT_ACTIONABLE, refusal)
 
         result = call_tool(toolbox, session_id, tool, args)
-        ran.append(step_summary(index, tool, result))
+        line = step_summary(index, tool, result)
+        if tool == "capture" and result.get("ok") and result.get("base64"):
+            # The pixels cannot ride on a JSON step line, and used to be
+            # dropped outright, so every capture in a batch had to be
+            # re-issued standalone (#197). They ride beside the result
+            # instead, for the protocol layer to return as image blocks.
+            if len(images) < MAX_BATCH_IMAGES:
+                images.append({"step": index, "base64": result["base64"],
+                               "width": result.get("width"), "height": result.get("height")})
+                line["image"] = "attached"
+            else:
+                line["image"] = (f"dropped: a batch carries at most {MAX_BATCH_IMAGES} "
+                                 "images; capture it standalone")
+        ran.append(line)
         if not result.get("ok"):
             all_ok = False
             if stop_on_failure:
@@ -142,5 +162,6 @@ def run_steps(toolbox, session_id: str, steps, *, stop_on_failure: bool = True,
         "completed": len(ran),
         "total": len(steps),
         "stopped_at": stopped_at,
+        **({"images": images} if images else {}),
         "steps": ran,
     }

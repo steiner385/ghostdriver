@@ -17,6 +17,7 @@ from ..model.result import ErrorKind
 from ..model.window import WindowNode, select_main_tree
 from ..resolve import resolve, resolve_elements
 from ..session import SessionManager
+from .drift import note_index_drift
 from .geometry import _top_level_overlapping
 
 #: How long a session's descendant list is trusted before it is re-read.
@@ -48,6 +49,9 @@ class _Prepared:
     session: object
     node: WindowNode
     cadence: object
+    #: Set when the locator's index= picked a different control than it did
+    #: the last time this session resolved it (#198).
+    drift: str | None = None
 
 
 def _accessible(element: AccessibleElement) -> dict:
@@ -135,6 +139,10 @@ class _ToolboxCore:
     #: (when, pids) per session: the descendant list is asked for on nearly
     #: every call, and a snapshot half a second old is still the truth.
     _tree_cache: dict = field(default_factory=dict)
+    #: (session id, locator) -> the handle its index= last picked, and the
+    #: drift note waiting to ride on the next result (#198).
+    _index_seen: dict = field(default_factory=dict)
+    _index_drift: dict = field(default_factory=dict)
     #: Where tool calls are recorded (trace.py); resolved from the
     #: environment on first use, and a no-op when nothing is configured.
     _trace: Any = None
@@ -280,6 +288,14 @@ class _ToolboxCore:
             ]
         )
 
+    def _note_index_drift(self, session, expression: str, picked, found: list) -> None:
+        note_index_drift(self._index_seen, self._index_drift, session.session_id,
+                         expression, picked, found)
+
+    def _drift_note(self, session, expression: str) -> str | None:
+        """The pending drift note for this locator, once (#198)."""
+        return self._index_drift.pop((session.session_id, expression), None)
+
     def _resolve(self, session, expression: str, all_windows: bool) -> list:
         """Every window or element `expression` names.
 
@@ -307,7 +323,10 @@ class _ToolboxCore:
         if not locator.is_element:
             found: list = [node for tree in trees
                            for node in resolve(tree, unindexed, confirm=confirm)]
-            return _pick(found, index)
+            picked = _pick(found, index)
+            if index is not None and len(picked) == 1:
+                self._note_index_drift(session, expression, picked[0], found)
+            return picked
 
         from ..backends import current
         walk_elements_awake = current().walk_elements_awake

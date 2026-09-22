@@ -126,10 +126,12 @@ class DiscoveryTools(_VisibilityCore):
             if note:
                 described["note"] = note
             elements.append(described)
+        drift = self._drift_note(session, locator)
         result = {
             "ok": True,
             "locator": locator,
             "match_count": len(matches),
+            **({"index_drift": drift} if drift else {}),
             "frame": "screen",
             **self._frame_note(),
             "elements": elements,

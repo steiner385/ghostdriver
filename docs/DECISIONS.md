@@ -8042,6 +8042,71 @@ observation having happened.
 **Evidence.** `tests/test_windows_unresponsive.py`; `tests/conftest.py`
 (`silent_target`); D76 (Gate 5). Issue #29.
 
+### D#196. `modals` reports each text control on its own, capped by default
+
+**The field report.** Every `modals` call on a VendorApp error dumped the
+Java stack trace held in the dialog's memo -- three to four thousand
+tokens, paid about eight times -- when only the message line was needed.
+
+**Decision.** Each readable text control in a dialog is reported on its
+own (`controls`: class, length, text), in reading order, and by default
+cut to its first 600 characters with `cut` saying how many were left out.
+A one-line message and a memo full of trace are then told apart, and the
+memo does not cost the message beside it. The joined `text` stays, built
+from the capped pieces so the whole is bounded too; `truncated_chars` and
+a note say when anything was cut, and `full_text: true` returns
+everything. A "Message:" parser would have been target knowledge; the
+cap is not. The helpers moved to `tools/dialogtext.py` because
+`status.py` sat at the tool-module limit (D60).
+
+**Evidence.** `tests/test_dialog_text.py`: three controls reported, the
+long one cut with its count, `full_text` whole, the joined text bounded
+(`env: any`, the tree stood in for). Issue #196; D73; D11.
+
+### D#197. A batch's captures come back as images
+
+**The field report.** A `capture` step in a batch returned width and
+height and no pixels, so every capture had to be re-issued standalone --
+the round trip a batch exists to remove.
+
+**Decision.** The step line still carries no pixels (a JSON line cannot).
+The image rides beside the batch result and the protocol layer returns
+it as an image block before the JSON, exactly as a standalone `capture`
+does; the step line says `image: attached`. At most four images ride in
+one batch result, and a fifth capture's line says it was dropped and why.
+The base64 never enters the text: unreadable and enormous there, as D73
+measured.
+
+**Evidence.** `tests/test_stepper.py`: images collected beside the steps,
+none in a step line, the cap and its note (`env: any`).
+`tests/test_mcp_server.py`: image blocks before the text, the base64
+absent from the text and the structured result. Issue #197; D#75; D73.
+
+### D#198. An `index=` locator that picks a different control than before says so
+
+**The field report.** Fields on a form located by `index=N` shifted as
+fields filled and emptied, and a value landed in the wrong field twice.
+
+**What was measured.** `index` picks from the window tree's sibling
+order, which on Windows is z-order, and a VCL form reorders siblings as
+controls take focus. So the same locator names a different control after
+the previous field was edited -- exactly the sequence a form fill is.
+
+**Decision.** Reordering the index would change every existing locator's
+meaning, so the order stays. Instead the session remembers what each
+`index=` locator picked, and when the same locator picks a different
+control while the earlier one is still among the matches, the next
+result -- `find` or the actuation -- carries `index_drift` naming both
+handles and the stable anchors: `text=` where the field has one, or
+`region=` copied from an earlier `find`. Said once per drift. A control
+that went away is not drift. The locator argument's own description now
+says the same. The bookkeeping lives in `tools/drift.py`, off the core,
+which sat at the tool-module limit (D60).
+
+**Evidence.** `tests/test_index_drift.py`: a reordered sibling list is
+reported once with both handles; a control that went away is not drift;
+a locator without `index` never is (`env: any`, trees built by hand).
+Issue #198; D33.
 ### D#194. A window that appeared is what the action did, and `changed` sees it
 
 **The field report.** A click on Ok raised a validation Error dialog. The
