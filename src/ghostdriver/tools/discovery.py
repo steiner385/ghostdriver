@@ -23,6 +23,10 @@ INK_THRESHOLD = disclosure_report.INK_THRESHOLD
 MAX_WAIT_S = 300.0
 
 
+#: How many suggested locators one describe carries; the rest are counted.
+MAX_SUGGESTED = 30
+
+
 class DiscoveryTools(_VisibilityCore):
     """Seeing the target: its tree, single elements, text, pixels, and waiting on it."""
 
@@ -35,6 +39,7 @@ class DiscoveryTools(_VisibilityCore):
         all_windows: bool = False,
         include_hidden: bool = False,
         collapse_threshold: int = 3,
+        within: str | None = None,
     ) -> dict:
         try:
             session = self.sessions.authorize(session_id, "describe")
@@ -45,6 +50,23 @@ class DiscoveryTools(_VisibilityCore):
         if not trees:
             return _error(ErrorKind.NOT_FOUND,
                           f"pid {session.pid} has no windows on this desktop")
+        if within:
+            # Root the summary at one window (#210). At scale the first
+            # describe collapses same-class siblings and hides everything
+            # under them -- 1,093 of 1,102 nodes, measured -- which is the
+            # right first answer and a dead end without a way back in.
+            try:
+                matches = self._resolve(session, within, all_windows)
+            except ValueError as exc:
+                return _error(ErrorKind.NOT_FOUND, str(exc), locator=within)
+            matches = [m for m in matches if not isinstance(m, AccessibleElement)]
+            if len(matches) != 1:
+                return _error(
+                    ErrorKind.NOT_FOUND if not matches else ErrorKind.AMBIGUOUS,
+                    f"within must name exactly one window; {within!r} matched "
+                    f"{len(matches)}. Use one of an earlier describe's "
+                    "suggested_locators, or add index=", locator=within)
+            trees = [matches[0]]
 
         windows, locators = [], []
         remaining, omitted, skipped = max_nodes, 0, 0
@@ -88,11 +110,21 @@ class DiscoveryTools(_VisibilityCore):
             "ok": True,
             "blocked": blocked,
             **({"blocked_hint": BLOCKED_HINT} if blocked else {}),
+            **({"within": within} if within else {}),
             "windows": windows,
-            "suggested_locators": locators[:30],
+            "suggested_locators": locators[:MAX_SUGGESTED],
+            # A cap that says nothing reads as "that was all of them" (D11).
+            **({"suggested_locators_omitted": len(locators) - MAX_SUGGESTED}
+               if len(locators) > MAX_SUGGESTED else {}),
             "nodes_shown": totals["nodes"],
             "truncated": truncated,
             "elided_by_collapsing": totals["elided"],
+            **({"expand_hint": (
+                "a collapsed group ([N x Class ...]) hides everything under its "
+                "members. To see inside one, describe again with within=<its "
+                "locator> -- the captioned ones are in suggested_locators; an "
+                "uncaptioned one is class=<Class> index=<n>.")}
+               if totals["elided"] else {}),
             "below_depth": totals["below_depth"],
             "windows_omitted_for_budget": omitted,
             "windows_hidden": skipped,

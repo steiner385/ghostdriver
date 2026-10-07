@@ -8325,3 +8325,60 @@ second explicit click on the same cell is the expected next step, not a
 retry. No activation either (D64): the `require_active` refusal now says
 that on a popup menu window it can never clear and names the menu's own
 routes, `menu_by_keyboard` and `send_keys`. Issue #208; D45; D64; D#189.
+
+### D#210. `describe` at scale: bounded and honest, and now a way back in
+
+**Context.** Gate 3 (#28) asks whether `describe` holds at the ~1,100
+windows of a fully loaded target; it had run on 108. The real-target run
+still needs an operator session. What could be done without one was a
+synthetic measurement: trees of 108 to 20,000 windows shaped like a
+business application (a shell of forms of panels of controls), through the
+same summarizer.
+
+**What was measured.**
+
+| windows | summary | time |
+|---|---|---|
+| 110 | ~20 tokens | < 1 ms |
+| 1,102 | ~40 tokens | < 1 ms |
+| 5,001 | ~150 tokens | < 1 ms |
+| 20,002 | ~560 tokens | < 10 ms |
+
+Independent of how many controls carry captions. The summary stays inside
+the budget at every size and always says what it hid: `[8 x Form -- 1093
+descendants not shown]`, `truncated: true`, `elided_by_collapsing`. The
+first two of the gate's three questions hold on this shape.
+
+**Where it stops being useful, which is the third question.**
+
+- Same-class siblings collapse into one group and everything under its
+  members is hidden: 1,093 of 1,102 windows in the 1,100 case. That is the
+  right first answer -- an outline of the views -- and a dead end, because
+  `describe` could not be rooted at one of them. `find within=(...)` lists
+  matches; it does not summarize a view.
+- `suggested_locators` was cut to 30 with nothing said (153 were offered at
+  20,000): a cap that says nothing reads as "that was all of them" (D11).
+
+**Decision.**
+
+- **`describe` takes `within`**: a window locator that must match exactly
+  one, and the summary is rooted there. Zero or several matches is an
+  error naming the count, never a guess (D33).
+- **A result that collapsed anything says how to get back in**
+  (`expand_hint`), pointing at `within` and at the locators already in the
+  result.
+- **The locator cap is said**: `suggested_locators_omitted` counts what
+  was left out.
+
+**What this does not settle.** That a real target's tree has this shape.
+The synthetic tree puts the views directly under the shell with one class;
+a real one may nest them, or mix classes so that fewer groups collapse and
+the node budget, not the collapse, does the cutting. #28 stays open for
+that run.
+
+**Evidence.** `tests/test_describe_scale.py`: the summary stays inside a
+4,000-character budget and says what it hid at 108, 1,100, 5,000 and
+20,000 windows, at 10% and 100% captioned; a collapsed result carries the
+hint and the view's locator; `within` roots the summary at one view and
+refuses zero or several; the locator cap is counted; a small tree carries
+neither note (`env: any`). Issue #210; #28; D11; D33; D76.

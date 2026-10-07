@@ -378,10 +378,17 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "Include windows and controls that are not visible. Roughly 90% "
             "of this target class is hidden, so expect far more output."
         ))] = False,
+        within: Annotated[str | None, Field(description=(
+            "Summarize only the subtree under this one window (a window "
+            "locator matching exactly one, e.g. one of an earlier describe's "
+            "suggested_locators). On a large target the first describe "
+            "collapses same-class siblings -- views, tabs, panels -- and hides "
+            "what is under them; this is the way back in."
+        ))] = None,
     ) -> dict[str, Any]:
         return box.describe(session_ref, depth=depth, max_nodes=max_nodes,
                             all_windows=all_windows,
-                            include_hidden=include_hidden)
+                            include_hidden=include_hidden, within=within)
 
     @server.tool(annotations=READS, description=(
         "Resolve a locator to elements. Returns a re-resolvable locator for "
