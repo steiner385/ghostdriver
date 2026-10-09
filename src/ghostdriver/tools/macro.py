@@ -11,6 +11,7 @@ already has (the `batch` it just ran, say), read back, listed, and archived.
 import json
 import time
 
+from ..interference import watch_fields
 from ..model.result import ErrorKind, GhostdriverError
 from ..operator import ENV_VAR, OperatorDir, OperatorDirError
 from ..policy import Tier
@@ -296,8 +297,7 @@ class MacroTools(_ToolboxCore):
         result["name"] = wf.name
         if warnings:
             result["warnings"] = warnings
-        if interference:
-            result["interference"] = interference
+        result.update(watch_fields(watch, interference))  # and what it could not see (#225)
         if took_foreground:
             result["ok"] = False
             result["foreground_taken"] = True

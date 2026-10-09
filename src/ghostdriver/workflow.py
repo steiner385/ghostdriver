@@ -811,6 +811,9 @@ class RunReport:
     verdict: str = "not_run"
     steps: list[StepReport] = field(default_factory=list)
     interference: list[dict] = field(default_factory=list)
+    #: What the watch could not see, when anything (#225): on a Wayland
+    #: desktop, the pointer.
+    interference_unwatched: str = ""
     watchdog_events: list[dict] = field(default_factory=list)
     attach: dict = field(default_factory=dict)
     release: dict = field(default_factory=dict)
@@ -828,6 +831,8 @@ class RunReport:
             "started_at": self.started_at, "finished_at": self.finished_at,
             "steps": [s.to_dict() for s in self.steps],
             "interference": self.interference,
+            **({"interference_unwatched": self.interference_unwatched}
+               if self.interference_unwatched else {}),
             "watchdog_events": self.watchdog_events,
             "attach": _trimmed(self.attach), "release": _trimmed(self.release),
         }
@@ -940,6 +945,9 @@ def run_workflow(
         if watch is not None:
             watch.stop()
             report.interference = watch.events()
+            # What the watch could not see -- asked of the watch itself, so the
+            # runner imports nothing but stays honest about a blind half.
+            report.interference_unwatched = getattr(watch, "unwatched", "")
             if any(e.get("kind") == "foreground_taken" for e in report.interference):
                 report.verdict = "failed"
                 report.error = (report.error + "; " if report.error else "") + \

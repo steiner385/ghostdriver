@@ -8677,3 +8677,39 @@ entry's value -- is unchanged and still asserted.
 `tests/test_linux_reading.py`, `test_linux_protection.py` and
 `test_linux_atspi.py` on linux-host-a, passing with the masked answer. Issue #219;
 D#34a; D#34b; D37; D38; D62.
+
+### D#225. On Wayland the interference watch watches focus, and says it cannot watch the pointer
+
+**Context.** The interference watch asks two questions while a macro replay
+or a workflow run is in progress: did the target take the foreground, and
+did the pointer move. On a Wayland desktop it refused at construction,
+because both answers came from X (D#215). That refused macro replay and the
+workflow runner outright, read-only macros included, even though every
+step inside them works there since D#221.
+
+**Decision.** The neutral watch takes an optional pointer sampler. On a
+Wayland desktop, the Linux watch samples the foreground from AT-SPI's
+`STATE_ACTIVE`, which W1 measured to track focus for native-Wayland and
+XWayland clients alike. It polls every 0.25s rather than 0.05s, because
+each sample walks every application's frames over D-Bus. It has no
+pointer: Wayland gives no global pointer query, and W5 is unmeasured.
+
+**What a result says about it.** A watch reports what it cannot see
+(`unwatched`). A macro result and a workflow report carry it as
+`interference_unwatched`, so an empty event list is never read as "the
+pointer did not move" -- the same rule as `blocked: null` (D#215). Asked of
+the watch itself, so the workflow runner stays free of imports (its
+structure guard).
+
+**What it does not change.** Live actuation (D#111) stays refused on
+Wayland: its own guard reads the pointer before each keystroke. The
+minimized watch stays refused: minimized state is unobservable there (W4).
+
+**Evidence.** `tests/test_interference_without_pointer.py` (`env: any`):
+the watch without a pointer, on its own thread, the Linux watch on Wayland
+reading the front from AT-SPI, the result fields, and `macro_replay`
+running and carrying the note. `tests/test_workflow.py`: the report says
+it, and says nothing when the pointer was watched. On a nested headless
+shell in Wayland mode, a native-Wayland fixture, through the tool layer: a
+`find` then `click` macro replayed, 2/2 steps, with the note. Issue #225;
+D#215; D#221; D#111.

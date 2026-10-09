@@ -28,7 +28,7 @@ POLL_S = 0.02
 class InterferenceWatch:
     def __init__(self, pid: int, *,
                  foreground_pid: Callable[[], int],
-                 cursor: Callable[[], tuple[int, int]],
+                 cursor: Callable[[], tuple[int, int]] | None,
                  family: Callable[[], list[int]] | None = None,
                  now: Callable[[], float] = time.time,
                  poll_s: float = POLL_S):
@@ -36,6 +36,9 @@ class InterferenceWatch:
         #: The process family to watch for, asked each poll (R5, D71).
         self._family = family
         self._foreground_pid = foreground_pid
+        #: None where the pointer cannot be read -- a Wayland desktop has no
+        #: global pointer query (W5). The foreground half still runs, and
+        #: `watches_pointer` says the other half did not (#225).
         self._cursor = cursor
         self._now = now
         self._poll_s = poll_s
@@ -56,6 +59,18 @@ class InterferenceWatch:
     def events(self) -> list[dict]:
         return list(self._events)
 
+    @property
+    def unwatched(self) -> str:
+        """What this watch cannot see, said in a sentence; "" when nothing."""
+        return "" if self.watches_pointer else POINTER_UNWATCHED
+
+    @property
+    def watches_pointer(self) -> bool:
+        """Whether pointer movement is watched at all. When it is not, no
+        `cursor_moved` event means nothing about the pointer, and a result
+        must say so rather than let the silence read as stillness."""
+        return self._cursor is not None
+
     def family_now(self) -> list[int]:
         """The target and its descendants right now; the target alone when
         no family was given or the snapshot failed."""
@@ -67,8 +82,8 @@ class InterferenceWatch:
             return [self.pid]
         return pids if self.pid in pids else [self.pid, *pids]
 
-    def observe(self, foreground_pid: int, cursor: tuple[int, int],
-                last_foreground: int, last_cursor: tuple[int, int]) -> None:
+    def observe(self, foreground_pid: int, cursor: tuple[int, int] | None,
+                last_foreground: int, last_cursor: tuple[int, int] | None) -> None:
         """One poll step, separated so it can be fed."""
         family = self.family_now()
         if foreground_pid in family and last_foreground not in family:
@@ -78,7 +93,7 @@ class InterferenceWatch:
                 "kind": "foreground_taken", "at": self._now(), "pid": foreground_pid,
                 "detail": f"a window of {who} became the foreground window",
             })
-        if cursor != last_cursor:
+        if cursor is not None and last_cursor is not None and cursor != last_cursor:
             self._events.append({
                 "kind": "cursor_moved", "at": self._now(),
                 "from": list(last_cursor), "to": list(cursor),
@@ -86,10 +101,30 @@ class InterferenceWatch:
             })
 
     def _run(self) -> None:
+        sample_cursor = self._cursor
         last_foreground = self._foreground_pid()
-        last_cursor = self._cursor()
+        last_cursor = sample_cursor() if sample_cursor else None
         while not self._stop.is_set():
-            foreground, cursor = self._foreground_pid(), self._cursor()
+            foreground = self._foreground_pid()
+            cursor = sample_cursor() if sample_cursor else None
             self.observe(foreground, cursor, last_foreground, last_cursor)
             last_foreground, last_cursor = foreground, cursor
             self._stop.wait(self._poll_s)
+
+
+#: Said in a result when the pointer half of the watch could not run.
+POINTER_UNWATCHED = (
+    "the pointer: this desktop gives no way to read it (Wayland, W5), so "
+    "pointer movement was not watched -- no cursor_moved event means "
+    "nothing either way"
+)
+
+
+def watch_fields(watch, events: list[dict]) -> dict:
+    """The fields a result carries about its watch: what it saw, and what it
+    could not see. A watch without a pointer must say so, or an empty event
+    list reads as "the pointer never moved" (#225)."""
+    fields: dict = {"interference": events} if events else {}
+    if getattr(watch, "unwatched", ""):
+        fields["interference_unwatched"] = watch.unwatched
+    return fields

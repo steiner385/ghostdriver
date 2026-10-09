@@ -45,11 +45,12 @@ def test_frame_correlation_is_skipped_not_refused_on_wayland(wayland, monkeypatc
     tree._correlate_frame(Frame(), pid=1)  # returns, does not raise
 
 
-def test_the_watches_refuse_at_construction_on_wayland(wayland):
-    from ghostdriver.backends.linux.interference import InterferenceWatch
+def test_the_minimized_watch_refuses_at_construction_on_wayland(wayland):
+    """Minimized state is unobservable on Wayland (W4, D#221). The
+    interference watch no longer refuses here: its foreground half reads
+    AT-SPI and it says it does not watch the pointer
+    (tests/test_interference_without_pointer.py, #225)."""
     from ghostdriver.backends.linux.isolate import MinimizedWatch
-    with pytest.raises(session_type.X11Only, match="interference watch"):
-        InterferenceWatch(1)
     with pytest.raises(session_type.X11Only, match="minimized watch"):
         MinimizedWatch(1)
 

@@ -296,6 +296,34 @@ def test_cursor_movement_alone_is_reported_not_judged():
     assert report.passed and report.interference == [{"kind": "cursor_moved"}]
 
 
+def test_a_run_whose_watch_cannot_see_the_pointer_says_so():
+    """On a Wayland desktop the watch reads the foreground and not the
+    pointer (#225); the report must not let "no cursor_moved" read as "the
+    pointer never moved"."""
+    box = FakeBox({
+        "find": {"ok": True, "match_count": 3},
+        "click": {"ok": True, "verified": "effect"},
+        "read": {"ok": True, "values": [{"text": "clicks=1"}]},
+    })
+    watch = FakeWatch()
+    watch.unwatched = "the pointer: not watched here"
+
+    report = run_workflow(box, walk_tabs(), pid=1, watch=watch)
+
+    assert report.passed
+    assert "pointer" in report.to_dict()["interference_unwatched"]
+
+
+def test_a_run_whose_watch_sees_the_pointer_adds_no_note():
+    box = FakeBox({
+        "find": {"ok": True, "match_count": 3},
+        "click": {"ok": True, "verified": "effect"},
+        "read": {"ok": True, "values": [{"text": "clicks=1"}]},
+    })
+    assert "interference_unwatched" not in run_workflow(
+        box, walk_tabs(), pid=1, watch=FakeWatch()).to_dict()
+
+
 def test_a_failed_attach_is_the_report_not_an_exception():
     box = FakeBox({"attach": {"ok": False, "error": {"message": "not approved"}}})
 
