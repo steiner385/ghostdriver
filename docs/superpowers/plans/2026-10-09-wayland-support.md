@@ -716,6 +716,8 @@ git commit -m "docs: D#<N> -- X-sourced state is refused on a Wayland session"
 
 ## Phase 1: the measurements (W1–W11)
 
+**Status (2026-10-09).** W1–W4 are measured on linux-host-a's own session, not a nested one: in a headless shell, injected input could give focus once and never move it again. They are built (D#221, `tests/test_linux_wayland_live.py`). W0 and the nested Wayland hidden desktop were superseded by D#217, which hosts X clients on a headless shell's Xwayland instead.
+
 Each measurement gets an issue labelled `env: linux`, a test in
 `tests/test_linux_wayland_*.py`, and a `D#<issue>` record. Run them on
 linux-host-a, the GNOME 50 Wayland host.

@@ -31,9 +31,37 @@ from ...disturbance import Snapshot
 from ...modality import TopLevel, find_modal_blocks
 from ...surface import is_web_host
 from .. import UnsupportedPlatform
-from . import display
+from . import display, session_type, tree
 from .deadline import call_with_deadline
 from .tree import _accessible
+
+
+def _wayland() -> bool:
+    return session_type.display_server() == "wayland"
+
+
+def _wayland_top_level_state(pid: int) -> list[TopLevel]:
+    """The same, from AT-SPI frames, on a Wayland desktop (#221).
+
+    Measured on linux-host-a's GNOME 50 session (W2, W4): a modal is a frame with
+    `STATE_MODAL` and no relation back to its owner, and a minimized frame
+    keeps `SHOWING`, so `visible` is AT-SPI's claim and cannot tell
+    minimized from shown. With no owner to read, a modal is attributed to
+    the application's first non-modal frame, so the block is reported rather
+    than dropped -- which window of the application it holds is the one
+    thing Wayland does not say.
+    """
+    found = tree.frames(pid)
+    owner = next((f.handle for f in found if "MODAL" not in f.states), 0)
+    return [
+        TopLevel(
+            handle=f.handle, class_name="frame", text=f.name,
+            visible="SHOWING" in f.states, enabled=True,
+            owner=owner if "MODAL" in f.states else 0,
+            modal="MODAL" in f.states, hung=False,
+        )
+        for f in found
+    ]
 
 
 def top_level_state(pid: int) -> list[TopLevel]:
@@ -48,6 +76,8 @@ def top_level_state(pid: int) -> list[TopLevel]:
     nothing on this platform ever reports a top-level as insensitive while
     a modal holds it (D#12). The blocking signal is `modal`.
     """
+    if _wayland():
+        return _wayland_top_level_state(pid)
     state: list[TopLevel] = []
     for xid in display.windows_of(pid):
         state.append(
@@ -157,6 +187,8 @@ def blocking_ancestor(handle: int) -> int | None:
     wrong refusal costs a caller an attempt; a wrong permission actuates
     into a held application, which is the failure D#12 exists to prevent.
     """
+    if _wayland():
+        return _wayland_blocking_ancestor(handle)
     pid = _pid_of_accessible(_accessible(handle))
     if pid is None:
         return None
@@ -176,6 +208,33 @@ def blocking_ancestor(handle: int) -> int | None:
     # The control's own frame is not held. It may still *be* the modal, in
     # which case acting on it is exactly what a caller should be doing.
     return None
+
+
+def _pid_of_handle(handle: int) -> int | None:
+    return _pid_of_accessible(_accessible(handle))
+
+
+def _frame_handle_of(handle: int) -> int | None:
+    """The handle of the frame a node sits in, by its path."""
+    entry = tree._HANDLES.get(handle)
+    return tree._BY_PATH.get(entry.path[:2]) if entry is not None else None
+
+
+def _wayland_blocking_ancestor(handle: int) -> int | None:
+    """Any modal of the application, unless the control is in it (#221).
+
+    No owner relation exists on Wayland (W2), so the question is answered
+    for the application -- the same weaker, safe-direction answer the X11
+    path gives when it cannot identify a frame: a wrong refusal costs an
+    attempt, a wrong permission actuates into a held application.
+    """
+    pid = _pid_of_handle(handle)
+    if pid is None:
+        return None
+    modals = [f.handle for f in tree.frames(pid) if "MODAL" in f.states]
+    if not modals or _frame_handle_of(handle) in modals:
+        return None
+    return modals[0]
 
 
 def _pid_of_accessible(accessible: Any) -> int | None:
@@ -205,9 +264,21 @@ def snapshot(pid: int) -> Snapshot:
     return Snapshot(
         windows={w.handle: w.text for w in state if w.visible},
         blocked_by=tuple(b.dialog.text or "(untitled)" for b in blocks),
-        foreground=display.active_window() or 0,
+        foreground=_wayland_foreground(pid) if _wayland() else (display.active_window() or 0),
         alive=True,
     )
+
+
+def _wayland_foreground(pid: int) -> int:
+    """The target's frame handle when it holds the front (W1, #221); else a
+    stable value that is none of its handles -- the other application's pid,
+    negated -- so a move between two other applications is still a change,
+    and never reads as the target taking the front."""
+    active = tree.active_frame()
+    if active is None:
+        return 0
+    owner, handle = active
+    return handle if owner == pid else -owner
 
 
 def surface_of(handle: int) -> str:

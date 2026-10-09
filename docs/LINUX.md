@@ -89,6 +89,17 @@ working. The measurements that will replace each refusal (W0–W11) are in
 `docs/superpowers/plans/2026-10-09-wayland-support.md`. A related
 measurement: GNOME 50 removed `gnome-shell --x11`, so `HiddenDesktop` now
 runs a headless `gnome-shell --wayland` instead (D#217).
+**Measured (D#221), on linux-host-a's own GNOME 50 Wayland session:**
+- `STATE_ACTIVE` and `window:activate`/`deactivate` track focus for
+  native-Wayland and XWayland clients alike (W1).
+- A modal is a frame with `STATE_MODAL` and no relation to its owner (W2).
+- Frame extents are window-relative (W3).
+- A minimized GTK4 frame still reads `SHOWING` and `VISIBLE` (W4).
+
+So on a Wayland desktop `snapshot`, `top_level_state` and
+`blocking_ancestor` come from AT-SPI, and tier-1 actions work: through the
+MCP tools, with another application at the front, `click` and `set_value`
+landed and focus did not move.
 
 **Sandboxed applications.** The model above -- "a Flatpak reaches the
 AT-SPI bus only with `--talk-name=org.a11y.Bus`, otherwise it is a target

@@ -8558,3 +8558,72 @@ nested shell, runtime directory or mount is left after any of them: the
 harnesses and `teardown` both sweep every process carrying the desktop's
 runtime directory (the headless shell does not always die on SIGTERM). Issue #217; #218;
 D75; D#8; D#11; D#12; D#14; D#215.
+
+### D#221. On a Wayland desktop, window state comes from AT-SPI, and tier-1 actions work
+
+**Context.** D#215 refused every X-sourced fact on a Wayland operator
+desktop. That was correct, because X answered about the wrong desktop, but
+it also refused every action: the actuator will not act on a desktop it
+cannot observe. linux-host-a, the box the MCP is used on, runs GNOME 50 on
+Wayland, so ghostdriver could read the operator's applications but not
+drive them.
+
+**How it was measured.** On linux-host-a's own session, with the operator's
+consent and the desktop handed over. A nested headless shell could not
+answer this: injected input there gave focus once and never moved it again,
+neither by the switcher nor by closing the focused window. On the real
+session, two GTK fixtures were driven, one a native Wayland client and one
+an XWayland client. Focus was moved with mutter's RemoteDesktop keyboard,
+so the compositor saw real input. Nothing was typed, and Super+H went only
+to a fixture. `tests/linux_wayland_live_probe.py` is that run;
+`tests/test_linux_wayland_live.py` gates it behind
+`GHOSTDRIVER_LIVE_WAYLAND=1` and pins what it found.
+
+| | Measured |
+|---|---|
+| W1, focus | After each of four Alt+Tab switches exactly one fixture frame held `STATE_ACTIVE`, alternating, for both kinds of client. A `window:deactivate`/`activate` pair arrived at the switch. For the X client, `_NET_ACTIVE_WINDOW` agreed; for the Wayland one it named nothing. `gnome-shell` (the switcher) and `mutter-x11-frames` also go active, and are skipped. |
+| W2, modality | A modal is a frame with `STATE_MODAL`. It does not take focus, and carries no relation to its owner. |
+| W3, position | Frame extents are `0,0,w,h`: relative to the window, never the display. |
+| W4, minimized | A minimized native-Wayland GTK4 frame keeps `SHOWING` and `VISIBLE` and gains no `ICONIFIED`. Only focus leaving it shows anything happened. |
+| Acting | Through the MCP tools at the `interactive` tier, with the XWayland fixture at the front: `click` on the Wayland fixture's toolbar button and `set_value` on its bound entry both landed at tier 1 (the fixture logged them), focus did not move, and no disturbance was reported. The actuator's snapshot of the target was alive, with another application's front. |
+
+**Decision.** On a Wayland operator desktop, `snapshot`, `top_level_state`
+and `blocking_ancestor` read AT-SPI frames (`tree.frames`, which lists a
+process's frames without walking their trees, and `tree.active_frame`):
+- **Foreground** is the target's frame handle when it holds the front,
+  and the front application's pid negated otherwise. That value is stable
+  and never one of the target's handles, so a move between two other
+  applications is still a change, but never reads as the target taking
+  the front.
+- **A modal** is attributed to the application's first non-modal frame,
+  so the block is reported rather than dropped. `blocking_ancestor` holds
+  every control of the application except those in the modal itself.
+  Wayland does not say which window a modal holds, and the safe direction
+  is the X11 path's own fallback.
+- **`visible`** is AT-SPI's `SHOWING`. It cannot tell a minimized window
+  from a shown one (W4), which is why `restore`, the minimized strategy
+  and `is_minimized` stay refused or answer "no hint" there.
+
+Still refused on Wayland, because no Wayland signal for them has been
+measured:
+- capture;
+- the pointer half of the interference watch, and with it live actuation
+  (W5, W11);
+- the operator notice (W10);
+- macro replay, which arms a watch.
+
+**Found on the way, fixed here.** `click` and `set_value` failed on *every*
+Linux desktop. The tool layer aims an actuation through
+`winapi.client_centre`/`client_to_screen` before it acts (the denied-region
+check, D72), and the Linux shim refused both. A tier-1 action needs no
+point. The aim only has to agree with the element rects and denied
+regions, and those are AT-SPI extents, so that is the space these answer
+in (window-relative on Wayland, and for GTK4 on X11, D#40d).
+
+**Evidence.** `tests/test_wayland_atspi_state.py` (`env: any`, against
+fakes): top-level state from frames, the modal attributed and reported,
+foreground for the target and for another application, no frames reading
+as gone, `blocking_ancestor` inside and outside the modal, and the aim.
+`tests/test_linux_wayland_live.py` on linux-host-a: 10/10 in three runs, then
+11/11 once the actuator-observation check was added. Issue #221;
+D#215; D#217; D72; D#40d; D#12.

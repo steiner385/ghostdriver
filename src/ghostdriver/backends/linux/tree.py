@@ -236,7 +236,7 @@ def _rect(node: Any) -> tuple[int, int, int, int]:
     return (got.x, got.y, got.x + got.width, got.y + got.height)
 
 
-def _states(node: Any) -> frozenset[str]:
+def _states(node: Any, names: tuple[str, ...] = STATE_NAMES) -> frozenset[str]:
     import gi
 
     gi.require_version("Atspi", "2.0")
@@ -245,7 +245,7 @@ def _states(node: Any) -> frozenset[str]:
     got = call_with_deadline(node.get_state_set)
     if got is None:
         return frozenset()
-    return frozenset(name for name in STATE_NAMES
+    return frozenset(name for name in names
                      if got.contains(getattr(Atspi.StateType, name)))
 
 
@@ -327,6 +327,88 @@ def frame_xid_of(handle: int) -> int | None:
         return None
     xid = _HANDLES[frame_handle].xid
     return xid or None
+
+
+# --- frames only: the Wayland desktop's window state (#221) --------------------
+
+#: What a frame is asked on a Wayland desktop, where nothing about it can be
+#: read from X: whether it holds the front, and whether it is a modal.
+FRAME_STATE_NAMES = (*STATE_NAMES, "ACTIVE", "MODAL")
+
+#: Applications whose frames report ACTIVE alongside the real one, measured
+#: on GNOME 50: the shell's own UI (the Alt+Tab switcher) and mutter's X11
+#: frames client, which goes active with every X client.
+HELPER_APPLICATIONS = frozenset({"gnome-shell", "mutter-x11-frames"})
+
+
+@dataclass(frozen=True)
+class Frame:
+    handle: int
+    name: str
+    states: frozenset[str]
+
+
+def _frame_handle(frame: Any, pid: int, index: int, name: str,
+                  states: frozenset[str]) -> int:
+    """The handle an enumeration mints for this frame's path, minted here if
+    none has yet -- never replacing an entry an enumeration already filled
+    in, which carries the frame's children."""
+    path = (pid, index)
+    handle = _BY_PATH.get(path)
+    if handle is not None and handle in _HANDLES:
+        return handle
+    return _mint(path, _Entry(
+        accessible=frame, path=path, pid=pid,
+        role=call_with_deadline(frame.get_role_name) or "",
+        name=name, states=states, interfaces=()))
+
+
+def frames(pid: int) -> list[Frame]:
+    """A process's top-level frames, without walking what is under them.
+
+    What a snapshot needs on a Wayland desktop, before and after every
+    action (#221): `top_level_windows` walks the whole tree, which for a
+    browser is thousands of nodes. The handles are the ones an enumeration
+    would mint for the same path, so the two agree.
+    """
+    out = []
+    for app in _for_pid(pid):
+        count = call_with_deadline(app.get_child_count) or 0
+        for index in range(count):
+            frame = call_with_deadline(partial(app.get_child_at_index, index))
+            if frame is None:
+                continue
+            name = call_with_deadline(frame.get_name) or ""
+            states = _states(frame, FRAME_STATE_NAMES)
+            out.append(Frame(_frame_handle(frame, pid, index, name, states), name, states))
+    return out
+
+
+def active_frame() -> tuple[int, int] | None:
+    """(pid, frame handle) of the frame holding the front, or None.
+
+    `STATE_ACTIVE` tracks focus for native-Wayland and XWayland clients
+    alike -- measured on linux-host-a's GNOME 50 session: exactly one application
+    frame was active after every switch, and for the X client the X server
+    agreed (W1, #221). The shell's switcher and mutter's frames client also
+    go active and are skipped.
+    """
+    for app in _applications():
+        if (call_with_deadline(app.get_name) or "") in HELPER_APPLICATIONS:
+            continue
+        pid = call_with_deadline(app.get_process_id)
+        if pid is None:
+            continue
+        count = call_with_deadline(app.get_child_count) or 0
+        for index in range(count):
+            frame = call_with_deadline(partial(app.get_child_at_index, index))
+            if frame is None:
+                continue
+            states = _states(frame, FRAME_STATE_NAMES)
+            if "ACTIVE" in states:
+                name = call_with_deadline(frame.get_name) or ""
+                return pid, _frame_handle(frame, pid, index, name, states)
+    return None
 
 
 # --- the contract ------------------------------------------------------------

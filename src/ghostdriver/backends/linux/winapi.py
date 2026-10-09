@@ -28,7 +28,8 @@ from . import display, session_type
 
 #: What is answered. Everything else in `winapi` refuses.
 _WIRED = ("class_name", "is_visible_style", "foreground_window",
-          "resolve_live_window", "is_hung", "is_minimized")
+          "resolve_live_window", "is_hung", "is_minimized",
+          "client_centre", "client_to_screen", "screen_to_client")
 
 
 def resolve_live_window(pid: int) -> int:
@@ -108,6 +109,39 @@ def is_minimized(handle: int) -> bool:
 
     xid = tree.frame_xid_of(handle)
     return xid is not None and display.is_hidden(xid)
+
+
+def _extents(handle: int) -> tuple[int, int, int, int]:
+    from . import tree
+
+    return tree._rect(tree._accessible(handle))
+
+
+def client_centre(handle: int) -> tuple[int, int]:
+    """The centre of a node, in its own coordinates.
+
+    The tool layer aims every actuation before it acts -- the denied-region
+    check (D72) -- and the shim refused this, so `click` and `set_value`
+    failed on every Linux desktop (found driving linux-host-a, #221). A tier-1
+    action needs no point: it acts on the accessible. What the aim needs is
+    consistency with the element rects and the denied regions, and those are
+    all AT-SPI extents -- which on Wayland (W3) and for GTK4 on X11 (D#40d)
+    are relative to the window, not the display. So that is the space here.
+    """
+    left, top, right, bottom = _extents(handle)
+    return (right - left) // 2, (bottom - top) // 2
+
+
+def client_to_screen(handle: int, point: tuple[int, int]) -> tuple[int, int]:
+    """A point inside a node, in AT-SPI's extents space (see client_centre)."""
+    left, top, _, _ = _extents(handle)
+    return left + int(point[0]), top + int(point[1])
+
+
+def screen_to_client(handle: int, point: tuple[int, int]) -> tuple[int, int]:
+    """The inverse of client_to_screen."""
+    left, top, _, _ = _extents(handle)
+    return int(point[0]) - left, int(point[1]) - top
 
 
 def foreground_window() -> int:

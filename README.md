@@ -314,11 +314,16 @@ The Linux backend differs from Windows in these ways:
   and `assess_msaa` are not wired yet, so `surfaces` and `probe` return a
   `denied_by_environment` error that names what is missing. The embedded-document case has been measured
   (D#15); the wiring has not been done.
-- **Wayland is read-only for now.** On a Wayland desktop the tree reads
-  correctly. Everything that watched or drove the desktop through X
-  refuses with `denied_by_environment` (D#215), because XWayland answers
-  about X clients only. The plan for the rest is
-  `docs/superpowers/plans/2026-10-09-wayland-support.md`.
+- **On a Wayland desktop, reading and tier-1 acting work.** Window state
+  comes from AT-SPI there, not X (D#221): focus from `STATE_ACTIVE`, modals
+  from `STATE_MODAL`. So `attach`, `describe`, `find`, `read`, `click` and
+  `set_value` work, with focus left where the operator had it, which was
+  measured on GNOME 50. Three things are still refused there: `capture`,
+  `restore`, and anything that needs the pointer or a watch (the minimized
+  strategy, live actuation, macro replay), because Wayland cannot report
+  minimized state or the pointer (D#215, D#221). A modal blocks the whole
+  application, since Wayland does not say which window it holds. The plan
+  for the rest is `docs/superpowers/plans/2026-10-09-wayland-support.md`.
 - **The hidden desktop is a headless GNOME Shell.** GNOME 50 removed
   `gnome-shell --x11`, so the nested desktop runs `gnome-shell --headless
   --wayland` and the target is an X client of its Xwayland (D#217). It needs
