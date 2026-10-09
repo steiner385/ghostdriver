@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 
 import gi
@@ -21,6 +22,11 @@ from gi.repository import Atspi  # noqa: E402
 
 WAKE_BUDGET_S = 15.0
 WAKE_POLL_S = 0.25
+
+#: How long to wait for the page to finish loading before the first ask.
+#: The wake question (D58) is about a *loaded* page; asked mid-load the
+#: answer was "no document" on a busy box, which is not the same fact.
+LOAD_BUDGET_S = 30.0
 
 
 def _find_role(node, role_name, depth=0, max_depth=25):
@@ -136,6 +142,18 @@ def main():
         print(json.dumps(report), flush=True)
         return 1
 
+    # Keep reading load events after the announce: the first ask waits for
+    # the page to say it finished (see LOAD_BUDGET_S).
+    def read_events():
+        for line in app.stdout:
+            line = line.strip()
+            if line:
+                try:
+                    load_events.append(json.loads(line))
+                except ValueError:
+                    pass
+    threading.Thread(target=read_events, daemon=True).start()
+
     Atspi.init()
     desktop = Atspi.get_desktop(0)
     mine = None
@@ -158,9 +176,19 @@ def main():
         app.terminate()
         return 1
 
-    # The wake question: is the document there the first time anything asks,
-    # or does it take retrying? Budget generously and record how long it
-    # actually took, rather than assuming either answer.
+    # The wake question: once the page has loaded, is the document there the
+    # first time anything asks, or does it take retrying? Asked only after
+    # the page says it finished -- asking mid-load measured the load, not
+    # the wake, and failed intermittently on a busy box. How long the load
+    # took is recorded, so a slow run explains itself.
+    load_started = time.monotonic()
+    while time.monotonic() - load_started < LOAD_BUDGET_S:
+        if any(e.get("state", "").endswith("FINISHED") for e in load_events):
+            break
+        time.sleep(0.1)
+    report["load_finished_before_ask"] = any(
+        e.get("state", "").endswith("FINISHED") for e in load_events)
+    report["load_wait_s"] = round(time.monotonic() - load_started, 2)
     doc = _find_role(mine, "document web")
     report["doc_found_on_first_ask"] = doc is not None
     report["doc_children_on_first_ask"] = doc.get_child_count() if doc is not None else None

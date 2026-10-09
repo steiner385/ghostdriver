@@ -13,53 +13,48 @@ import shutil
 import signal
 import subprocess
 import sys
-import time
 
 import pytest
 
 from tests.conftest import on_linux
+from tests.linux_nested_shell import NEEDED as NESTED_NEEDED
+from tests.linux_nested_shell import inner, nested_env
+from tests.linux_probe_support import collect
 
 pytestmark = [on_linux, pytest.mark.slow]
 
-DISPLAY = ":71"
 BUS_LAUNCHER = "/usr/libexec/at-spi-bus-launcher"
 
 
 @pytest.fixture(scope="module")
 def wired():
-    missing = [t for t in ("Xvfb", "dbus-run-session", "convert", "xwininfo")
+    missing = [t for t in (*NESTED_NEEDED, "convert", "xwininfo")
                if shutil.which(t) is None]
     if not os.path.exists(BUS_LAUNCHER):
         missing.append(BUS_LAUNCHER)
     if missing:
         pytest.skip("slice 2 needs: " + ", ".join(missing))
 
-    server = subprocess.Popen(["Xvfb", DISPLAY, "-screen", "0", "1280x800x24"],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    inner = (f"{BUS_LAUNCHER} --launch-immediately & sleep 3; "
-             f"exec {sys.executable} -m tests.linux_reading_probe")
-    probe = subprocess.Popen(
-        ["dbus-run-session", "--", "bash", "-c", inner],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-        start_new_session=True,
-        env=dict(os.environ, DISPLAY=DISPLAY, GSETTINGS_BACKEND="memory",
-                 GDK_BACKEND="x11", PYTHONPATH="src"),
-    )
-    line, deadline = None, time.monotonic() + 180
-    try:
-        for out in probe.stdout:
-            if out.startswith("{") and '"controls"' in out:
-                line = out
-                break
-            if time.monotonic() > deadline:
-                break
-    finally:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(os.getpgid(probe.pid), signal.SIGTERM)
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            probe.wait(timeout=20)
-        server.terminate()
-        server.wait(timeout=10)
+    # A headless gnome-shell's Xwayland (#217), not a bare Xvfb: capture
+    # finds a frame's X window through the window manager's client list,
+    # and a bare Xvfb has none (D75) -- so this test failed on `main` behind
+    # the hang that usually stopped it first.
+    with nested_env() as env:
+        probe = subprocess.Popen(
+            ["dbus-run-session", "--", "bash", "-c",
+             inner(f"{sys.executable} -m tests.linux_reading_probe")],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+            start_new_session=True, env=env,
+        )
+        try:
+            # A real deadline (collect): the old loop only checked the clock
+            # when a line arrived, so a silent probe hung the suite.
+            line, _trace = collect(probe.stdout, '"controls"', 180)
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(os.getpgid(probe.pid), signal.SIGTERM)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                probe.wait(timeout=20)
 
     if line is None:
         pytest.skip("the slice-2 probe produced no report")

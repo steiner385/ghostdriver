@@ -118,3 +118,18 @@ def test_what_belongs_to_a_desktop_is_found_by_its_runtime_directory(tmp_path):
     (proc / "self").mkdir()
 
     assert hidden_desktop._processes_in("/tmp/ghostdriver-desktop-ab12", proc=str(proc)) == [101, 103]
+
+
+def test_a_missing_xwayland_is_named_not_met_at_connect(monkeypatch):
+    """Without the Xwayland binary the headless shell still announces an X
+    display, and nothing ever answers on it: CI's first Linux run failed
+    with "connection refused" (mutter only recommends the package). So it
+    is a requirement, named up front like the others (#217)."""
+    import types
+
+    from ghostdriver.backends.linux import hidden_desktop
+    monkeypatch.setattr(hidden_desktop.shutil, "which",
+                        lambda tool: None if tool == "Xwayland" else f"/usr/bin/{tool}")
+    monkeypatch.setattr(hidden_desktop.subprocess, "run",
+                        lambda *a, **k: types.SimpleNamespace(stdout="--headless", stderr=""))
+    assert hidden_desktop._unavailable() == ["Xwayland"]

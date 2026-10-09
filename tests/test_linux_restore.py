@@ -20,7 +20,6 @@ import os
 import shutil
 import signal
 import subprocess
-import time
 from pathlib import Path
 
 import pytest
@@ -28,6 +27,7 @@ import pytest
 from tests.conftest import on_linux
 from tests.linux_nested_shell import NEEDED as NESTED_NEEDED
 from tests.linux_nested_shell import nested_env
+from tests.linux_probe_support import collect_lines
 
 pytestmark = [on_linux, pytest.mark.slow]
 
@@ -50,16 +50,10 @@ def l7():
             start_new_session=True,
             env=env,
         )
-        lines, deadline = [], time.monotonic() + 260
         try:
-            for line in probe.stdout:
-                line = line.strip()
-                if line.startswith(("CONTROL", "RESULT", "TIMING", "ABORT", "==")):
-                    lines.append(line)
-                if line.startswith("RESULT after_activate") or line.startswith("ABORT"):
-                    break
-                if time.monotonic() > deadline:
-                    break
+            # A real deadline (collect_lines): the old loop only checked the
+            # clock when a line arrived, so a silent probe hung the suite.
+            lines = collect_lines(probe.stdout, ("CONTROL", "RESULT", "TIMING", "ABORT", "=="), ("RESULT after_activate", "ABORT"), 260)
         finally:
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(os.getpgid(probe.pid), signal.SIGTERM)

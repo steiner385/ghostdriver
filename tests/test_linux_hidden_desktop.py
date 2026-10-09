@@ -30,7 +30,7 @@ from tests.conftest import on_linux
 
 pytestmark = [on_linux, pytest.mark.slow]
 
-NEEDED = ("dbus-daemon", "dbus-send", "gnome-shell")
+NEEDED = ("dbus-daemon", "dbus-send", "gnome-shell", "Xwayland")
 
 
 def _unavailable() -> list[str]:

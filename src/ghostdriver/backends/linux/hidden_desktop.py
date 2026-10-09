@@ -98,7 +98,10 @@ def _unavailable() -> list[str]:
     backend has met (46, 50) can, but a shell that cannot is named here
     rather than failing later with a log nobody reads.
     """
-    missing = [t for t in ("dbus-daemon", "dbus-send", "gnome-shell")
+    # Xwayland too: without it the shell still announces an X display and
+    # nothing answers on it (mutter only recommends the package; CI's first
+    # Linux run met exactly that).
+    missing = [t for t in ("dbus-daemon", "dbus-send", "gnome-shell", "Xwayland")
                if shutil.which(t) is None]
     if "gnome-shell" not in missing:
         helped = subprocess.run(["gnome-shell", "--help"], capture_output=True,

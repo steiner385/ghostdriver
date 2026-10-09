@@ -716,7 +716,7 @@ git commit -m "docs: D#<N> -- X-sourced state is refused on a Wayland session"
 
 ## Phase 1: the measurements (W1–W11)
 
-**Status (2026-10-09).** W1–W4 are measured on linux-host-a's own session, not a nested one: in a headless shell, injected input could give focus once and never move it again. They are built (D#221, `tests/test_linux_wayland_live.py`). W0 and the nested Wayland hidden desktop were superseded by D#217, which hosts X clients on a headless shell's Xwayland instead.
+**Status (2026-10-09).** W1–W4 are measured on linux-host-a's own session, not a nested one: in a headless shell, injected input could give focus once and never move it again. They are built (D#221, `tests/test_linux_wayland_live.py`). **Deferred by the operator (2026-10-09):** W6 (capture), W10 (the notice) and W11 (live actuation) each put a GNOME consent dialog on the operator's own screen; they wait until one is actually needed. Reading and tier-1 acting already work. W0 and the nested Wayland hidden desktop were superseded by D#217, which hosts X clients on a headless shell's Xwayland instead.
 
 Each measurement gets an issue labelled `env: linux`, a test in
 `tests/test_linux_wayland_*.py`, and a `D#<issue>` record. Run them on

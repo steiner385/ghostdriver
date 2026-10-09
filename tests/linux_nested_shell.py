@@ -24,7 +24,7 @@ from pathlib import Path
 SNIPPET = Path(__file__).parent / "linux_nested_shell.sh"
 
 #: What every nested-display probe needs, beyond its own tools.
-NEEDED = ("dbus-run-session", "gnome-shell", "xprop")
+NEEDED = ("dbus-run-session", "gnome-shell", "Xwayland", "xprop")
 
 _OPERATORS = ("DISPLAY", "WAYLAND_DISPLAY", "WAYLAND_SOCKET", "XAUTHORITY",
               "XDG_SESSION_TYPE", "AT_SPI_BUS_ADDRESS", "DBUS_SESSION_BUS_ADDRESS")

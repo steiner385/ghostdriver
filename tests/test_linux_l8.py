@@ -30,11 +30,11 @@ import shutil
 import signal
 import subprocess
 import sys
-import time
 
 import pytest
 
 from tests.conftest import on_linux
+from tests.linux_probe_support import collect
 
 pytestmark = [on_linux, pytest.mark.slow]
 
@@ -61,14 +61,10 @@ def l8():
         env=dict(os.environ, DISPLAY=DISPLAY, GSETTINGS_BACKEND="memory",
                  GDK_BACKEND="x11", PYTHONPATH="src"),
     )
-    line, deadline = None, time.monotonic() + 120
     try:
-        for out in probe.stdout:
-            if out.startswith("{") and '"found_on_bus"' in out:
-                line = out
-                break
-            if time.monotonic() > deadline:
-                break
+        # A real deadline (collect): the old loop only checked the clock
+        # when a line arrived, so a silent probe hung the suite.
+        line, _trace = collect(probe.stdout, '"found_on_bus"', 120)
     finally:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(os.getpgid(probe.pid), signal.SIGTERM)
@@ -93,7 +89,16 @@ def test_a_webkitgtk3_document_is_awake_on_the_first_ask(l8):
     if not l8["doc_present"]:
         pytest.skip("no document ever appeared -- see the module docstring's "
                     "GTK4 finding; nothing below this can be measured")
-    assert l8["doc_found_on_first_ask"] is True
+    if not l8.get("load_finished_before_ask"):
+        # The first ask is only the wake question once the page has loaded;
+        # before that it measures the load. Skipped, with the wait, rather
+        # than failed: a harness that never reached the state the test is
+        # about has measured nothing (test_linux_restore.py's precedent).
+        pytest.skip(f"the page did not finish loading within "
+                    f"{l8.get('load_wait_s')}s, so the first ask measured the load")
+    assert l8["doc_found_on_first_ask"] is True, (
+        f"the loaded page's document was not there on the first ask "
+        f"(load took {l8.get('load_wait_s')}s)")
     assert l8["doc_children_on_first_ask"] and l8["doc_children_on_first_ask"] > 0
     assert l8["woke_after_s"] == 0.0
 

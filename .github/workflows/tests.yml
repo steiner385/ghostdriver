@@ -5,6 +5,14 @@ name: tests
 # Win32, and CLAUDE.md is explicit that a run on the wrong platform "looks
 # like success" -- so this required check runs on Windows, where the backend
 # tests actually execute rather than skip.
+#
+# `pytest-linux` is the Linux half. Without it, Linux broke three times with
+# nothing noticing: GNOME 50 removed `gnome-shell --x11` (#217), and
+# `attach`/`describe` and then `click`/`set_value` failed on every Linux
+# desktop (#215, #221) -- each found only by hand on linux-host-a. It runs the
+# whole suite against the Linux backend with the system's AT-SPI and GTK,
+# and lists every skip (-rs), because a green run that skipped the backend
+# says nothing about it.
 on:
   pull_request:
   push:
@@ -32,5 +40,33 @@ jobs:
       - name: Run the suite
         # PYTHONPATH=src matches the documented gate in CLAUDE.md.
         run: python -m pytest
+        env:
+          PYTHONPATH: src
+
+  pytest-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages
+        # gi and the typelibs come from the system, not pip: without the
+        # typelibs every AT-SPI test skips rather than fails (README).
+        # gnome-shell hosts the nested desktop the backend tests run on
+        # (#217); Xvfb, xdotool, xprop, xwininfo and ImageMagick are what the
+        # measurement harnesses drive and read with.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-venv python3-gi python3-xlib gir1.2-atspi-2.0 gir1.2-gtk-4.0 \
+            gir1.2-gtk-3.0 gir1.2-webkit2-4.1 at-spi2-core dbus-x11 \
+            gnome-shell mutter xwayland libgl1-mesa-dri \
+            xvfb xdotool x11-utils xclip imagemagick
+      - name: Install (a venv that can see the system's gi)
+        run: |
+          python3 -m venv --system-site-packages .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -e ".[dev,server]"
+      - name: Run the suite
+        run: .venv/bin/python -m pytest -rs
         env:
           PYTHONPATH: src

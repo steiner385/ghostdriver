@@ -107,6 +107,43 @@ def collect(stdout, marker, seconds):
     return report, trace
 
 
+def collect_lines(stdout, keep, stop, seconds):
+    """`collect` for the shell probes, which report in prefixed lines rather
+    than one JSON object: every stripped line starting with one of `keep`,
+    until one starting with one of `stop` (kept too), or the deadline.
+
+    The same real deadline as `collect`. The loops this replaces checked the
+    clock inside `for line in probe.stdout:` -- a silent probe blocked them
+    forever, which is how `test_linux_reading_wired.py` hung the local suite.
+    """
+    queued: queue.Queue = queue.Queue()
+
+    def pump():
+        for line in stdout:
+            queued.put(line)
+        queued.put(None)
+
+    threading.Thread(target=pump, daemon=True).start()
+
+    kept, deadline = [], time.monotonic() + seconds
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            line = queued.get(timeout=min(remaining, 1.0))
+        except queue.Empty:
+            continue
+        if line is None:
+            break
+        line = line.strip()
+        if line.startswith(tuple(keep)):
+            kept.append(line)
+        if line.startswith(tuple(stop)):
+            break
+    return kept
+
+
 def settle(what, predicate, timeout, interval=INTERVAL, giveup=None):
     """Poll `predicate` until it is true, and report what happened.
 

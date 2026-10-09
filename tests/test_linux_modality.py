@@ -23,13 +23,13 @@ import shutil
 import signal
 import subprocess
 import sys
-import time
 
 import pytest
 
 from tests.conftest import on_linux
 from tests.linux_nested_shell import NEEDED as NESTED_NEEDED
 from tests.linux_nested_shell import inner, nested_env
+from tests.linux_probe_support import collect
 
 pytestmark = [on_linux, pytest.mark.slow]
 
@@ -55,14 +55,10 @@ def modality():
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
             start_new_session=True, env=env,
         )
-        line, deadline = None, time.monotonic() + 220
         try:
-            for out in probe.stdout:
-                if out.startswith("{") and '"during"' in out:
-                    line = out
-                    break
-                if time.monotonic() > deadline:
-                    break
+            # A real deadline (collect): the old loop only checked the clock
+            # when a line arrived, so a silent probe hung the suite.
+            line, _trace = collect(probe.stdout, '"during"', 220)
         finally:
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(os.getpgid(probe.pid), signal.SIGTERM)

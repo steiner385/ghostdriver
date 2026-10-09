@@ -8678,6 +8678,10 @@ entry's value -- is unchanged and still asserted.
 `test_linux_atspi.py` on linux-host-a, passing with the masked answer. Issue #219;
 D#34a; D#34b; D37; D38; D62.
 
+**Confirmed by the operator (2026-10-09):** keep withholding by class; the
+narrowing options above stay unused. `set_value` already verifies by value
+without disclosure (D#34b's `confirms_value`), so there is little to gain.
+
 ### D#225. On Wayland the interference watch watches focus, and says it cannot watch the pointer
 
 **Context.** The interference watch asks two questions while a macro replay
