@@ -1,8 +1,17 @@
 # The Linux backend: a specification, and the measurements that come first
 
-Status: specified, not built -- but no longer unmeasured. The package
-`ghostdriver.backends.linux` answers every contract name with a refusal that
-points here. **D75 contradicted two things below**; the affected rows are
+Status (2026-10-09): **built for X11, except assessment.** The package
+`ghostdriver.backends.linux` wires 38 of the 42 contract names. The four
+assessment names still refuse with a pointer here: `region_evidence`,
+`resolve_hosted_app`, `assess_uia` and `assess_msaa`. As a result,
+`surfaces` and `probe` do not work on Linux. Their embedded-document case
+was measured (D#15), but nothing has been wired to it. The table below
+marks the rows that were built and the measurements that corrected them.
+The "proposed" column is kept as written, so the model and the
+measurement stay visible side by side.
+
+The spec was first written that way, before any of it was built. **D75
+contradicted two things below**; the affected rows are
 marked rather than rewritten, so the model and the measurement stay visible
 side by side. This
 document exists because the Windows backend was built by measurement --
@@ -10,8 +19,10 @@ every corner of it that mattered was a measurement contradicting a model
 (D21, D47, D49, D55, D56, D58) -- and the Linux one will be too. What
 follows is the model, stated so it can be contradicted.
 
-It was written on a machine with no Linux desktop. Nothing in it has been
-run.
+It was first written on a machine with no Linux desktop. Measurements 0-8
+below have since been run on Linux hosts, and each is recorded in the
+decision log. Wayland, MPX, and window managers other than GNOME Shell
+have not been measured.
 
 ## What the backend has to provide
 

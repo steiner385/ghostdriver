@@ -6,7 +6,7 @@ machine.
 
 ## Status
 
-**Usable on Windows.** Twenty-three tools over a session manager, in three
+**Usable on Windows, and on Linux under X11.** Twenty-three tools over a session manager, in three
 capability tiers (`read_only`, `interactive`, `full`), with session-scoped
 consent, a denylist that names controls by caption or by identity, a
 tiered actuation ladder that never activates a window, two isolation
@@ -14,7 +14,8 @@ strategies (`minimized`, with a watchdog; `hidden_desktop`, launch-only),
 locators for windows and for elements that are not windows, embedded web
 documents driven through their accessibility tree, and an operator
 directory the tool reads profiles and workflows from and refuses to read
-from any repository. Linux is specified (`docs/LINUX.md`), not built.
+from any repository. The Linux backend wires everything except
+assessment, so `surfaces` and `probe` refuse there (see *Platforms*).
 
 See `docs/superpowers/specs/2026-09-01-desktop-automation-mcp-design.md` for
 the design, `docs/DECISIONS.md` for what was decided along the way and why,
@@ -40,6 +41,19 @@ tool answers it per region.
 pip install -e ".[dev,server]"
 pytest
 ```
+
+On Linux, the backend reaches AT-SPI through PyGObject, and pip cannot
+install that. It comes from the system. Install the typelibs, then build
+the virtual environment with `--system-site-packages` so it can see `gi`:
+
+```bash
+sudo apt install python3-gi gir1.2-atspi-2.0 gir1.2-gtk-4.0 at-spi2-core xclip xvfb
+python3 -m venv --system-site-packages .venv
+```
+
+Without the typelibs, the AT-SPI tests do not fail. They skip, and the
+run still comes out green. GTK 4 is for the test fixture; the backend
+itself does not need it.
 
 The quick gate for everyday changes leaves out the tests that launch an
 engine, a hidden desktop or a server, or wait on a watchdog:
@@ -89,7 +103,17 @@ app's `claude_desktop_config.json`:
 ```
 
 Use the virtual environment's console script, not a bare `python`: the
-server needs the COM and Win32 bindings installed there. With the
+server needs the platform's bindings installed there: COM and Win32 on
+Windows, `gi` and `python-xlib` on Linux. On Linux the same registration
+reads:
+
+```bash
+claude mcp add --scope user --env GHOSTDRIVER_OPERATOR_DIR=$HOME/ghostdriver-operator ghostdriver -- /path/to/ghostdriver-mcp/.venv/bin/ghostdriver-mcp
+```
+
+The server must run inside the person's graphical session, with `DISPLAY`
+and the session's D-Bus address set. From a bare SSH shell it finds no
+accessibility bus and no display. With the
 operator directory configured, `attach` accepts a profile by bare name
 (`profile_path="sandbox"` finds `profiles/sandbox.json` there), so no
 path that names a machine crosses the wire.
@@ -269,12 +293,29 @@ and writes a report of every step and event back to `reports/`.
 
 ## Platforms
 
-Windows is the backend. Linux is specified in `docs/LINUX.md` -- AT-SPI
-for the tree and actuation, a nested X server for the structural
-isolation guarantee -- and its package refuses every call with a pointer
-there until it is built on a machine that can measure it. Everything
-above the backend boundary (`ghostdriver.backends.current()`) is
-platform-neutral, and a test keeps it that way.
+There are two backends, and `ghostdriver.backends.current()` picks one by
+`sys.platform`. Everything above that boundary is platform-neutral, and a
+test keeps it that way.
+
+**Windows** is complete. It reads the tree with window messages and UI
+Automation, acts by posted messages, and isolates by minimizing the target
+or by putting it on a hidden desktop.
+
+**Linux** targets X11. It reads the tree and acts through AT-SPI, reads
+window-manager state through EWMH, and gets a hidden desktop from a nested
+`Xvfb` that has its own D-Bus and AT-SPI buses. `docs/LINUX.md` lists each
+contract name with its Linux mechanism and the decision that measured it.
+The Linux backend differs from Windows in three ways:
+
+- **No tier 3.** GTK drops synthetic X events (D#11). An action that needs
+  real input is tier 4, sent with XTest, and only under the live-actuation
+  consent (D#111).
+- **No assessment.** `region_evidence`, `resolve_hosted_app`, `assess_uia`
+  and `assess_msaa` are not wired yet, so `surfaces` and `probe` fail with
+  an `UnsupportedPlatform` error that names what is missing. The embedded-document case has been measured
+  (D#15); the wiring has not been done.
+- **Wayland is unmeasured.** AT-SPI reads still work under Wayland, but
+  the window list, the watches and XTest are X11 mechanisms.
 
 ## What it does not do
 

@@ -1,8 +1,11 @@
 # ghostdriver-mcp
 
 An MCP server that drives desktop applications without stealing the desktop from
-the person using it. The Windows backend is built; the Linux backend is
-specified and not built.
+the person using it. There are two backends. Windows is complete. Linux
+(X11, AT-SPI) wires 38 of the 42 contract names. Its missing piece is
+assessment (`region_evidence`, `resolve_hosted_app`, `assess_uia`,
+`assess_msaa`), so `surfaces` and `probe` refuse there. `docs/LINUX.md`
+says what has been measured and what has not.
 
 Read `docs/DECISIONS.md` before changing behaviour. It is the project's real
 tracker: every decision that mattered was forced by a measurement, and it is
