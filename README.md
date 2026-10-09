@@ -305,7 +305,7 @@ or by putting it on a hidden desktop.
 window-manager state through EWMH, and gets a hidden desktop from a nested
 `Xvfb` that has its own D-Bus and AT-SPI buses. `docs/LINUX.md` lists each
 contract name with its Linux mechanism and the decision that measured it.
-The Linux backend differs from Windows in three ways:
+The Linux backend differs from Windows in these ways:
 
 - **No tier 3.** GTK drops synthetic X events (D#11). An action that needs
   real input is tier 4, sent with XTest, and only under the live-actuation
@@ -314,8 +314,13 @@ The Linux backend differs from Windows in three ways:
   and `assess_msaa` are not wired yet, so `surfaces` and `probe` return a
   `denied_by_environment` error that names what is missing. The embedded-document case has been measured
   (D#15); the wiring has not been done.
-- **Wayland is unmeasured.** AT-SPI reads still work under Wayland, but
-  the window list, the watches and XTest are X11 mechanisms.
+- **Wayland is read-only for now.** On a Wayland desktop the tree reads
+  correctly. Everything that watched or drove the desktop through X
+  refuses with `denied_by_environment` (D#215), because XWayland answers
+  about X clients only. The plan for the rest is
+  `docs/superpowers/plans/2026-10-09-wayland-support.md`.
+- **GNOME 50 and later cannot host the hidden desktop yet.** It runs
+  `gnome-shell --x11`, which GNOME 50 removed.
 
 ## What it does not do
 

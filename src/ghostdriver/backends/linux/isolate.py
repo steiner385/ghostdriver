@@ -131,6 +131,8 @@ class MinimizedWatch:
     def __init__(self, pid: int, main_xid: int, *,
                  now: Callable[[], float] = time.monotonic,
                  poll_s: float = POLL_S) -> None:
+        from . import session_type
+        session_type.require_x11("the minimized watch")
         self.pid = pid
         self.main_xid = main_xid
         self.dog = Watchdog(now=now)

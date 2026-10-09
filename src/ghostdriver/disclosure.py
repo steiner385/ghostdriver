@@ -84,13 +84,18 @@ def explain_empty_handed(value: dict, *, protected: bool, verdict: str) -> dict:
     return value
 
 
-def note_unreliable(value: dict, ink: float) -> dict:
+def note_unreliable(value: dict, ink: float | None) -> dict:
     """An empty answer from a control that is visibly painting something.
 
     The read path does not work on this control, and reporting "empty" would
     be wrong in the way D66 names -- a caller acts on a blank that is not
-    blank.
+    blank. `ink` is None when the desktop cannot be captured to check
+    (Wayland, #215); that is said rather than read as "paints nothing".
     """
+    if ink is None:
+        value["note"] = ("empty, and this desktop could not be checked for "
+                         "rendered content -- treat the blank as unverified")
+        return value
     if ink > INK_THRESHOLD:
         value["read_unreliable"] = True
         value["rendered_ink"] = ink

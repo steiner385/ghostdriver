@@ -1,7 +1,7 @@
 """Discovery and reading: describe, find, read, capture, wait_for."""
 
 from .. import disclosure as disclosure_report
-from ..backends import current
+from ..backends import UnsupportedPlatform, current
 from ..model.element import AccessibleElement
 from ..model.locator import Locator
 from ..model.result import ErrorKind, GhostdriverError
@@ -238,8 +238,11 @@ class DiscoveryTools(_VisibilityCore):
             raw = read_window_text(node.handle, disclose=disclose)
             value = disclosure_report.describe(node.class_name, raw)
             if raw == "" and node.visible:
+                ink: float | None
                 try:
                     ink = session.run(lambda h=node.handle: current().ink_fraction(h))
+                except UnsupportedPlatform:
+                    ink = None  # cannot look, not "blank" (#215)
                 except Exception:
                     ink = 0.0
                 disclosure_report.note_unreliable(value, ink)

@@ -207,3 +207,33 @@ def test_a_name_the_backend_has_not_built_is_a_result_not_an_exception(
     assert result["ok"] is False
     assert result["error"]["kind"] == ErrorKind.DENIED_BY_ENVIRONMENT.value
     assert "not implemented on Linux" in result["error"]["message"]
+
+
+def test_blocking_is_unknown_not_empty_when_the_platform_cannot_read_it(
+        box, monkeypatch):
+    """`[]` says "not blocked". On a desktop where modality cannot be read
+    (Wayland, issue 215) that would be a confident wrong answer. `None`
+    is the unknown the server instructions already tell callers to
+    expect."""
+    from ghostdriver import backends
+    from ghostdriver.backends import UnsupportedPlatform
+
+    class NoModality:
+        def top_level_state(self, pid):
+            raise UnsupportedPlatform("modality cannot be read here")
+
+    session_id = _attached(box, Tier.READ_ONLY)
+    monkeypatch.setattr(backends, "current", lambda: NoModality())
+    session = box.sessions.authorize(session_id, "describe")
+
+    assert box._blocking(session) is None
+
+
+def test_the_linux_backend_answers_the_hung_question_describe_asks():
+    """`describe` asks `winapi.is_hung` of every window it shows; the Linux
+    shim refused it, so `describe` failed on every Linux desktop (found
+    verifying #215). Linux has no `IsHungAppWindow` -- a frozen
+    application is caught by the read deadline (D#9) -- so the answer is
+    the one `top_level_state` already gives: not hung."""
+    from ghostdriver.backends.linux import winapi
+    assert winapi.is_hung(1) is False

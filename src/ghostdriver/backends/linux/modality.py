@@ -30,6 +30,7 @@ from typing import Any
 from ...disturbance import Snapshot
 from ...modality import TopLevel, find_modal_blocks
 from ...surface import is_web_host
+from .. import UnsupportedPlatform
 from . import display
 from .deadline import call_with_deadline
 from .tree import _accessible
@@ -192,6 +193,9 @@ def snapshot(pid: int) -> Snapshot:
     """
     try:
         state = top_level_state(pid)
+    except UnsupportedPlatform:
+        # Not a dead target: a desktop this cannot read (#215).
+        raise
     except Exception:
         return Snapshot(alive=False)
     if not state:

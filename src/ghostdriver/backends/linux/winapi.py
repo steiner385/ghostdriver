@@ -24,11 +24,11 @@ from __future__ import annotations
 from typing import Any
 
 from .. import UnsupportedPlatform
-from . import display
+from . import display, session_type
 
 #: What is answered. Everything else in `winapi` refuses.
 _WIRED = ("class_name", "is_visible_style", "foreground_window",
-          "resolve_live_window")
+          "resolve_live_window", "is_hung", "is_minimized")
 
 
 def resolve_live_window(pid: int) -> int:
@@ -57,7 +57,14 @@ def class_name(xid: int) -> str:
     registers. Elsewhere on this backend `class_name` carries the accessible
     *role* (D#40b) because the subject is an accessible; here the subject is
     an X window, and the window manager's answer is the honest one.
+
+    On a Wayland desktop there is no `WM_CLASS` to read, and `list_targets`
+    asks this of every window it counts -- refusing would refuse the listing
+    itself (final review, #215). An empty class is what an uncorrelated
+    handle already answered on X11.
     """
+    if session_type.display_server() == "wayland":
+        return ""
     return display.window_class(xid)
 
 
@@ -72,6 +79,35 @@ def is_visible_style(xid: int) -> bool:
     (D#13).
     """
     return not display.is_hidden(xid)
+
+
+def is_hung(handle: int) -> bool:
+    """Never "hung", and that is a measurement rather than a stub.
+
+    There is no `IsHungAppWindow` here. A frozen application is caught by
+    the read deadline instead (D#9), which is why `top_level_state` reports
+    `hung=False` for every window -- this gives `describe` the same answer
+    rather than failing every call on Linux (found verifying #215).
+    """
+    return False
+
+
+def is_minimized(handle: int) -> bool:
+    """Whether the frame holding `handle` is put away, for `attach`'s hint.
+
+    On X11 that is `_NET_WM_STATE_HIDDEN` on the frame's X window (D#13).
+    Where no X window can be found -- an uncorrelated frame, or a Wayland
+    desktop, where nothing has measured minimized state yet (W4) -- the
+    answer is False, which `attach` reads as "no hint", not as a claim. It
+    was refused outright, which made `attach` fail on every Linux desktop
+    (final review, #215).
+    """
+    if session_type.display_server() == "wayland":
+        return False
+    from . import tree
+
+    xid = tree.frame_xid_of(handle)
+    return xid is not None and display.is_hidden(xid)
 
 
 def foreground_window() -> int:

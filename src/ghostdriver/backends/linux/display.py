@@ -25,13 +25,33 @@ from __future__ import annotations
 
 import contextlib
 import threading
+from collections.abc import Iterator
 from typing import Any
 
-from .. import AccessibilityUnavailable
-from . import desktop_claim
+from .. import AccessibilityUnavailable, UnsupportedPlatform
+from . import desktop_claim, session_type
 
 _LOCK = threading.Lock()
 _DISPLAYS: dict[str, Any] = {}
+#: Per claimant: is its X server Xwayland? Asked once (`_is_xwayland`).
+_XWAYLAND: dict[str, bool] = {}
+
+
+@contextlib.contextmanager
+def _x_errors_ignored() -> Iterator[None]:
+    """`contextlib.suppress(Exception)`, except for a platform refusal.
+
+    Every fact here degrades to a default when X errors -- a window gone
+    mid-read is ordinary. A Wayland desktop is not: "not hidden", "gone",
+    "not modal" would each be a confident wrong answer, so `X11Only` (an
+    `UnsupportedPlatform`) passes through (#215).
+    """
+    try:
+        yield
+    except UnsupportedPlatform:
+        raise
+    except Exception:
+        pass
 
 
 def _display() -> Any:
@@ -55,12 +75,54 @@ def _display() -> Any:
     is the same fact: the desktop this backend reads is not there.
     """
     owner = desktop_claim.effective_owner()
+    if session_type.display_server(owner) == "wayland":
+        # XWayland would answer, about X clients only (#215).
+        session_type.require_x11("this call")
+    return _connect(owner)
+
+
+def _open(display_name: str | None) -> Any:
+    """Open an X connection, or say why not.
+
+    A seam of its own so the probe below can be tested without an X server
+    -- and without Xlib, which is why both imports live here: a test that
+    replaces this must not need Xlib installed (Windows CI does not have it).
+    """
+    from Xlib import display, error
+
+    try:
+        return display.Display(display_name)
+    except (error.DisplayNameError, error.DisplayConnectionError) as exc:
+        raise AccessibilityUnavailable(
+            f"cannot open the X display: {exc}. This backend reads "
+            "the window manager over X, so it needs a DISPLAY "
+            "pointing at a running server -- on a headless box that "
+            "has to be arranged deliberately, for instance with Xvfb."
+        ) from exc
+
+
+def _is_xwayland(owner: str) -> bool:
+    """Whether `owner`'s X server is Xwayland -- asked once, of the server
+    itself, for when the environment does not say (#215). A server that
+    cannot be reached is not answered here: `_display` reports that."""
+    if owner not in _XWAYLAND:
+        try:
+            conn = _connect(owner)
+        except AccessibilityUnavailable:
+            return False
+        _XWAYLAND[owner] = "XWAYLAND" in conn.list_extensions()
+    return _XWAYLAND[owner]
+
+
+session_type.register_server_probe(_is_xwayland)
+
+
+def _connect(owner: str) -> Any:
+    """The cached connection for `owner`, opened on first use."""
     with _LOCK:
         conn = _DISPLAYS.get(owner)
         if conn is None:
             desktop_claim.claim()
-            from Xlib import display, error
-
             # Explicit rather than ambient: swapping `os.environ["DISPLAY"]`
             # process-wide would race any other thread reaching for its own
             # first connection (a watch on an unrelated, ordinary session),
@@ -70,15 +132,7 @@ def _display() -> Any:
             # `Display()` with no argument reads the ambient environment,
             # which for the operator's own desktop is exactly right.
             display_name = desktop_claim.environment_for(owner).get("DISPLAY")
-            try:
-                conn = display.Display(display_name)
-            except (error.DisplayNameError, error.DisplayConnectionError) as exc:
-                raise AccessibilityUnavailable(
-                    f"cannot open the X display: {exc}. This backend reads "
-                    "the window manager over X, so it needs a DISPLAY "
-                    "pointing at a running server -- on a headless box that "
-                    "has to be arranged deliberately, for instance with Xvfb."
-                ) from exc
+            conn = _open(display_name)
             _DISPLAYS[owner] = conn
         return conn
 
@@ -88,7 +142,7 @@ def _atom(name: str) -> int:
 
 
 def _prop(window: Any, name: str) -> Any:
-    with contextlib.suppress(Exception):
+    with _x_errors_ignored():
         got = window.get_full_property(_atom(name), 0)
         if got is not None:
             return got.value
@@ -110,11 +164,11 @@ def window_pid(xid: int) -> int | None:
     extension hands it over (`LocalClientPIDMask`). Measured on Studio:
     1461891, the real application process, where `_NET_WM_PID` had nothing.
     """
-    with contextlib.suppress(Exception):
+    with _x_errors_ignored():
         value = _prop(_display().create_resource_object("window", xid), "_NET_WM_PID")
         if value:
             return int(value[0])
-    with contextlib.suppress(Exception):
+    with _x_errors_ignored():
         from Xlib.ext import res
 
         reply = res.query_client_ids(
@@ -165,7 +219,7 @@ def is_hidden(xid: int) -> bool:
     window stays `IsViewable` and asking the Windows question answers wrongly
     (D#13).
     """
-    with contextlib.suppress(Exception):
+    with _x_errors_ignored():
         window = _display().create_resource_object("window", xid)
         states = _prop(window, "_NET_WM_STATE") or []
         return _atom("_NET_WM_STATE_HIDDEN") in list(states)
@@ -177,6 +231,8 @@ def exists(xid: int) -> bool:
     try:
         _display().create_resource_object("window", xid).get_attributes()
         return True
+    except UnsupportedPlatform:
+        raise
     except Exception:
         return False
 
@@ -302,7 +358,7 @@ def window_name(xid: int) -> str:
     for prop in ("_NET_WM_NAME", "WM_NAME"):
         value = _prop(_display().create_resource_object("window", xid), prop)
         if value:
-            with contextlib.suppress(Exception):
+            with _x_errors_ignored():
                 if isinstance(value, bytes):
                     return value.decode("utf-8", "replace")
                 return str(value)
@@ -331,7 +387,7 @@ def is_modal(xid: int) -> bool:
     that does not read this cannot tell a held application from a working
     one (D#12).
     """
-    with contextlib.suppress(Exception):
+    with _x_errors_ignored():
         window = _display().create_resource_object("window", xid)
         states = _prop(window, "_NET_WM_STATE") or []
         return _atom("_NET_WM_STATE_MODAL") in list(states)
@@ -346,7 +402,7 @@ def transient_for(xid: int) -> int:
     platform ownership is *stated* rather than derived, which is a better
     position than Windows (D#12).
     """
-    with contextlib.suppress(Exception):
+    with _x_errors_ignored():
         window = _display().create_resource_object("window", xid)
         value = _prop(window, "WM_TRANSIENT_FOR")
         if value:
@@ -364,7 +420,7 @@ def geometry(xid: int) -> tuple[int, int, int, int]:
     is the part both agree on, exactly, and it is the part this backend
     uses to tell two frames of one process apart.
     """
-    with contextlib.suppress(Exception):
+    with _x_errors_ignored():
         got = _display().create_resource_object("window", xid).get_geometry()
         return (0, 0, got.width, got.height)
     return (0, 0, 0, 0)
@@ -389,7 +445,7 @@ def foreground_pid() -> int:
 
 def cursor() -> tuple[int, int]:
     """Where the pointer is, in root coordinates."""
-    with contextlib.suppress(Exception):
+    with _x_errors_ignored():
         pointer = _root().query_pointer()
         return (pointer.root_x, pointer.root_y)
     return (0, 0)
@@ -411,7 +467,7 @@ def iconify(xid: int) -> None:
 
     display = _display()
     window = display.create_resource_object("window", xid)
-    with contextlib.suppress(Exception):
+    with _x_errors_ignored():
         event = _protocol_event(window, _atom("WM_CHANGE_STATE"),
                                 [Xutil.IconicState, 0, 0, 0, 0])
         _root().send_event(
@@ -443,7 +499,7 @@ def activate(xid: int) -> None:
 
     display = _display()
     window = display.create_resource_object("window", xid)
-    with contextlib.suppress(Exception):
+    with _x_errors_ignored():
         event = _protocol_event(
             window, _atom("_NET_ACTIVE_WINDOW"), [2, X.CurrentTime, 0, 0, 0]
         )

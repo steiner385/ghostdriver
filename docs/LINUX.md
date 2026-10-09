@@ -80,6 +80,15 @@ structural isolation guarantee also changes shape: a nested compositor
 (`cage`, `weston --backend=headless`) instead of a nested X server. The
 first Linux backend should target X11 and say so, and measure the
 XWayland case before claiming anything about Wayland.
+**Measured (D#215): on a Wayland session, X answers about the wrong
+desktop.** Rootless XWayland knows only X clients, so it named gnome-shell
+as the foreground while Chrome held it, and called a live target gone.
+Enumeration is AT-SPI-sourced and was right. So on a Wayland operator
+desktop every X-sourced name now refuses (`X11Only`), and reading keeps
+working. The measurements that will replace each refusal (W0–W11) are in
+`docs/superpowers/plans/2026-10-09-wayland-support.md`. A related
+measurement: GNOME 50 removed `gnome-shell --x11`, so `HiddenDesktop` as
+built cannot start there.
 
 **Sandboxed applications.** The model above -- "a Flatpak reaches the
 AT-SPI bus only with `--talk-name=org.a11y.Bus`, otherwise it is a target

@@ -8382,3 +8382,103 @@ that run.
 hint and the view's locator; `within` roots the summary at one view and
 refuses zero or several; the locator cap is counted; a small tree carries
 neither note (`env: any`). Issue #210; #28; D11; D33; D76.
+
+### D#215. On a Wayland session, X-sourced desktop state is refused, not answered
+
+**Context.** linux-host-a, the box the MCP is actually used on, runs Ubuntu 26.04
+with GNOME Shell 50 in a **Wayland** session. The Linux backend reads the
+window tree through AT-SPI and everything about the *desktop* (foreground,
+pointer, modality, visibility, liveness, capture, real input) through X.
+On a Wayland session the X server is rootless XWayland, which knows only
+X clients. Nothing checked which kind of session it was talking to.
+
+**What was measured** (2026-10-09, linux-host-a's live session, read-only):
+
+| Read | Answer | Truth |
+|---|---|---|
+| X `_NET_CLIENT_LIST` | 1 client (Conky) | AT-SPI: 13 applications |
+| `list-targets` (AT-SPI) | gnome-shell, Chrome, 1Password, Tabby, ... | right |
+| `display.foreground_pid()` | gnome-shell | Chrome's frame was `STATE_ACTIVE` |
+| `display.cursor()` | `(3081, 634)` | XWayland's last pointer, stale over Wayland surfaces |
+| `snapshot(<chrome>)` | `windows={}, foreground=0, alive=False` | a live target |
+| `top_level_state(<chrome>)` | `[]` | modality unknown, not absent |
+| `capture_window(<chrome frame>)` | "a control is an accessible ..." | a frame with no xid, because Wayland |
+
+Each of those is a confident answer about the wrong desktop. The one that
+matters most is the foreground: the interference watch and the
+live-actuation guard (D#111) would never see the operator's front change.
+
+**Decision.** `backends/linux/session_type.py` answers *x11* or *wayland*
+per claimant: the operator's desktop from `XDG_SESSION_TYPE` (which wins,
+because it names the session), else `WAYLAND_DISPLAY`, else **the X server
+itself** -- Xwayland advertises the `XWAYLAND` extension and a plain X
+server does not. The last is not a nicety: a server launched outside the
+graphical session inherits `DISPLAY=:0` and neither variable (measured on
+linux-host-a, in the launcher this MCP actually runs under), and without it the
+guard was off exactly where it was needed. A hidden desktop answers from
+what it registered, so an Xvfb hidden desktop on a Wayland host stays X11.
+On a Wayland operator desktop:
+
+- **`display._display()` refuses** with `X11Only` (an
+  `UnsupportedPlatform`, so a tool returns `denied_by_environment`, #213).
+  It is the one choke point every X call passes. The degrade-to-default
+  wrappers in `display.py` let it through (`_x_errors_ignored`), because
+  "not hidden", "gone", "not modal" and `(0, 0)` would each be the same
+  confident wrong answer the refusal exists to stop. Verifying on linux-host-a
+  found `cursor()` swallowing it before this was added.
+- **Frame correlation skips**: a native Wayland window has no xid, and
+  enumeration must keep working.
+- **Both watches refuse at construction**, not inside their poll threads.
+- **`snapshot` lets the refusal through** rather than calling the target
+  gone, and **the actuator refuses an action it cannot observe**
+  beforehand. It used to swallow every observer failure so instrumentation
+  could not stop an action; acting unwatched on the operator's desktop is
+  the failure this project exists to prevent (D53). A refusal *after* an
+  action leaves the action's result standing.
+- **`blocked` reads `null`**, not `[]`. Unknown is not "not blocked".
+
+- **The questions reading asks still answer.** `list_targets` asks a
+  class name of every window (empty on Wayland -- there is no `WM_CLASS`),
+  `attach` asks whether the main window is minimized (False: "no hint",
+  until W4 measures it), and a `read` that came back empty says it could
+  not be checked for rendered content instead of reading the missing
+  capture as "paints nothing" (D66).
+
+**What it costs.** On a Wayland desktop nothing can be actuated, and
+`capture`, `restore`, the interference watch, macro replay (it arms one)
+and the minimized strategy all refuse. `await_human` still waits, but its
+notice cannot be shown, and it says `notice_shown: false`. Reading works
+through the MCP tools: `list_targets`, `attach`, `describe`, `find`,
+`read`. That is the D53 trade -- a refusal a caller can
+read instead of an action that might take the operator's desktop with
+nobody told. Each refusal narrows as its Wayland mechanism is measured
+(W1-W11 in `docs/superpowers/plans/2026-10-09-wayland-support.md`).
+
+**Found on the way, fixed here.** `describe` and `attach` failed on
+*every* Linux desktop, X11 too: they ask `winapi.is_hung` and
+`winapi.is_minimized`, and the Linux shim refused both. `is_minimized`
+now reads the frame's `_NET_WM_STATE_HIDDEN` on X11. `is_hung` answers
+`False`, as `top_level_state` already did: Linux has no
+`IsHungAppWindow`, and the read deadline catches a frozen application
+(D#9).
+
+**Found on the way, not fixed here.** GNOME 50 removed `gnome-shell
+--x11`, so `HiddenDesktop` (Xvfb + `gnome-shell --x11`, D75) cannot start
+on linux-host-a: `test_linux_hidden_desktop.py` errors there on `main`, with or
+without Wayland. linux-host-b has no gnome-shell and skips it, and CI is
+Windows-only, so nothing caught it. A nested `gnome-shell --headless
+--wayland` was measured starting on a private bus with Mutter's
+RemoteDesktop and ScreenCast interfaces (W0 / Phase 2a of the plan).
+
+**Evidence.** `tests/test_wayland_session_type.py` and
+`tests/test_wayland_guard.py` (`env: any` -- the session type and the X
+connection are injected, so they run on Windows too), including the MCP
+`list_targets` under Wayland and the silent-environment probe both ways;
+`tests/test_tool_contracts.py` for `blocked` and `is_hung`. Live on linux-host-a,
+in a launcher environment with only `DISPLAY` set: the session reads as
+Wayland, foreground and pointer refuse, and over the MCP tools
+`list_targets`, `attach` and `describe` answer (`blocked: null`) while
+`surfaces` returns `denied_by_environment`. On linux-host-a,
+`tests/test_linux_*.py` fails the identical set on `main` and on this
+change with the display variables unset (the X11 path), every failure the
+missing `gnome-shell --x11`. Issue #215; #213; D9; D53; D#111; D75.

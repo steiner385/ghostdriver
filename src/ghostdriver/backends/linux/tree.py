@@ -296,6 +296,12 @@ def _correlate_frame(frame: WindowNode, pid: int) -> None:
     that cannot be identified uniquely is left uncorrelated rather than
     guessed at (D33).
     """
+    from . import session_type
+    if session_type.display_server() == "wayland":
+        # No xid exists for a native Wayland window, so there is nothing
+        # to correlate. Skipping is the answer, not a refusal:
+        # enumeration is AT-SPI-sourced and right on Wayland (#215).
+        return
     entry = _entry(frame.handle)
     width = frame.rect[2] - frame.rect[0]
     height = frame.rect[3] - frame.rect[1]

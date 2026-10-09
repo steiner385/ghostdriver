@@ -30,7 +30,7 @@ from __future__ import annotations
 import subprocess
 from typing import Any
 
-from . import protection
+from . import protection, session_type
 from .deadline import call_with_deadline
 from .tree import _accessible, frame_xid_of
 
@@ -172,6 +172,8 @@ def capture_window(
         raise CaptureError("scale below 1 is not implemented on the Linux backend yet")
     xid = _toplevel_xid(handle)
     if xid is None:
+        # On Wayland no frame has an xid; say that, not "a control" (#215).
+        session_type.require_x11("capture")
         raise CaptureError(
             "no X window behind this handle. Only a toplevel has one; a "
             "control is an accessible with no drawable of its own."
@@ -293,6 +295,8 @@ def ink_fraction(handle: int, *,
     """
     xid = _toplevel_xid(handle)
     if xid is None:
+        # 0.0 would say "paints nothing" on a desktop that cannot look (#215).
+        session_type.require_x11("ink_fraction")
         return 0.0
     return ink_fraction_xid(xid, region=region)
 

@@ -21,5 +21,7 @@ class InterferenceWatch(_Watch):
                  foreground_pid: Callable[[], int] = display.foreground_pid,
                  cursor: Callable[[], tuple[int, int]] = display.cursor,
                  now: Callable[[], float] = time.time):
+        from . import session_type
+        session_type.require_x11("the interference watch")
         super().__init__(pid, foreground_pid=foreground_pid, cursor=cursor,
                          family=family, now=now, poll_s=0.05)

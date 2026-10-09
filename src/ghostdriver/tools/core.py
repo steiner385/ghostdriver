@@ -267,8 +267,8 @@ class _ToolboxCore:
         main = select_main_tree(trees)
         return [main] if main else []
 
-    def _blocking(self, session) -> list[str]:
-        from ..backends import current
+    def _blocking(self, session) -> list[str] | None:
+        from ..backends import UnsupportedPlatform, current
         top_level_state = current().top_level_state
         from ..modality import find_modal_blocks
 
@@ -276,8 +276,11 @@ class _ToolboxCore:
         # the target's window from outside its pid, and reading the target
         # alone would report a block nothing accounts for.
         state: list = []
-        for pid in self._tree_pids(session):
-            state = state + session.run(lambda p=pid: top_level_state(p))
+        try:
+            for pid in self._tree_pids(session):
+                state = state + session.run(lambda p=pid: top_level_state(p))
+        except UnsupportedPlatform:
+            return None  # unknown, not "not blocked" (#215)
         blocks, unexplained = find_modal_blocks(state)
         return (
             [b.describe() for b in blocks]

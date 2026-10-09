@@ -39,6 +39,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import IntEnum
 
+from .backends import UnsupportedPlatform
 from .disturbance import Snapshot, compare
 from .model.result import ActionResult, ErrorKind
 
@@ -148,7 +149,19 @@ class Actuator:
         expect_after: Condition | None = None,
     ) -> ActionResult:
         started = self.now()
-        before = self._look()
+        try:
+            before = self._look()
+        except UnsupportedPlatform as exc:
+            # `_look` swallows observer failures so instrumentation cannot
+            # stop an action. A platform that cannot observe at all is
+            # different: acting blind would break the non-disruption
+            # promise with nobody told (#215, D53).
+            return ActionResult(
+                ok=False,
+                elapsed_ms=self._elapsed(started),
+                error={"kind": ErrorKind.DENIED_BY_ENVIRONMENT.value,
+                       "message": f"nothing was attempted: {exc}"},
+            )
 
         if expect_before is not None and not expect_before.holds():
             # Not a failure of the action -- the action did not happen. A
@@ -323,12 +336,16 @@ class Actuator:
 
         Guarded on both sides. Instrumentation must never be able to stop an
         action from running, and an observer that throws on the way in would
-        do exactly that.
+        do exactly that. The one exception is a platform that cannot observe
+        at all (`UnsupportedPlatform`): that passes through, and `perform`
+        refuses the action rather than running it unwatched (#215).
         """
         if self.observe is None:
             return None
         try:
             return self.observe()
+        except UnsupportedPlatform:
+            raise
         except Exception:
             return None
 
@@ -339,7 +356,10 @@ class Actuator:
         tation, and an action that actually happened must not be reported as
         having crashed because the report about it could not be gathered.
         """
-        after = self._look()
+        try:
+            after = self._look()
+        except UnsupportedPlatform:
+            after = None  # the action ran; only the report is missing (#215)
         if before is None or after is None:
             return []
         return [d.to_dict() for d in compare(before, after)]
