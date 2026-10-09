@@ -124,3 +124,39 @@ def test_every_tool_call_is_traced_with_its_arguments_and_outcome(tmp_path, monk
     assert events[1]["args"]["button"] == "right"
     assert events[2]["ok"] is True and events[2]["result"]["released"] == "nope"
     assert all("elapsed_ms" in e for e in events)
+
+
+# --- how describe fared at the sizes it met (#227) ------------------------------
+
+def test_the_scale_report_lists_measured_describes_largest_first():
+    from ghostdriver.trace import scale_report
+
+    def describe_event(total, shown, chars, truncated, **args):
+        return {"tool": "describe", "ok": True, "elapsed_ms": 150, "args": args,
+                "result": {"windows_total": total, "nodes_shown": shown, "tree_chars": chars,
+                           "truncated": truncated, "elided_by_collapsing": total - shown,
+                           "below_depth": 0}}
+
+    events = [
+        describe_event(108, 60, 900, False),
+        describe_event(1140, 48, 1300, True, max_nodes=80),
+        {"tool": "describe", "ok": True, "result": {"blocked": []}},      # before the numbers
+        {"tool": "find", "ok": True, "result": {"match_count": 3}},
+        {"tool": "describe", "ok": False, "result": {}},
+    ]
+
+    lines = scale_report(events)
+
+    assert lines[1].split()[0] == "1140" and lines[2].split()[0] == "108"
+    assert "the largest tree held 1140 windows and came back as 1300 characters" in lines[3]
+    assert "truncated, and said so" in lines[3]
+    assert "1 earlier describe call(s) were traced before the numbers were kept" in lines[4]
+
+
+def test_the_scale_report_says_when_nothing_was_measured():
+    from ghostdriver.trace import scale_report
+
+    lines = scale_report([{"tool": "describe", "ok": True, "result": {"blocked": []}}])
+
+    assert lines[0] == "-- no describe call in this trace recorded its numbers"
+    assert "1 earlier describe call(s)" in lines[1]

@@ -175,7 +175,13 @@ def _result_summary(result):
             "found", "row_count", "pages_read", "reached_end", "advanced",
             "delivered_to", "hit_container", "warning", "until_change",
             "still_arriving", "idle", "polls", "outside_container",
-            "took_foreground", "physical_rect", "copies_failed", "copy_stopped")
+            "took_foreground", "physical_rect", "copies_failed", "copy_stopped",
+            # describe's own numbers (#227): the trace held 99 real describe
+            # calls and kept only `blocked` for each, so five weeks of field
+            # use recorded nothing about how the summarizer fares at scale.
+            "windows_total", "nodes_shown", "tree_chars", "truncated",
+            "elided_by_collapsing", "below_depth", "windows_omitted_for_budget",
+            "windows_hidden", "suggested_locators_omitted", "within")
     return {k: result[k] for k in keep if k in result}
 
 

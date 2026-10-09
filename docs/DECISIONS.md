@@ -8717,3 +8717,50 @@ it, and says nothing when the pointer was watched. On a nested headless
 shell in Wayland mode, a native-Wayland fixture, through the tool layer: a
 `find` then `click` macro replayed, 2/2 steps, with the note. Issue #225;
 D#215; D#221; D#111.
+
+### D#227. Every `describe` records how it fared, so Gate 3 is answered by ordinary use
+
+**Context.** Gate 3 (#28) asks how `describe` holds on a fully loaded
+target and has waited five weeks for a special run against one. Looking
+for evidence that already existed: the operator's trace holds **97
+successful `describe` calls** across 56 server runs (2026-09-03 to
+2026-10-07), nearly all against the real client -- and for every one the
+trace kept exactly one field, `blocked`. None of what the gate asks was
+recorded, and `describe` itself never reported the denominator: how many
+windows the tree it summarized held, or how much text it returned.
+
+**What those calls do show.**
+
+- Callers tune the budget themselves: `max_nodes` asked for ranged 10 to
+  300 with a median of 80; the 200 default was used 3 times in 99. Depth
+  ranged 1 to 14, median 5. 47 of 99 asked for every top-level window.
+- Real latency: median 172 ms, 95th percentile 702 ms, maximum 3.6 s.
+  That is enumeration, which the synthetic run (D#210) could not see: the
+  summarizer itself takes under 10 ms at 20,000 windows.
+
+**Decision.**
+
+- `describe` reports **`windows_total`** (the windows in the trees it
+  summarized, or in the subtree `within` names) and **`tree_chars`** (the
+  size of the text it returned -- what the result costs a caller to hold).
+- The trace keeps those with `nodes_shown`, `truncated`,
+  `elided_by_collapsing`, `below_depth`, `windows_omitted_for_budget`,
+  `windows_hidden`, `suggested_locators_omitted` and `within`. The tree
+  text itself stays out of the trace, as before.
+- **`ghostdriver trace --scale`** reads them back: one line per measured
+  call, largest tree first, then what the largest was and how it came
+  back. Calls traced before the numbers were kept are counted, never
+  guessed at.
+
+**Why this and not the special run.** The special run needs an operator
+to load a client and hand it over, and it measures one moment. The
+target is driven for real work most days; from here on every one of those
+calls is a measurement, at whatever size the client happens to be, and
+the gate is answered the first time a loaded client is described.
+
+**Evidence.** `tests/test_describe_scale.py`: `windows_total` equals the
+tree's size and `within` counts only the subtree; the trace summary keeps
+the numbers and not the tree. `tests/test_trace.py`: the report lists
+measured calls largest first, states the largest, and counts the
+unmeasured. Run against the real logs today it says, correctly, that none
+of 97 recorded its numbers. Issue #227; #28; D#210; D76; D11.
