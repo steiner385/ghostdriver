@@ -23,9 +23,10 @@
 # it took on a TIMING line, so a limit that is generous today and tight next
 # year says so rather than becoming the next flake.
 set -u
-gnome-shell --x11 >/dev/null 2>&1 & WM_PID=$!
-for i in $(seq 1 30); do
-  xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q 0x && break; sleep 1; done
+# A headless gnome-shell's Xwayland, not Xvfb + `gnome-shell --x11` (#217).
+. "$(dirname "$0")/linux_nested_shell.sh"
+gd_start_nested_shell || { echo "ABORT nested shell did not start"; exit 1; }
+WM_PID=$GD_SHELL_PID
 
 now_ms(){ date +%s%3N; }
 

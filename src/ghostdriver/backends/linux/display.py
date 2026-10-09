@@ -24,6 +24,7 @@ Every fact here was measured before it was coded:
 from __future__ import annotations
 
 import contextlib
+import os
 import threading
 from collections.abc import Iterator
 from typing import Any
@@ -131,8 +132,26 @@ def _connect(owner: str) -> Any:
             # operator's own claim registers nothing, which is correct --
             # `Display()` with no argument reads the ambient environment,
             # which for the operator's own desktop is exactly right.
-            display_name = desktop_claim.environment_for(owner).get("DISPLAY")
-            conn = _open(display_name)
+            registered = desktop_claim.environment_for(owner)
+            display_name = registered.get("DISPLAY")
+            cookie = registered.get("XAUTHORITY")
+            if cookie is None:
+                conn = _open(display_name)
+            else:
+                # A nested Xwayland wants its own cookie (#217), and Xlib
+                # reads it from the environment at connect time with no
+                # argument to pass it by. Swapped only for the open, inside
+                # the lock every open takes, so no other connection can see
+                # it.
+                previous = os.environ.get("XAUTHORITY")
+                os.environ["XAUTHORITY"] = cookie
+                try:
+                    conn = _open(display_name)
+                finally:
+                    if previous is None:
+                        os.environ.pop("XAUTHORITY", None)
+                    else:
+                        os.environ["XAUTHORITY"] = previous
             _DISPLAYS[owner] = conn
         return conn
 

@@ -28,11 +28,12 @@ import time
 import pytest
 
 from tests.conftest import on_linux
+from tests.linux_nested_shell import NEEDED as NESTED_NEEDED
+from tests.linux_nested_shell import inner, nested_env
 
 pytestmark = [on_linux, pytest.mark.slow]
 
-DISPLAY = ":63"
-NEEDED = ("Xvfb", "dbus-run-session", "gnome-shell", "xprop")
+NEEDED = NESTED_NEEDED
 BUS_LAUNCHER = "/usr/libexec/at-spi-bus-launcher"
 
 
@@ -44,36 +45,29 @@ def modality():
     if missing:
         pytest.skip("the modality measurement needs: " + ", ".join(missing))
 
-    server = subprocess.Popen(["Xvfb", DISPLAY, "-screen", "0", "1280x800x24"],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    inner = ('gnome-shell --x11 >/dev/null 2>&1 & '
-             'for i in $(seq 1 30); do '
-             'xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q 0x && break; '
-             'sleep 1; done; '
-             f'{BUS_LAUNCHER} --launch-immediately & sleep 3; '
-             f'exec {sys.executable} -m tests.linux_modality_probe')
-    probe = subprocess.Popen(
-        ["dbus-run-session", "--", "bash", "-c", inner],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-        start_new_session=True,
-        env=dict(os.environ, DISPLAY=DISPLAY, GSETTINGS_BACKEND="memory",
-                 GDK_BACKEND="x11", PYTHONPATH="src"),
-    )
-    line, deadline = None, time.monotonic() + 220
-    try:
-        for out in probe.stdout:
-            if out.startswith("{") and '"during"' in out:
-                line = out
-                break
-            if time.monotonic() > deadline:
-                break
-    finally:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(os.getpgid(probe.pid), signal.SIGTERM)
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            probe.wait(timeout=20)
-        server.terminate()
-        server.wait(timeout=10)
+    # A headless gnome-shell's Xwayland, not Xvfb + `gnome-shell --x11`,
+    # which GNOME 50 removed (#217). The shell activates its own
+    # accessibility bus on the private session bus.
+    with nested_env() as env:
+        probe = subprocess.Popen(
+            ["dbus-run-session", "--", "bash", "-c",
+             inner(f"{sys.executable} -m tests.linux_modality_probe")],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+            start_new_session=True, env=env,
+        )
+        line, deadline = None, time.monotonic() + 220
+        try:
+            for out in probe.stdout:
+                if out.startswith("{") and '"during"' in out:
+                    line = out
+                    break
+                if time.monotonic() > deadline:
+                    break
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(os.getpgid(probe.pid), signal.SIGTERM)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                probe.wait(timeout=20)
 
     if line is None:
         pytest.skip("the modality probe produced no report")
@@ -126,16 +120,20 @@ def test_the_held_window_is_not_disabled_and_that_is_the_finding(modality):
     )
 
 
-def test_what_does_change_on_the_owner_is_active(modality):
-    """The one signal that does move, and it is not enough on its own: a
-    window loses `ACTIVE` whenever anything else takes focus, modal or not.
-    Recorded so it is not mistaken for a modality check.
+def test_active_on_the_owner_is_not_a_modality_signal(modality):
+    """`ACTIVE` on the owner is not how to tell it is held, on any stack
+    measured.
+
+    Under `gnome-shell --x11` (D#12) the owner *lost* `ACTIVE` when the modal
+    came up -- but so does any window when anything else takes focus, modal
+    or not. Under GNOME 50's headless shell, mutter in Wayland mode (#217),
+    it does not even move: an X client's new modal is not given focus, so the
+    owner stays `ACTIVE` with the modal up. Either way the signal is
+    `STATE_MODAL` and the window manager's modal state, never this.
 
     Skips rather than fails when the window manager never focused the
-    fixture. A baseline taken before that happened records "not active" and
-    then compares it against "not active", which is a race dressed as a
-    result -- and this test failed exactly that way once, in a full-suite run
-    where the machine was busier than when it passed alone.
+    fixture: a baseline of "not active" compared against "not active" is a
+    race dressed as a result (a full-suite run failed exactly that way).
     """
     if not modality.get("baseline_was_active"):
         pytest.skip("the window manager never focused the fixture, so there is "
@@ -143,4 +141,6 @@ def test_what_does_change_on_the_owner_is_active(modality):
     before = _frame(modality, "before", "fixture")
     during = _frame(modality, "during", "fixture")
     assert "ACTIVE" in before["states"]
-    assert "ACTIVE" not in during["states"]
+    assert "ACTIVE" in during["states"], (
+        "the owner lost ACTIVE: focus moved to the modal, which mutter in "
+        "Wayland mode did not do when this was measured (#217)")

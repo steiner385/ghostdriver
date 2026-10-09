@@ -56,7 +56,7 @@ decision holds the measurement the Linux one must repeat.
 | `NAMED_KEYS`, `EDIT_ACTIONS`, `button_pair` | virtual-key table; button messages with modifier flags | X keysym **names** for XTest (`press_key`, tier 4, live only); `button_pair` only *refuses* a right click or a modifier, since an AT-SPI action carries neither and there is no posted pair (D#11); `deepest_child_at` is a no-op -- a control is an accessible, not a window to hit-test | D44, D61, D#11 |
 | `copy_route`, `focus_route` | `WM_COPY`, posted `WM_SETFOCUS` | AT-SPI `Action` named "copy", `Component.GrabFocus` -- **measured (D#102): on wxGTK3 it works *and* raises the window to the foreground**, so it is a focus steal, not the harmless focus set D#11 assumed; on GTK4 it raised instead (D#10) | D50, D#102 |
 | `MinimizedWatch`, `WatchError` | poll `WS_MINIMIZE` + foreground; `SW_SHOWMINNOACTIVE` | poll `_NET_WM_STATE_HIDDEN` + `_NET_ACTIVE_WINDOW`; iconify via `XIconifyWindow` (does not focus) | D49, D55 |
-| `HiddenDesktop` | `CreateDesktopW` + thread binding | a nested `Xvfb` with its own `DISPLAY`, its own private D-Bus session bus, and its own AT-SPI bus (`at-spi-bus-launcher`) and window manager (`gnome-shell --x11`); launch-only, as on Windows. **Corrected (D#40f): "no thread binding needed" was half right** -- Xlib needs none, but AT-SPI is a process-wide singleton with no route to a second bus, measured against fork, a second `Atspi.init()`, and `Atspi.exit()` then reconnect, none of which worked; `run` claims the process (`desktop_claim.py`) rather than binding a context to it | D51, D52, D53, D#40f |
+| `HiddenDesktop` | `CreateDesktopW` + thread binding | a nested desktop with its own `DISPLAY`, its own private D-Bus session bus and runtime directory, its own AT-SPI bus, and a window manager; launch-only, as on Windows. **Rebuilt (D#217):** it was an `Xvfb` with `gnome-shell --x11`, which GNOME 50 removed; it is now a headless `gnome-shell --wayland` whose own Xwayland hosts the target as an X client -- still mutter, so EWMH, iconify and capture read as before, but focus does not: an X client's activation and `present()` are refused. **Corrected (D#40f): "no thread binding needed" was half right** -- Xlib needs none, but AT-SPI is a process-wide singleton with no route to a second bus, measured against fork, a second `Atspi.init()`, and `Atspi.exit()` then reconnect, none of which worked; `run` claims the process (`desktop_claim.py`) rather than binding a context to it | D51, D52, D53, D#40f, D#217 |
 | `InterferenceWatch` | foreground pid + cursor | `_NET_ACTIVE_WINDOW` owner + `XQueryPointer` | D57 |
 | `OperatorNotice` | a topmost, no-activate popup window | built (#40 slice 5b): an override-redirect X window with `_NET_WM_STATE_ABOVE`, drawn with the server's `fixed` font rather than a toolkit; override-redirect means no WM decision is involved in "never focused" at all. Wayland (a layer-shell surface or `org.freedesktop.Notifications`) is unmeasured | D61, D#40f |
 | `winapi` | raw Win32 | a small `x11` module: the handful of Xlib and EWMH calls above | -- |
@@ -87,8 +87,8 @@ Enumeration is AT-SPI-sourced and was right. So on a Wayland operator
 desktop every X-sourced name now refuses (`X11Only`), and reading keeps
 working. The measurements that will replace each refusal (W0–W11) are in
 `docs/superpowers/plans/2026-10-09-wayland-support.md`. A related
-measurement: GNOME 50 removed `gnome-shell --x11`, so `HiddenDesktop` as
-built cannot start there.
+measurement: GNOME 50 removed `gnome-shell --x11`, so `HiddenDesktop` now
+runs a headless `gnome-shell --wayland` instead (D#217).
 
 **Sandboxed applications.** The model above -- "a Flatpak reaches the
 AT-SPI bus only with `--talk-name=org.a11y.Bus`, otherwise it is a target

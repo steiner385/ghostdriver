@@ -29,6 +29,14 @@ from tests.linux_probe_support import Budget, settle
 #: harness problem and a backend defect respectively.
 PRESENT_AFTER_MS = 30000
 
+#: How the fixture gets out. A modal, not `present()`: measured on GNOME 50's
+#: headless shell (#217), mutter in Wayland mode refuses an X client's
+#: `present()` while it is minimized -- the window stayed hidden, so there was
+#: no escape to report. A modal does get out: it brings the main window back
+#: on screen beside itself, focus unmoved. That is the escape `sample` calls
+#: the one that matters most.
+ESCAPE_FLAG = "--modal-after"
+
 #: The fixture's announce line is on a 120ms timer armed alongside the grab's.
 ANNOUNCE_DELAY_S = 0.12
 
@@ -36,7 +44,7 @@ ANNOUNCE_DELAY_S = 0.12
 def main():
     app = subprocess.Popen(
         [sys.executable, "-m", "tests.fixtureapp_gtk",
-         "--present-after", str(PRESENT_AFTER_MS), "--quit-after", "120000"],
+         ESCAPE_FLAG, str(PRESENT_AFTER_MS), "--quit-after", "120000"],
         stdout=subprocess.PIPE, text=True,
         env=dict(os.environ, GDK_BACKEND="x11"),
     )
@@ -64,8 +72,11 @@ def main():
 
     timing = [settle("window_mapped", lambda: display.exists(xid), timeout=30, giveup=gone)]
 
-    watch = backend.MinimizedWatch(announced["pid"], xid)
+    # Built the way `attach` builds it (#218): no window handed in, so
+    # `start` has to find the main window and the X window behind it.
+    watch = backend.MinimizedWatch(announced["pid"], family=lambda: [announced["pid"]])
     watch.start()
+    report["found_main_xid"] = watch.main_xid
     report["hidden_after_start"] = display.is_hidden(xid)
     timing.append(budget.record())
 

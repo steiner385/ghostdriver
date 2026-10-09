@@ -30,12 +30,13 @@ import sys
 import pytest
 
 from tests.conftest import on_linux
+from tests.linux_nested_shell import NEEDED as NESTED_NEEDED
+from tests.linux_nested_shell import inner, nested_env
 from tests.linux_probe_support import collect, describe
 
 pytestmark = [on_linux, pytest.mark.slow]
 
-DISPLAY = ":64"
-NEEDED = ("Xvfb", "dbus-run-session", "gnome-shell", "xprop")
+NEEDED = NESTED_NEEDED
 BUS_LAUNCHER = "/usr/libexec/at-spi-bus-launcher"
 
 
@@ -47,39 +48,32 @@ def slice3():
     if missing:
         pytest.skip("slice 3 needs: " + ", ".join(missing))
 
-    server = subprocess.Popen(["Xvfb", DISPLAY, "-screen", "0", "1280x800x24"],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    inner = ('gnome-shell --x11 >/dev/null 2>&1 & '
-             'for i in $(seq 1 30); do '
-             'xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q 0x && break; '
-             'sleep 1; done; '
-             f'{BUS_LAUNCHER} --launch-immediately & sleep 3; '
-             f'exec {sys.executable} -m tests.linux_slice3_probe')
-    probe = subprocess.Popen(
-        ["dbus-run-session", "--", "bash", "-c", inner],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-        start_new_session=True,
-        env=dict(os.environ, DISPLAY=DISPLAY, GSETTINGS_BACKEND="memory",
-                 GDK_BACKEND="x11", PYTHONPATH="src"),
-    )
-    # The deadline is raised with the probe's modal budget (#163): the
-    # fixture now waits 30s before raising its modal rather than 9s, so the
-    # old 220s left less headroom than it looks like it does.
-    #
-    # `collect` reads on a thread against a real deadline and keeps the
-    # streamed timing records, so a probe that stalls still leaves a trace
-    # and a probe that goes silent does not block the run (#163). The loop
-    # this replaces checked its deadline inside `for out in probe.stdout:`,
-    # which only expires when a line arrives.
-    try:
-        line, trace = collect(probe.stdout, '"during"', 260)
-    finally:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(os.getpgid(probe.pid), signal.SIGTERM)
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            probe.wait(timeout=20)
-        server.terminate()
-        server.wait(timeout=10)
+    # A headless gnome-shell's Xwayland, not Xvfb + `gnome-shell --x11`,
+    # which GNOME 50 removed (#217). The shell activates its own
+    # accessibility bus on the private session bus.
+    with nested_env() as env:
+        probe = subprocess.Popen(
+            ["dbus-run-session", "--", "bash", "-c",
+             inner(f"{sys.executable} -m tests.linux_slice3_probe")],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+            start_new_session=True, env=env,
+        )
+        # The deadline is raised with the probe's modal budget (#163): the
+        # fixture now waits 30s before raising its modal rather than 9s, so the
+        # old 220s left less headroom than it looks like it does.
+        #
+        # `collect` reads on a thread against a real deadline and keeps the
+        # streamed timing records, so a probe that stalls still leaves a trace
+        # and a probe that goes silent does not block the run (#163). The loop
+        # this replaces checked its deadline inside `for out in probe.stdout:`,
+        # which only expires when a line arrives.
+        try:
+            line, trace = collect(probe.stdout, '"during"', 260)
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(os.getpgid(probe.pid), signal.SIGTERM)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                probe.wait(timeout=20)
 
     if line is None:
         pytest.skip("the slice 3 probe produced no report. What it did get through:\n"

@@ -30,12 +30,13 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import on_linux
+from tests.linux_nested_shell import NEEDED as NESTED_NEEDED
+from tests.linux_nested_shell import nested_env
 
 pytestmark = [on_linux, pytest.mark.slow]
 
-DISPLAY = ":79"
 PROBE = Path(__file__).parent / "linux_l6_probe.sh"
-NEEDED = ("Xvfb", "dbus-run-session", "gnome-shell", "xdotool", "xprop",
+NEEDED = (*NESTED_NEEDED, "xdotool", "xprop",
           "xwd", "convert")
 
 
@@ -47,33 +48,31 @@ def l6():
     if not os.environ.get("DISPLAY"):
         pytest.skip("no operator display to prove the target never disturbs")
 
-    server = subprocess.Popen(["Xvfb", DISPLAY, "-screen", "0", "1280x800x24"],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    probe = subprocess.Popen(
-        ["dbus-run-session", "--", "bash", str(PROBE)],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-        start_new_session=True,
-        env=dict(os.environ, DISPLAY=DISPLAY, GSETTINGS_BACKEND="memory",
-                 GDK_BACKEND="x11", PYTHONPATH="src",
-                 GHOSTDRIVER_OPERATOR_DISPLAY=os.environ["DISPLAY"]),
-    )
-    lines, deadline = [], time.monotonic() + 260
-    try:
-        for line in probe.stdout:
-            line = line.strip()
-            if line.startswith(("OPERATOR", "CONTROL", "RESULT", "ABORT", "==")):
-                lines.append(line)
-            if line.startswith("RESULT operator_final") or line.startswith("ABORT"):
-                break
-            if time.monotonic() > deadline:
-                break
-    finally:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(os.getpgid(probe.pid), signal.SIGTERM)
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            probe.wait(timeout=20)
-        server.terminate()
-        server.wait(timeout=10)
+    # A headless gnome-shell's Xwayland, not Xvfb + `gnome-shell --x11`,
+    # which GNOME 50 removed (#217).
+    with nested_env(GHOSTDRIVER_OPERATOR_DISPLAY=os.environ["DISPLAY"],
+                    GHOSTDRIVER_OPERATOR_XAUTHORITY=os.environ.get("XAUTHORITY", "")) as env:
+        probe = subprocess.Popen(
+            ["dbus-run-session", "--", "bash", str(PROBE)],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+            start_new_session=True,
+            env=env,
+        )
+        lines, deadline = [], time.monotonic() + 260
+        try:
+            for line in probe.stdout:
+                line = line.strip()
+                if line.startswith(("OPERATOR", "CONTROL", "RESULT", "ABORT", "==")):
+                    lines.append(line)
+                if line.startswith("RESULT operator_final") or line.startswith("ABORT"):
+                    break
+                if time.monotonic() > deadline:
+                    break
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(os.getpgid(probe.pid), signal.SIGTERM)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                probe.wait(timeout=20)
 
     if any(ln.startswith("ABORT") for ln in lines) or "== controls pass ==" not in lines:
         pytest.skip("the L6 harness could not drive the target, so a still "
@@ -155,13 +154,17 @@ def test_an_iconified_window_can_still_be_captured(l6):
     )
 
 
-def test_a_target_that_presents_itself_un_iconifies_and_the_watchdog_can_see_it(l6):
-    """The disruption the watchdog exists for, reproduced end to end. The
-    fixture calls present() on a timer -- which is what a foreground grab *is*
-    -- and that clears HIDDEN and takes the *nested* foreground. It is
-    observable, which is the point: D49's watchdog does not prevent the flap,
-    it makes it visible."""
-    assert _field(l6["after_present"], "hidden") == "0", "the grab did not happen"
-    assert _field(l6["after_present"], "nested_active") == _field(l6["after_present"], "target")
-    assert _field(l6["re_iconified"], "hidden") == "1", "it could not be put away again"
-    assert int(_field(l6["re_iconified"], "colours")) > 100, "capture died after the flap"
+def test_a_target_that_presents_itself_stays_put_away(l6):
+    """The disruption the watchdog exists for, asked again on GNOME 50 (#217).
+
+    Under `gnome-shell --x11` the fixture's timed present() cleared HIDDEN and
+    took the nested foreground -- a foreground grab, observable, which is what
+    D49's watchdog reports. Under GNOME 50's headless shell, mutter in Wayland
+    mode refuses an X client's present() while it is iconified: the window
+    stays hidden and the foreground stays where it was. The escape that does
+    still happen on this stack is a modal (tests/linux_watch_probe.py).
+    """
+    assert _field(l6["after_present"], "hidden") == "1", (
+        "present() un-iconified the target: mutter now honours it, which it "
+        "did not when this was measured (#217)")
+    assert _field(l6["after_present"], "nested_active") != _field(l6["after_present"], "target")

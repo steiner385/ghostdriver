@@ -10,10 +10,10 @@
 # took. Every line below prints what it did, so a reader can tell an
 # experiment that failed from a harness that did.
 set -u
-gnome-shell --x11 >/dev/null 2>&1 &
-WM_PID=$!
-for i in $(seq 1 30); do
-  xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q 0x && break; sleep 1; done
+# A headless gnome-shell's Xwayland, not Xvfb + `gnome-shell --x11` (#217).
+. "$(dirname "$0")/linux_nested_shell.sh"
+gd_start_nested_shell || { echo "ABORT nested shell did not start"; exit 1; }
+WM_PID=$GD_SHELL_PID
 python3 -m tests.fixtureapp_gtk --grid-no-copy --quit-after 100000 2>/dev/null > /tmp/gd-A.json &
 A_PID=$!
 sleep 5

@@ -26,12 +26,13 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import on_linux
+from tests.linux_nested_shell import NEEDED as NESTED_NEEDED
+from tests.linux_nested_shell import nested_env
 
 pytestmark = [on_linux, pytest.mark.slow]
 
-DISPLAY = ":69"
 PROBE = Path(__file__).parent / "linux_l7_probe.sh"
-NEEDED = ("Xvfb", "dbus-run-session", "gnome-shell", "xdotool", "xprop")
+NEEDED = (*NESTED_NEEDED, "xdotool", "xprop")
 
 
 @pytest.fixture(scope="module")
@@ -40,40 +41,46 @@ def l7():
     if missing:
         pytest.skip("the L7 measurement needs: " + ", ".join(missing))
 
-    server = subprocess.Popen(["Xvfb", DISPLAY, "-screen", "0", "1280x800x24"],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    probe = subprocess.Popen(
-        ["dbus-run-session", "--", "bash", str(PROBE)],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-        start_new_session=True,
-        env=dict(os.environ, DISPLAY=DISPLAY, GSETTINGS_BACKEND="memory",
-                 GDK_BACKEND="x11", PYTHONPATH="src"),
-    )
-    lines, deadline = [], time.monotonic() + 260
-    try:
-        for line in probe.stdout:
-            line = line.strip()
-            if line.startswith(("CONTROL", "RESULT", "TIMING", "ABORT", "==")):
-                lines.append(line)
-            if line.startswith("RESULT after_activate") or line.startswith("ABORT"):
-                break
-            if time.monotonic() > deadline:
-                break
-    finally:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(os.getpgid(probe.pid), signal.SIGTERM)
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            probe.wait(timeout=20)
-        server.terminate()
-        server.wait(timeout=10)
+    # A headless gnome-shell's Xwayland, not Xvfb + `gnome-shell --x11`,
+    # which GNOME 50 removed (#217).
+    with nested_env() as env:
+        probe = subprocess.Popen(
+            ["dbus-run-session", "--", "bash", str(PROBE)],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+            start_new_session=True,
+            env=env,
+        )
+        lines, deadline = [], time.monotonic() + 260
+        try:
+            for line in probe.stdout:
+                line = line.strip()
+                if line.startswith(("CONTROL", "RESULT", "TIMING", "ABORT", "==")):
+                    lines.append(line)
+                if line.startswith("RESULT after_activate") or line.startswith("ABORT"):
+                    break
+                if time.monotonic() > deadline:
+                    break
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(os.getpgid(probe.pid), signal.SIGTERM)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                probe.wait(timeout=20)
 
     if any(ln.startswith("ABORT") for ln in lines) or "== controls pass ==" not in lines:
         # The whole trace, not a tail. #163: the controls are themselves
         # timed steps now, and which one blew its limit is the difference
         # between a loaded box and a window manager that has changed
         # behaviour -- a six-line tail can cut off exactly that.
-        pytest.skip("the L7 harness could not hide a focused window, so nothing "
-                    "it says about restoring one means anything:\n"
+        why = ""
+        if any(ln.startswith("TIMING focus_") and "ok=0" in ln for ln in lines):
+            # #217: the harness focuses a window by activating it, and mutter
+            # in Wayland mode (GNOME 50's headless shell) refuses an X
+            # client's activation -- so it can only get a focused window
+            # when mutter happened to focus one on map.
+            why = ("it focuses by activation, which mutter in Wayland mode "
+                   "refuses for an X client (D#217); ")
+        pytest.skip("the L7 harness could not hide a focused window -- " + why
+                    + "so nothing it says about restoring one means anything:\n"
                     + "\n".join(lines))
     return {
         "results": {ln.split()[1]: " ".join(ln.split()[2:])
@@ -124,23 +131,21 @@ def test_the_bare_map_also_does_not_disturb_the_foreground(l7):
     assert _field(l7, "after_map", "active") == _field(l7, "after_map", "was"), _why(l7)
 
 
-def test_restoring_a_window_necessarily_focuses_it(l7):
-    """The answer to D55, stronger than the assumption it replaced. D55 said
-    to assume the window manager focuses a restored window; in fact
-    activation is the *only* thing that restores it, so restoring and
-    focusing are one operation and cannot be separated.
+def test_activation_neither_restores_nor_focuses_on_the_headless_shell(l7):
+    """What restoring a hidden window takes, measured again on GNOME 50 (#217).
 
-    That is acceptable -- D4 permits `restore` at `read_only` because it is
-    the operator's escape hatch, and handing the window back is the point.
-    What it forbids is any code path that wants a window visible but not
-    focused: on this window manager there isn't one.
+    Under `gnome-shell --x11` (D#14) activation was the *only* thing that
+    restored a hidden window, so restoring and focusing were one operation.
+    GNOME 50 has no X11 mode. Under its headless shell -- mutter in Wayland
+    mode, the target an X client of its Xwayland -- activation is refused for
+    an X client outright: the window stays hidden and the foreground does not
+    move. So on this stack nothing an X client can send restores a hidden
+    window, and `restore` reports that rather than claiming it (#217).
     """
-    assert _field(l7, "after_activate", "a_hidden") == "0", (
-        "activation did not restore it" + _why(l7)
+    assert _field(l7, "after_activate", "a_hidden") == "1", (
+        "activation restored it: mutter now honours an X client's activation, "
+        "which it did not when this was measured (#217)" + _why(l7)
     )
-    assert _field(l7, "after_activate", "active") == _field(l7, "before_restore", "target"), (
-        "the restored window is not the active one" + _why(l7)
-    )
-    assert _field(l7, "after_activate", "active") != _field(l7, "before_restore", "active"), (
-        "the foreground did not move, so this proves nothing about focus" + _why(l7)
+    assert _field(l7, "after_activate", "active") == _field(l7, "before_restore", "active"), (
+        "the foreground moved without the window coming back" + _why(l7)
     )

@@ -1,14 +1,24 @@
 """The `hidden_desktop` isolation strategy: a nested display, not a thread.
 
-`docs/LINUX.md`'s proposed mechanism, built: a nested X server (`Xvfb`) with
-its own `DISPLAY`, its own D-Bus session bus (so it does not find the
-operator's accessibility bus and enumerate the operator's applications --
-D#8), its own accessibility bus on that session bus (`at-spi-bus-launcher`),
-and its own window manager (`gnome-shell --x11`, D75 -- a bare `Xvfb` sets
-neither `_NET_CLIENT_LIST` nor `_NET_ACTIVE_WINDOW`, so nothing above the
-backend boundary can be answered without one). The guarantee is the same
-structural one Windows has: a window on a display that is not the input
-display has no foreground to steal.
+`docs/LINUX.md`'s proposed mechanism, built: a nested desktop with its own
+`DISPLAY`, its own D-Bus session bus (so it does not find the operator's
+accessibility bus and enumerate the operator's applications -- D#8), its
+own accessibility bus on that session bus, and its own window manager
+(D75 -- `_NET_CLIENT_LIST` and `_NET_ACTIVE_WINDOW` come from one, so
+nothing above the backend boundary can be answered without it). The
+guarantee is the same structural one Windows has: a window on a display
+that is not the input display has no foreground to steal.
+
+**The nested display is a headless gnome-shell's own Xwayland (#217).** It
+was an `Xvfb` with `gnome-shell --x11` on it, and GNOME 50 removed the X11
+backend, so that stack cannot start there. A headless `gnome-shell
+--wayland` is still mutter: the target runs as an X client of the shell's
+Xwayland and gets the same window manager, so everything this backend reads
+from X reads the same way -- measured on linux-host-a against the GTK fixture
+(client list, active window, iconify, capture, XTest), with the operator's
+foreground unmoved. Everything runs under a private `XDG_RUNTIME_DIR`:
+without one the accessibility bus fell back to a fixed path under
+`~/.cache` that another program also used, and the "nested" bus listed it.
 
 **Where this stops mapping onto Windows.** `CreateDesktopW` gives one
 process several desktops and binds a *thread* to whichever one it should
@@ -46,11 +56,15 @@ misrouted.
 
 from __future__ import annotations
 
+import contextlib
+import glob
 import json
 import os
-import random
+import re
 import shutil
+import signal
 import subprocess
+import tempfile
 import time
 from collections.abc import Callable
 from typing import TypeVar
@@ -59,18 +73,18 @@ from . import desktop_claim, display
 
 T = TypeVar("T")
 
-#: The one binary this needs beyond Xvfb and dbus-daemon, both of which
-#: `docs/LINUX.md`'s own nested-bus measurement (`tests/test_linux_atspi.
-#: py`) already depends on. Not on `PATH` on every distribution, which is
-#: why `_unavailable` checks the literal path rather than `shutil.which`.
-BUS_LAUNCHER = "/usr/libexec/at-spi-bus-launcher"
-
 #: How long to wait for each piece of the stack to answer before giving up
 #: and reporting why, rather than hanging `launch_isolated` on a service
 #: that will never start (D#9's reasoning, applied to setup rather than a
-#: single call).
+#: single call). Measured on linux-host-a: the shell announces its Xwayland in
+#: ~0.2s once it has a runtime directory.
 STARTUP_TIMEOUT_S = 10.0
 POLL_S = 0.1
+
+#: The size of the nested desktop's one virtual monitor.
+VIRTUAL_MONITOR = "1280x800"
+
+_PUBLIC_DISPLAY = re.compile(r"Using public X11 display (:\d+)")
 
 
 class Unsupported(RuntimeError):
@@ -78,34 +92,118 @@ class Unsupported(RuntimeError):
 
 
 def _unavailable() -> list[str]:
-    """What is missing, or an empty list when the stack can be built."""
-    missing = [t for t in ("Xvfb", "dbus-daemon", "dbus-send", "gnome-shell")
+    """What is missing, or an empty list when the stack can be built.
+
+    `gnome-shell` must also be able to run headless -- every version this
+    backend has met (46, 50) can, but a shell that cannot is named here
+    rather than failing later with a log nobody reads.
+    """
+    missing = [t for t in ("dbus-daemon", "dbus-send", "gnome-shell")
                if shutil.which(t) is None]
-    if not os.path.exists(BUS_LAUNCHER):
-        missing.append(BUS_LAUNCHER)
+    if "gnome-shell" not in missing:
+        helped = subprocess.run(["gnome-shell", "--help"], capture_output=True,
+                                text=True, timeout=STARTUP_TIMEOUT_S)
+        if "--headless" not in helped.stdout + helped.stderr:
+            missing.append("a gnome-shell that runs --headless")
     return missing
 
 
-def _free_display_number() -> int:
-    """A display number nothing is listening on yet.
+def _public_display(log: str) -> str | None:
+    """The Xwayland display the shell chose, from its own log line.
 
-    `/tmp/.X{n}-lock` is what a running `Xvfb` leaves behind; picking a
-    random band and stepping past whatever is taken is enough to make
-    concurrent launches (two tests, or two sessions) not collide, without
-    needing a registry of what this process has already claimed.
+    The shell picks a free number itself and says so on stderr
+    ("Using public X11 display :2, ..."). Measured, not assumed: watching
+    `/tmp/.X11-unix` for a new socket missed it, because the name was one a
+    stale socket already held.
     """
-    base = random.randint(150, 900)
-    for offset in range(200):
-        candidate = base + offset
-        if not os.path.exists(f"/tmp/.X{candidate}-lock"):
-            return candidate
-    raise Unsupported("no free nested display number found in the 150-900 band")
+    found = _PUBLIC_DISPLAY.search(log)
+    return found.group(1) if found else None
+
+
+def _target_env(*, display: str, xauthority: str, bus: str, atspi: str,
+                runtime: str) -> dict[str, str]:
+    """What the target runs with: an X client of the nested Xwayland.
+
+    Never the operator's `WAYLAND_DISPLAY`: a toolkit that prefers Wayland
+    (Qt, Chromium) would open on the operator's own desktop -- the one thing
+    this strategy exists to prevent. And the backends forced to X, because
+    everything this backend reads about a window it reads from X (#217).
+    """
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("WAYLAND_DISPLAY", "WAYLAND_SOCKET")}
+    env.update(
+        DISPLAY=display,
+        XAUTHORITY=xauthority,
+        DBUS_SESSION_BUS_ADDRESS=bus,
+        AT_SPI_BUS_ADDRESS=atspi,
+        XDG_RUNTIME_DIR=runtime,
+        XDG_SESSION_TYPE="x11",
+        GDK_BACKEND="x11",
+        QT_QPA_PLATFORM="xcb",
+        GSETTINGS_BACKEND="memory",
+    )
+    return env
+
+
+def _processes_in(runtime: str, proc: str = "/proc") -> list[int]:
+    """Every process whose `XDG_RUNTIME_DIR` is this desktop's.
+
+    That is what belongs to a nested desktop -- the shell, its Xwayland, and
+    the portals and services it activated, whatever process group they ended
+    up in. Swept by teardown because the headless shell does not always die
+    on SIGTERM, and outlived its harness three times in one run (#217).
+    """
+    marker = b"XDG_RUNTIME_DIR=" + runtime.encode()
+    found = []
+    for entry in sorted(os.listdir(proc), key=lambda e: (len(e), e)):
+        if not entry.isdigit() or int(entry) == os.getpid():
+            continue
+        try:
+            with open(os.path.join(proc, entry, "environ"), "rb") as f:
+                if marker in f.read().split(b"\0"):
+                    found.append(int(entry))
+        except OSError:
+            continue
+    return found
+
+
+def _mounts_under(directory: str, mounts: str) -> list[str]:
+    """Mount points inside `directory`, from `/proc/mounts` text.
+
+    The nested shell can activate the document portal, which FUSE-mounts
+    itself under the runtime directory; left mounted, the directory cannot be
+    removed (measured on linux-host-a, #217). Deepest first, for unmounting.
+    """
+    prefix = directory.rstrip("/") + "/"
+    found = [line.split()[1] for line in mounts.splitlines()
+             if len(line.split()) > 1 and line.split()[1].startswith(prefix)]
+    return sorted(found, key=len, reverse=True)
+
+
+def _await_group_gone(pgid: int, timeout: float = 5.0) -> None:
+    """Wait for a process group to empty, then make sure it has.
+
+    Removing the runtime directory while the group is still shutting down
+    lets a dying service write into it again; measured once on linux-host-a, a
+    gvfs mount point reappeared a few seconds after the directory went.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return
+        except OSError:
+            return
+        time.sleep(POLL_S)
+    with contextlib.suppress(OSError):
+        os.killpg(pgid, signal.SIGKILL)
 
 
 class HiddenDesktop:
-    """A nested display, its own accessibility bus, and the process it runs
-    the target on. Not reusable and not thread-safe by design, the same as
-    the Windows strategy this mirrors: one instance owns one nested stack.
+    """A nested desktop, its own buses, and the process it runs the target
+    on. Not reusable and not thread-safe by design, the same as the Windows
+    strategy this mirrors: one instance owns one nested stack.
     """
 
     def __init__(self, name: str = "ghostdriver") -> None:
@@ -115,16 +213,19 @@ class HiddenDesktop:
         self._procs: list[subprocess.Popen] = []
         self._target: subprocess.Popen | None = None
         self._bus_pid: int | None = None
+        self._runtime: str | None = None
 
     # -- lifecycle --------------------------------------------------------
 
     def prepare(self) -> None:
-        """Stand up the nested display, its bus, and its window manager.
+        """Stand up the nested desktop: a private runtime directory and
+        session bus, a headless gnome-shell, and its Xwayland.
 
         Claims the process for this desktop's name before anything else
         runs, so a process that already talks to the operator's own
         accessibility bus refuses here, loudly, instead of after a target
-        has been launched onto a display nothing can then read from.
+        has been launched onto a display nothing can then read from. A
+        failure part-way tears down what was already started.
         """
         with desktop_claim.desktop(self.name):
             desktop_claim.claim()
@@ -132,60 +233,65 @@ class HiddenDesktop:
         missing = _unavailable()
         if missing:
             raise Unsupported(
-                "the nested-display stack needs " + ", ".join(missing)
+                "the nested-desktop stack needs " + ", ".join(missing)
                 + ", which this machine does not have. hidden_desktop is "
                 "the Linux isolation strategy (docs/LINUX.md); without it "
                 "there is no launch-only guarantee to offer."
             )
+        try:
+            self._prepare()
+        except BaseException:
+            self.teardown()
+            raise
 
-        display_number = self._start_xvfb()
+    def _prepare(self) -> None:
+        # Private, so the accessibility bus and the shell's sockets land
+        # here. Without one, the bus fell back to a fixed path under
+        # ~/.cache that another program on linux-host-a also used, and the
+        # "nested" bus listed RustDesk (#217).
+        self._runtime = tempfile.mkdtemp(prefix="ghostdriver-desktop-")
         bus_address = self._start_private_bus()
-        atspi_address = self._start_bus_launcher(display_number, bus_address)
-        display_name = f":{display_number}"
-        self._env = dict(
-            os.environ,
-            DISPLAY=display_name,
-            DBUS_SESSION_BUS_ADDRESS=bus_address,
-            AT_SPI_BUS_ADDRESS=atspi_address,
-            GDK_BACKEND="x11",
-            GSETTINGS_BACKEND="memory",
-        )
+        display_name, xauthority = self._start_shell(bus_address)
+        atspi_address = self._a11y_address(bus_address)
+        self._env = _target_env(display=display_name, xauthority=xauthority,
+                                bus=bus_address, atspi=atspi_address,
+                                runtime=self._runtime)
         # What `display.py` and `tree.py` look up by claimant instead of
         # reading the ambient environment (D#40f) -- registered before the
         # window manager readiness poll below, which is the first caller.
         desktop_claim.register(
-            self.name, DISPLAY=display_name,
+            self.name, DISPLAY=display_name, XAUTHORITY=xauthority,
             DBUS_SESSION_BUS_ADDRESS=bus_address, AT_SPI_BUS_ADDRESS=atspi_address,
         )
-        self._start_window_manager()
+        self._await_window_manager()
 
-    def _spawn(self, command: list[str], *, env: dict[str, str] | None = None) -> subprocess.Popen:
-        proc = subprocess.Popen(
-            command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        self._procs.append(proc)
-        return proc
-
-    def _start_xvfb(self) -> int:
-        for _ in range(5):
-            number = _free_display_number()
-            proc = self._spawn(["Xvfb", f":{number}", "-screen", "0", "1280x800x24"])
-            time.sleep(0.3)
-            if proc.poll() is None:
-                return number
-            self._procs.remove(proc)
-        raise Unsupported("Xvfb would not start on any of five tried display numbers")
+    def _base_env(self, bus_address: str | None = None) -> dict[str, str]:
+        assert self._runtime is not None
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("DISPLAY", "WAYLAND_DISPLAY", "WAYLAND_SOCKET",
+                            "XAUTHORITY", "XDG_SESSION_TYPE", "AT_SPI_BUS_ADDRESS")}
+        # No gvfs: a nested desktop needs no virtual filesystems, and its
+        # daemons outlived the bus long enough to recreate their mount point
+        # in the runtime directory after teardown removed it (measured).
+        env.update(XDG_RUNTIME_DIR=self._runtime, GSETTINGS_BACKEND="memory",
+                   GIO_USE_VFS="local", GVFS_DISABLE_FUSE="1")
+        if bus_address is not None:
+            env["DBUS_SESSION_BUS_ADDRESS"] = bus_address
+        return env
 
     def _start_private_bus(self) -> str:
-        """A session bus of its own (D#8): the reason the nested display
+        """A session bus of its own (D#8): the reason the nested desktop
         isolates rather than merely runs somewhere else. `dbus-daemon
         --fork --print-address` rather than `dbus-run-session`, because
         this process needs the address as data to hand to the pieces it
-        starts next, not as an environment already applied to an `exec`."""
+        starts next. Started inside the private runtime directory, so the
+        services it activates -- the accessibility bus among them -- put
+        their sockets there too."""
         out = subprocess.run(
             ["dbus-daemon", "--session", "--fork",
              "--print-address=1", "--print-pid=1"],
             capture_output=True, text=True, timeout=STARTUP_TIMEOUT_S,
+            env=self._base_env(),
         )
         lines = out.stdout.splitlines()
         if out.returncode != 0 or len(lines) < 2:
@@ -195,10 +301,48 @@ class HiddenDesktop:
         self._bus_pid = int(lines[1].strip())
         return lines[0].strip()
 
-    def _start_bus_launcher(self, display_number: int, bus_address: str) -> str:
-        env = dict(os.environ, DISPLAY=f":{display_number}",
-                   DBUS_SESSION_BUS_ADDRESS=bus_address, GSETTINGS_BACKEND="memory")
-        self._spawn([BUS_LAUNCHER, "--launch-immediately"], env=env)
+    def _start_shell(self, bus_address: str) -> tuple[str, str]:
+        """A headless gnome-shell, and the Xwayland it announces.
+
+        Not `gnome-shell --x11` on an Xvfb (D75): GNOME 50 removed the X11
+        backend (#217). The shell is still mutter, so the target -- an X
+        client of the shell's own Xwayland -- gets the same window manager,
+        and with it `_NET_CLIENT_LIST`, `_NET_ACTIVE_WINDOW` and iconify,
+        measured on linux-host-a against the GTK fixture.
+        """
+        assert self._runtime is not None
+        log_path = os.path.join(self._runtime, "gnome-shell.log")
+        with open(log_path, "w") as log:
+            proc = subprocess.Popen(
+                ["gnome-shell", "--headless", "--wayland",
+                 "--virtual-monitor", VIRTUAL_MONITOR,
+                 "--wayland-display", f"ghostdriver-{os.getpid()}-{self.name}"],
+                env=self._base_env(bus_address), stdout=subprocess.DEVNULL,
+                stderr=log, start_new_session=True,
+            )
+        self._procs.append(proc)
+        deadline = time.monotonic() + STARTUP_TIMEOUT_S
+        while time.monotonic() < deadline:
+            with open(log_path) as log:
+                found = _public_display(log.read())
+            if found is not None:
+                cookies = glob.glob(os.path.join(self._runtime, ".mutter-Xwaylandauth.*"))
+                if cookies:
+                    return found, cookies[0]
+            if proc.poll() is not None:
+                break
+            time.sleep(POLL_S)
+        with open(log_path) as log:
+            tail = log.read()[-400:]
+        raise Unsupported(
+            "the headless gnome-shell did not announce an Xwayland display "
+            f"within {STARTUP_TIMEOUT_S:.0f}s. Its log ends: {tail}"
+        )
+
+    def _a11y_address(self, bus_address: str) -> str:
+        """The private accessibility bus's address, activated on the
+        private session bus by asking for it."""
+        env = self._base_env(bus_address)
         deadline = time.monotonic() + STARTUP_TIMEOUT_S
         while time.monotonic() < deadline:
             got = subprocess.run(
@@ -213,16 +357,13 @@ class HiddenDesktop:
                     return lines[-1].strip().split('"', 1)[1].rsplit('"', 1)[0]
             time.sleep(POLL_S)
         raise Unsupported(
-            "at-spi-bus-launcher did not answer GetAddress within "
-            f"{STARTUP_TIMEOUT_S:.0f}s of starting"
+            "the private accessibility bus did not answer GetAddress within "
+            f"{STARTUP_TIMEOUT_S:.0f}s"
         )
 
-    def _start_window_manager(self) -> None:
-        """A WM, not just a server (D75): `_NET_CLIENT_LIST` and
-        `_NET_ACTIVE_WINDOW` -- what everything above the tree read from
-        this display -- come from the window manager, and a bare `Xvfb`
-        sets neither."""
-        self._spawn(["gnome-shell", "--x11"], env=self._env)
+    def _await_window_manager(self) -> None:
+        """The shell manages its Xwayland's clients (D75's reason for a WM:
+        `_NET_CLIENT_LIST` and `_NET_ACTIVE_WINDOW` come from it)."""
         deadline = time.monotonic() + STARTUP_TIMEOUT_S
         with desktop_claim.desktop(self.name):
             while time.monotonic() < deadline:
@@ -230,7 +371,7 @@ class HiddenDesktop:
                     return
                 time.sleep(POLL_S)
         raise Unsupported(
-            f"gnome-shell did not attach to the nested display within "
+            f"the nested shell did not manage its Xwayland within "
             f"{STARTUP_TIMEOUT_S:.0f}s; without a window manager this "
             "display cannot answer top_level_windows or restore_process"
         )
@@ -282,18 +423,43 @@ class HiddenDesktop:
         )
 
     def teardown(self) -> None:
+        """Stop everything this desktop started, and remove its runtime
+        directory. Safe to call on a half-built desktop: `prepare` calls it
+        when a step fails, which it did not before -- every failed run on
+        linux-host-a left an X server and a private bus behind (#217)."""
         if self._target is not None and self._target.poll() is None:
             self._target.terminate()
         for proc in reversed(self._procs):
             if proc.poll() is None:
-                proc.terminate()
+                # The shell runs in its own session and takes Xwayland down
+                # with it; the group catches anything it started besides.
+                with contextlib.suppress(OSError):
+                    os.killpg(proc.pid, signal.SIGTERM)
         for proc in reversed(self._procs):
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                proc.kill()
+                with contextlib.suppress(OSError):
+                    os.killpg(proc.pid, signal.SIGKILL)
         if self._bus_pid:
-            try:
-                os.kill(self._bus_pid, 15)
-            except OSError:
-                pass
+            # `--fork` puts the daemon in a session of its own, so its group
+            # holds the services it activated: the accessibility bus, and
+            # the shell's helpers (ibus, the portal).
+            with contextlib.suppress(OSError):
+                os.killpg(self._bus_pid, signal.SIGTERM)
+            with contextlib.suppress(OSError):
+                os.kill(self._bus_pid, signal.SIGTERM)
+            _await_group_gone(self._bus_pid)
+            self._bus_pid = None
+        if self._runtime is not None:
+            # Whatever still carries this desktop's runtime directory is
+            # ours, in any process group: put down last, and hard.
+            for pid in _processes_in(self._runtime):
+                with contextlib.suppress(OSError):
+                    os.kill(pid, signal.SIGKILL)
+            with contextlib.suppress(OSError), open("/proc/mounts") as f:
+                for mount in _mounts_under(self._runtime, f.read()):
+                    subprocess.run(["fusermount3", "-u", "-z", mount],
+                                   capture_output=True, timeout=5)
+            shutil.rmtree(self._runtime, ignore_errors=True)
+            self._runtime = None

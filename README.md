@@ -302,8 +302,8 @@ Automation, acts by posted messages, and isolates by minimizing the target
 or by putting it on a hidden desktop.
 
 **Linux** targets X11. It reads the tree and acts through AT-SPI, reads
-window-manager state through EWMH, and gets a hidden desktop from a nested
-`Xvfb` that has its own D-Bus and AT-SPI buses. `docs/LINUX.md` lists each
+window-manager state through EWMH, and gets a hidden desktop from a headless
+GNOME Shell that has its own D-Bus and AT-SPI buses. `docs/LINUX.md` lists each
 contract name with its Linux mechanism and the decision that measured it.
 The Linux backend differs from Windows in these ways:
 
@@ -319,8 +319,11 @@ The Linux backend differs from Windows in these ways:
   refuses with `denied_by_environment` (D#215), because XWayland answers
   about X clients only. The plan for the rest is
   `docs/superpowers/plans/2026-10-09-wayland-support.md`.
-- **GNOME 50 and later cannot host the hidden desktop yet.** It runs
-  `gnome-shell --x11`, which GNOME 50 removed.
+- **The hidden desktop is a headless GNOME Shell.** GNOME 50 removed
+  `gnome-shell --x11`, so the nested desktop runs `gnome-shell --headless
+  --wayland` and the target is an X client of its Xwayland (D#217). It needs
+  `gnome-shell`, `dbus-daemon` and `dbus-send`; it no longer starts an
+  Xvfb (some measurement tests still do).
 
 ## What it does not do
 

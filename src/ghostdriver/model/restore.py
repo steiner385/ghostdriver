@@ -41,3 +41,15 @@ class RestoreResult:
     def newly_visible(self) -> tuple[int, ...]:
         before = set(self.visible_before)
         return tuple(h for h in self.visible_after if h not in before)
+
+    @property
+    def note(self) -> str:
+        """What happened, in a sentence -- never claiming more than the
+        screen showed. Asking is not restoring: on GNOME 50's headless shell
+        an X client's activation is refused and nothing comes back (#217)."""
+        if not self.restored:
+            return "nothing was minimized"
+        if not self.newly_visible:
+            return (f"asked to restore {len(self.restored)} window(s); none came "
+                    "back on screen -- the window manager declined")
+        return "the application re-showed its own forms"

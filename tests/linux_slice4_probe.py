@@ -151,7 +151,9 @@ def main():
     # --- phase 1: one enumeration, everything that needs a live handle ----
     nodes = _snap(pid)
     report["roles"] = _roles(nodes)
-    button = _pick(nodes, ("push button",), "Apply")
+    # at-spi2-core 2.60 names the role "button"; earlier releases said
+    # "push button" (measured on linux-host-a, Ubuntu 26.04, while fixing #217).
+    button = _pick(nodes, ("push button", "button"), "Apply")
     entry = _pick(nodes, ("text", "entry"), "bound entry")
     report["button"] = _describe(button)
     report["entry"] = _describe(entry, value=True)
@@ -163,7 +165,7 @@ def main():
         # does not provide it.
         report["focus_via_component"] = linux_input.focus_via_component(button.handle)
 
-    drawn = _pick(nodes, ("push button", "drawing area"), "Recalculate")
+    drawn = _pick(nodes, ("push button", "button", "drawing area"), "Recalculate")
     report["drawn"] = _describe(drawn)
     if drawn is not None:
         report["drawn_actions"] = linux_input.action_names(drawn.handle)

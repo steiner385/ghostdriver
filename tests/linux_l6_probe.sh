@@ -11,10 +11,12 @@
 # the drive has to be shown to work before its non-effect means anything.
 set -u
 OP=${GHOSTDRIVER_OPERATOR_DISPLAY:-:0}
+OP_AUTH=${GHOSTDRIVER_OPERATOR_XAUTHORITY:-}
 
-gnome-shell --x11 >/dev/null 2>&1 & WM_PID=$!
-for i in $(seq 1 30); do
-  xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q 0x && break; sleep 1; done
+# A headless gnome-shell's Xwayland, not Xvfb + `gnome-shell --x11` (#217).
+. "$(dirname "$0")/linux_nested_shell.sh"
+gd_start_nested_shell || { echo "ABORT nested shell did not start"; exit 1; }
+WM_PID=$GD_SHELL_PID
 
 python3 -m tests.fixtureapp_gtk --present-after 45000 --quit-after 120000 \
   2>/dev/null > /tmp/gd-l6-probe.json & B_PID=$!
@@ -33,9 +35,9 @@ want=$(printf 0x%x "$XB")
 # exactly what the Windows focus guard checks (tests/test_zz_focus_guard.py).
 opact(){
   local w
-  w=$(DISPLAY=$OP xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | sed 's/.*# //')
+  w=$(DISPLAY=$OP XAUTHORITY=$OP_AUTH xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | sed 's/.*# //')
   local pid="none"
-  [ -n "$w" ] && [ "$w" != "0x0" ] && pid=$(DISPLAY=$OP xprop -id "$w" _NET_WM_PID 2>/dev/null | sed 's/.*= //')
+  [ -n "$w" ] && [ "$w" != "0x0" ] && pid=$(DISPLAY=$OP XAUTHORITY=$OP_AUTH xprop -id "$w" _NET_WM_PID 2>/dev/null | sed 's/.*= //')
   echo "win=$w owner_pid=${pid:-none}"
 }
 nsact(){ xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | sed 's/.*# //'; }

@@ -106,7 +106,9 @@ def test_the_drawn_button_is_reachable_by_name(report):
     locatable because the fixture gives it an accessible role, which is
     itself the finding: an owner-drawn control that does not do this cannot
     be named at all."""
-    assert report["by_name"]["Recalculate"]["role"] == "push button"
+    # "button" from at-spi2-core 2.60 on; "push button" before it -- the
+    # same role, renamed (measured on linux-host-a, Ubuntu 26.04).
+    assert report["by_name"]["Recalculate"]["role"] in ("push button", "button")
 
 
 # --- slice 1: the tree the contract actually returns ---------------------------

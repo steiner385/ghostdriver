@@ -382,6 +382,5 @@ class StatusTools(_ToolboxCore):
                 for h in result.newly_visible
             ],
             "took_foreground": result.took_foreground,
-            "note": ("nothing was minimized" if not result.restored else
-                     "the application re-showed its own forms"),
+            "note": result.note,
         }

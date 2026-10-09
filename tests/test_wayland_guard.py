@@ -51,7 +51,7 @@ def test_the_watches_refuse_at_construction_on_wayland(wayland):
     with pytest.raises(session_type.X11Only, match="interference watch"):
         InterferenceWatch(1)
     with pytest.raises(session_type.X11Only, match="minimized watch"):
-        MinimizedWatch(1, 0)
+        MinimizedWatch(1)
 
 
 def test_a_snapshot_the_platform_cannot_take_is_not_a_dead_target(wayland, monkeypatch):

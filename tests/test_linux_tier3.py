@@ -26,12 +26,13 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import on_linux
+from tests.linux_nested_shell import NEEDED as NESTED_NEEDED
+from tests.linux_nested_shell import nested_env
 
 pytestmark = [on_linux, pytest.mark.slow]
 
-DISPLAY = ":83"
 PROBE = Path(__file__).parent / "linux_tier3_probe.sh"
-NEEDED = ("Xvfb", "dbus-run-session", "gnome-shell", "xdotool", "xclip", "xprop")
+NEEDED = (*NESTED_NEEDED, "xdotool", "xclip", "xprop")
 
 
 @pytest.fixture(scope="module")
@@ -48,32 +49,30 @@ def tier3():
     if missing:
         pytest.skip("tier-3 measurement needs: " + ", ".join(missing))
 
-    server = subprocess.Popen(["Xvfb", DISPLAY, "-screen", "0", "1280x800x24"],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    probe = subprocess.Popen(
-        ["dbus-run-session", "--", "bash", str(PROBE)],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-        start_new_session=True,          # its own group, so teardown is total
-        env=dict(os.environ, DISPLAY=DISPLAY, GSETTINGS_BACKEND="memory",
-                 GDK_BACKEND="x11", PYTHONPATH="src"),
-    )
-    lines, deadline = [], time.monotonic() + 240
-    try:
-        for line in probe.stdout:
-            line = line.strip()
-            if line.startswith(("CONTROL", "EXPT", "ABORT", "==")):
-                lines.append(line)
-            if line.startswith("EXPT D") or line.startswith("ABORT"):
-                break
-            if time.monotonic() > deadline:
-                break
-    finally:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(os.getpgid(probe.pid), signal.SIGTERM)
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            probe.wait(timeout=20)
-        server.terminate()
-        server.wait(timeout=10)
+    # A headless gnome-shell's Xwayland, not Xvfb + `gnome-shell --x11`,
+    # which GNOME 50 removed (#217).
+    with nested_env() as env:
+        probe = subprocess.Popen(
+            ["dbus-run-session", "--", "bash", str(PROBE)],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+            start_new_session=True,          # its own group, so teardown is total
+            env=env,
+        )
+        lines, deadline = [], time.monotonic() + 240
+        try:
+            for line in probe.stdout:
+                line = line.strip()
+                if line.startswith(("CONTROL", "EXPT", "ABORT", "==")):
+                    lines.append(line)
+                if line.startswith("EXPT D") or line.startswith("ABORT"):
+                    break
+                if time.monotonic() > deadline:
+                    break
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(os.getpgid(probe.pid), signal.SIGTERM)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                probe.wait(timeout=20)
 
     if any(ln.startswith("ABORT") for ln in lines) or "== controls pass ==" not in lines:
         pytest.skip("the tier-3 harness could not produce a positive control, "

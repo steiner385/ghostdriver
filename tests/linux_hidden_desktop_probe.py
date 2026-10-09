@@ -12,6 +12,7 @@ Never imported -- run as `python -m tests.linux_hidden_desktop_probe`.
 """
 
 import json
+import os
 import sys
 import time
 
@@ -51,7 +52,43 @@ def main() -> int:
     names = [node.text for tree in trees for node in tree.walk()]
     report["found_fixture"] = "Ghostdriver GTK fixture" in names
 
+    with open(f"/proc/{pid}/environ", "rb") as f:
+        target_env = dict(item.split(b"=", 1) for item in f.read().split(b"\0") if b"=" in item)
+    report["nested_display"] = instance._env["DISPLAY"]
+    report["target_display"] = target_env.get(b"DISPLAY", b"").decode()
+    wl = target_env.get(b"WAYLAND_DISPLAY")
+    report["target_wayland_display"] = wl.decode() if wl else None
+
+    started = [p.pid for p in instance._procs] + [instance._bus_pid, pid]
+    runtime = instance._runtime
     instance.teardown()
+
+    def alive(p):
+        try:
+            return not open(f"/proc/{p}/stat").read().split(") ")[1].startswith("Z")
+        except OSError:
+            return False
+
+    def naming_runtime():
+        # The shell's own children (Xwayland's -auth is under it) are not
+        # in `started`; anything still naming the runtime directory is ours.
+        found = []
+        for entry in os.listdir("/proc"):
+            if entry.isdigit():
+                try:
+                    with open(f"/proc/{entry}/cmdline", "rb") as f:
+                        if runtime and runtime.encode() in f.read() and alive(entry):
+                            found.append(int(entry))
+                except OSError:
+                    pass
+        return found
+
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and (
+            naming_runtime() or any(p and alive(p) for p in started)):
+        time.sleep(0.2)
+    report["left_running"] = sorted({p for p in started if p and alive(p)} | set(naming_runtime()))
+    report["runtime_removed"] = runtime is not None and not os.path.exists(runtime)
     print(json.dumps(report), flush=True)
     return 0
 

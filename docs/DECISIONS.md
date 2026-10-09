@@ -8482,3 +8482,79 @@ Wayland, foreground and pointer refuse, and over the MCP tools
 `tests/test_linux_*.py` fails the identical set on `main` and on this
 change with the display variables unset (the X11 path), every failure the
 missing `gnome-shell --x11`. Issue #215; #213; D9; D53; D#111; D75.
+
+### D#217. The hidden desktop is a headless gnome-shell's Xwayland, and on it an X client cannot take focus
+
+**Context.** `HiddenDesktop` was an `Xvfb` with `gnome-shell --x11` on it
+(D75), and seven measurement harnesses built the same stack by hand. GNOME
+50 removed the X11 backend (`gnome-shell --x11` → "Unknown option"), so on
+linux-host-a (Ubuntu 26.04, GNOME 50.1) the strategy could not start and the
+harnesses all errored. linux-host-b has no gnome-shell and skipped them; CI is
+Windows-only. Every failed `prepare` also left its `Xvfb` and private
+`dbus-daemon` running: five of each had piled up on linux-host-a.
+
+**What was measured** (linux-host-a, a headless `gnome-shell --headless --wayland
+--virtual-monitor 1280x800` on a private bus, the GTK fixture as an X client
+of the shell's own Xwayland; the operator's foreground read before and after
+every run, unmoved):
+
+| Question | Answer |
+|---|---|
+| Does the shell host an X client with EWMH? | Yes. The fixture is in `_NET_CLIENT_LIST`, `_NET_WM_PID` is right, `_NET_SUPPORTING_WM_CHECK` is set. |
+| Iconify, `_NET_WM_STATE_HIDDEN`, capture by `XGetImage`, XTest | All work. XTest synced in ~5ms with no portal prompt. |
+| Which display did it choose? | Its own log says ("Using public X11 display :2"). Watching `/tmp/.X11-unix` for a new socket missed it: a stale socket already held the name. |
+| Is the nested accessibility bus private? | **Not by default.** With no `XDG_RUNTIME_DIR` (the launcher environment again, as in D#215) the activated bus fell back to `~/.cache/at-spi/bus`, which RustDesk also used, and the "nested" bus listed RustDesk. With a private runtime directory it lists only the shell's own helpers and the fixture. |
+| Does an X client's `present()` un-iconify it? | **No.** Under `--x11` it did (L6). Mutter in Wayland mode refuses it: the window stays hidden, the foreground stays put. |
+| Does a modal raised by a hidden X client get out? | **Yes**: the main window comes back on screen beside the modal, focus unmoved. This is now the escape the watch probe uses. |
+| Does activating a hidden window restore it? | **No.** Under `--x11` activation was the only thing that restored a window, so restoring was focusing (D#14). Here it is refused outright: the window stays hidden for the whole 30s. |
+| Does the owner lose `ACTIVE` when its modal comes up? | **No.** It did under `--x11` (D#12 recorded it as not a modality signal). Here it does not even move. |
+
+**Decision.** `HiddenDesktop` runs a headless `gnome-shell --wayland` under
+a private `XDG_RUNTIME_DIR` and a private session bus, and launches the
+target as an X client of the shell's Xwayland -- never with the operator's
+`WAYLAND_DISPLAY`, and with `GDK_BACKEND=x11` and `QT_QPA_PLATFORM=xcb`, so
+no toolkit can open it on the operator's desktop. Everything the backend
+reads about a window it still reads from X, so nothing above the shell
+changed; the hidden desktop's own cookie is handed to the X connection
+(`display._connect`) only for the moment it opens. A `prepare` that fails
+part-way tears down what it started, and `teardown` waits for the private
+bus's process group to empty before removing the runtime directory (a dying
+gvfs recreated its mount point in it once). The measurement harnesses share
+one recipe (`tests/linux_nested_shell.{sh,py}`).
+
+**What it changes about earlier measurements.** D#12, D#14 and L6 were
+measured against mutter in X11 mode. That mode is gone on GNOME 50, and the
+answers differ in one direction: mutter in Wayland mode does not let an X
+client take focus or come back from iconified on its own. The tests that
+pinned the old answers now pin the new ones and say what changed
+(`test_active_on_the_owner_is_not_a_modality_signal`,
+`test_activation_neither_restores_nor_focuses_on_the_headless_shell`,
+`test_a_target_that_presents_itself_stays_put_away`). For the strategy this
+is more isolation, not less. For `restore` it means a request nothing
+answers, so the result now says "none came back on screen" instead of "the
+application re-showed its own forms". The tier-3 harness (D#11) can no longer
+produce its positive control -- it focused a window by activation -- so it
+skips and says why; D#11's conclusion does not depend on it.
+
+**Found on the way, not this decision.** at-spi2-core 2.60 renamed the role
+"push button" to "button" (two tests matched the old name and now accept
+both; a profile written with `type=push button` would stop matching on such
+a host). And GTK now hands out a password entry's text as bullets, not
+cleartext, which contradicts D#34a's finding: the tests that pin the leak
+fail on linux-host-a for that reason, not this one.
+
+**Evidence.** `tests/test_hidden_desktop_lifecycle.py` (`env: any`: the
+display parse, teardown on a failed `prepare`, the target environment, the
+cookie hand-off); `tests/test_restore_result.py` (`env: any`);
+`tests/test_linux_hidden_desktop.py` on linux-host-a, 6/6 including no process and
+no runtime directory left behind; the converted harnesses on linux-host-a --
+`watch` 5/5 (with #218's watch built as `attach` builds it), `slice3` 8/8,
+`slice4` 8/8, `modality` 4/4 and `foreground` 8/8 with the re-measured
+answers, `tier3` skipping on its control. `restore` measured its answer once
+-- activation left the hidden window hidden and the foreground where it was
+-- on a run where mutter had focused the window on map; it otherwise skips,
+because its harness focuses by activation, which is what is now refused. No
+nested shell, runtime directory or mount is left after any of them: the
+harnesses and `teardown` both sweep every process carrying the desktop's
+runtime directory (the headless shell does not always die on SIGTERM). Issue #217; #218;
+D75; D#8; D#11; D#12; D#14; D#215.

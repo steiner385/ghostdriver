@@ -29,7 +29,8 @@ import time
 from collections.abc import Callable
 
 from ...isolation import Action, Event, Observation, Watchdog
-from . import display
+from ...model.window import select_main_tree
+from . import display, tree
 from .tree import descendants
 
 #: Slower than the Windows poll. A sample here is several X round trips
@@ -52,14 +53,15 @@ def _family_windows(family: list[int]) -> list[int]:
             if display.window_pid(xid) in family]
 
 
-def sample(pid: int, now: Callable[[], float]) -> Observation:
+def sample(pid: int, now: Callable[[], float],
+           family: list[int] | None = None) -> Observation:
     """One read of whether the target is on screen, and holding the front.
 
     On-screen scans every managed top-level of the process family, not just
     the main one, because the escape that matters most is a modal raised as a
     *new* window while the main window stays put away.
     """
-    family = _family(pid)
+    family = family if family is not None else _family(pid)
     windows = _family_windows(family)
     on_screen = any(not display.is_hidden(xid) for xid in windows)
 
@@ -76,7 +78,8 @@ def sample(pid: int, now: Callable[[], float]) -> Observation:
     )
 
 
-def enforce(pid: int, main_xid: int, action: Action, dog: Watchdog) -> None:
+def enforce(pid: int, main_xid: int, action: Action, dog: Watchdog,
+            family: list[int] | None = None) -> None:
     """Carry out what the policy decided.
 
     The capture happens *before* the window is put away, because the picture
@@ -101,12 +104,13 @@ def enforce(pid: int, main_xid: int, action: Action, dog: Watchdog) -> None:
                 detail=last.detail, capture_png=picture,
             )
 
-    for xid in _family_windows(_family(pid)):
+    for xid in _family_windows(family if family is not None else _family(pid)):
         if not display.is_hidden(xid):
             display.iconify(xid)
 
 
-def watch_once(pid: int, main_xid: int, dog: Watchdog) -> Action:
+def watch_once(pid: int, main_xid: int, dog: Watchdog,
+               family: list[int] | None = None) -> Action:
     """Sample once and act on what the watchdog decides.
 
     `main_xid` is passed in rather than re-resolved, for the reason the
@@ -115,8 +119,8 @@ def watch_once(pid: int, main_xid: int, dog: Watchdog) -> Action:
     after a minimize flips to whatever is still on screen, and the watch
     would read the target as escaped on every sample forever.
     """
-    action = dog.observe(sample(pid, dog.now))
-    enforce(pid, main_xid, action, dog)
+    action = dog.observe(sample(pid, dog.now, family))
+    enforce(pid, main_xid, action, dog, family)
     return action
 
 
@@ -128,15 +132,34 @@ class MinimizedWatch:
     nothing about the next modal.
     """
 
-    def __init__(self, pid: int, main_xid: int, *,
+    def __init__(self, pid: int, *,
                  now: Callable[[], float] = time.monotonic,
-                 poll_s: float = POLL_S) -> None:
+                 family: Callable[[], list[int]] | None = None,
+                 poll_s: float = POLL_S,
+                 main_xid: int | None = None) -> None:
+        """The contract's shape, the one `tools/lifecycle.py` builds: the
+        Windows class's `(pid, *, now, family)`. It took `(pid, main_xid)`,
+        so `attach(isolation="minimized")` raised TypeError on Linux (#218).
+
+        `main_xid` stays as a keyword for a caller that already knows the
+        window -- the L6 probe does. Otherwise `start` finds it.
+        """
         from . import session_type
         session_type.require_x11("the minimized watch")
         self.pid = pid
+        #: The current process family, asked each poll so a helper process
+        #: that appears later is watched too (R5, D71). None: descendants.
+        self.family = family
         self.main_xid = main_xid
+        #: The main window's *tree* handle -- what the tool layer locks its
+        #: reads onto (`core._trees`). On this backend that is an AT-SPI
+        #: handle, not the xid the watch itself works in.
+        self.main_hwnd: int | None = None
+        #: True when *this watch* put the window away, reported at release.
+        self.put_away = False
         self.dog = Watchdog(now=now)
         self._poll_s = poll_s
+        self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -156,10 +179,13 @@ class MinimizedWatch:
         a caller that gets a watch back and finds the target still on screen
         has no way to tell "not yet" from "never".
         """
+        if self.main_xid is None:
+            self.main_xid = self._find_main_xid()
         if not display.exists(self.main_xid):
             raise WatchError(f"window {self.main_xid:#x} is gone; nothing to watch")
         if not display.is_hidden(self.main_xid):
             display.iconify(self.main_xid)
+            self.put_away = True
             if not self._await_hidden():
                 raise WatchError(
                     f"window {self.main_xid:#x} did not go away within "
@@ -170,7 +196,23 @@ class MinimizedWatch:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
+    def _find_main_xid(self) -> int:
+        """The main window, chosen as the Windows watch chooses it (by
+        visible nodes), and the X window behind its frame."""
+        main = select_main_tree(tree.enumerate_process(self.pid))
+        if main is None:
+            raise WatchError("the target has no window to keep minimized")
+        self.main_hwnd = main.handle
+        xid = tree.frame_xid_of(main.handle)
+        if xid is None:
+            raise WatchError(
+                "could not find the X window behind the target's main window "
+                "(its frame matched no managed window, or more than one), so "
+                "there is nothing this watch could put away")
+        return xid
+
     def _await_hidden(self) -> bool:
+        assert self.main_xid is not None  # set by start() before this runs
         deadline = time.monotonic() + self.SETTLE_S
         while time.monotonic() < deadline:
             if display.is_hidden(self.main_xid):
@@ -184,11 +226,33 @@ class MinimizedWatch:
             self._thread.join(timeout=5)
 
     def events(self) -> list[dict]:
-        return [event.to_dict() for event in self.dog.events]
+        with self._lock:
+            return [event.to_dict() for event in self.dog.events]
+
+    def drain(self) -> list[dict]:
+        """Every event since the last drain, as data (the tool layer's
+        per-call `watchdog_events`)."""
+        with self._lock:
+            return [event.to_dict() for event in self.dog.drain()]
+
+    @property
+    def suspended_reason(self) -> str:
+        return self.dog.suspended_reason
+
+    def _pids(self) -> list[int] | None:
+        if self.family is None:
+            return None
+        try:
+            pids = list(self.family())
+        except Exception:  # a failed process snapshot: the target alone this poll
+            return [self.pid]
+        return pids if self.pid in pids else [self.pid, *pids]
 
     def _run(self) -> None:
+        assert self.main_xid is not None
         while not self._stop.is_set():
             if not display.exists(self.main_xid):
                 break
-            watch_once(self.pid, self.main_xid, self.dog)
+            with self._lock:
+                watch_once(self.pid, self.main_xid, self.dog, self._pids())
             self._stop.wait(self._poll_s)
