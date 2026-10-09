@@ -152,6 +152,9 @@ def build_parser() -> argparse.ArgumentParser:
     trace.add_argument("--session", default=None, help="Only this session id")
     trace.add_argument("--all-files", action="store_true",
                        help="Every trace file, not just the newest")
+    trace.add_argument("--scale", action="store_true",
+                       help="How describe fared at the tree sizes it met: windows, "
+                            "what was shown and collapsed, and the size returned")
     trace.add_argument("--operator-dir", default=None, help=f"Overrides {ENV_VAR}")
 
     check = sub.add_parser(
@@ -719,9 +722,9 @@ def cmd_check_profile(profile: str, operator_dir: str | None = None) -> int:
 
 
 def cmd_trace(tail: int, session: str | None, all_files: bool,
-              operator_dir: str | None = None) -> int:
+              operator_dir: str | None = None, scale: bool = False) -> int:
     """Print recent tool calls from the trace, one line each."""
-    from .trace import describe, read
+    from .trace import describe, read, scale_report
 
     try:
         folder = OperatorDir.resolve(operator_dir)
@@ -738,6 +741,11 @@ def cmd_trace(tail: int, session: str | None, all_files: bool,
     for f in chosen:
         events.extend(read(f, session_id=session))
     events.sort(key=lambda e: e.get("at", 0))
+    if scale:
+        for line in scale_report(events):
+            print(line)
+        print(f"-- from {len(chosen)} trace file(s)")
+        return 0
     for event in events[-tail:]:
         print(describe(event))
     print(f"-- {len(events[-tail:])} of {len(events)} call(s) from {', '.join(f.name for f in chosen)}")
@@ -881,7 +889,8 @@ def _dispatch(argv: list[str] | None = None) -> int:
     if args.command == "check-profile":
         return cmd_check_profile(args.profile, args.operator_dir)
     if args.command == "trace":
-        return cmd_trace(args.tail, args.session, args.all_files, args.operator_dir)
+        return cmd_trace(args.tail, args.session, args.all_files, args.operator_dir,
+                         scale=args.scale)
     if args.command == "run-workflow":
         return cmd_run_workflow(args.name, args.pid, args.operator_dir)
     return 2

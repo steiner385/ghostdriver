@@ -68,10 +68,14 @@ class DiscoveryTools(_VisibilityCore):
                     "suggested_locators, or add index=", locator=within)
             trees = [matches[0]]
 
+        # The denominator (#227): how many windows the trees being summarized
+        # hold. describe reported what it showed and what it hid, never out
+        # of how many, so 99 real calls left Gate 3's question unanswered.
+        windows_total = sum(1 for tree in trees for _ in tree.walk())
         windows, locators = [], []
         remaining, omitted, skipped = max_nodes, 0, 0
         truncated = False
-        totals = {"nodes": 0, "elided": 0, "below_depth": 0}
+        totals = {"nodes": 0, "elided": 0, "below_depth": 0, "chars": 0}
 
         for index, tree in enumerate(trees):
             if all_windows and not include_hidden and not tree.visible:
@@ -98,6 +102,7 @@ class DiscoveryTools(_VisibilityCore):
             })
             remaining -= summary.node_count
             totals["nodes"] += summary.node_count
+            totals["chars"] += len(summary.text)
             totals["elided"] += summary.elided_nodes
             totals["below_depth"] += summary.depth_elided_nodes
             truncated = truncated or summary.truncated
@@ -117,6 +122,9 @@ class DiscoveryTools(_VisibilityCore):
             **({"suggested_locators_omitted": len(locators) - MAX_SUGGESTED}
                if len(locators) > MAX_SUGGESTED else {}),
             "nodes_shown": totals["nodes"],
+            "windows_total": windows_total,
+            # What this result costs a caller to hold: the trees' own text.
+            "tree_chars": totals["chars"],
             "truncated": truncated,
             "elided_by_collapsing": totals["elided"],
             **({"expand_hint": (

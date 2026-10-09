@@ -165,3 +165,41 @@ def lost_session_hint(session_id: str) -> str | None:
                     f"attach(pid={pid}, tier={tier!r}) opens a new one; the "
                     "approval is kept while that process lives." + unfinished)
     return None
+
+
+def scale_report(events: list[dict]) -> list[str]:
+    """How `describe` fared at the sizes it actually met (#227, Gate 3).
+
+    One line per traced describe that recorded its numbers, largest tree
+    first, then a line saying what the largest was. Calls traced before
+    the numbers were kept are counted, not guessed at.
+    """
+    rows, unmeasured = [], 0
+    for event in events:
+        if event.get("tool") != "describe" or event.get("phase") or not event.get("ok"):
+            continue
+        result = event.get("result") or {}
+        if "windows_total" not in result:
+            unmeasured += 1
+            continue
+        rows.append((result["windows_total"], result.get("nodes_shown", 0),
+                     result.get("tree_chars", 0), bool(result.get("truncated")),
+                     result.get("elided_by_collapsing", 0), result.get("below_depth", 0),
+                     event.get("elapsed_ms") or 0, (event.get("args") or {}).get("max_nodes", 200),
+                     bool(result.get("within"))))
+    rows.sort(reverse=True)
+    lines = [f"{'windows':>8} {'shown':>6} {'chars':>6} {'trunc':>5} {'collapsed':>9} "
+             f"{'below':>6} {'ms':>6} {'max_nodes':>9}  scope"]
+    for total, shown, chars, truncated, elided, below, ms, asked, within in rows:
+        lines.append(f"{total:>8} {shown:>6} {chars:>6} {'yes' if truncated else 'no':>5} "
+                     f"{elided:>9} {below:>6} {ms:>6} {asked:>9}  {'within' if within else 'whole'}")
+    if rows:
+        top = rows[0]
+        lines.append(f"-- {len(rows)} describe call(s) measured; the largest tree held "
+                     f"{top[0]} windows and came back as {top[2]} characters "
+                     f"({'truncated, and said so' if top[3] else 'whole'})")
+    else:
+        lines = ["-- no describe call in this trace recorded its numbers"]
+    if unmeasured:
+        lines.append(f"-- {unmeasured} earlier describe call(s) were traced before the numbers were kept")
+    return lines

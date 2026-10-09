@@ -138,3 +138,40 @@ def test_a_small_tree_carries_neither_note(box, monkeypatch):
     monkeypatch.setattr(box, "_trees", lambda session, all_windows: [small])
     result = box.describe("s")
     assert "expand_hint" not in result and "suggested_locators_omitted" not in result
+
+
+# --- the numbers the gate asks for, on every call (#227) -------------------------
+
+def test_describe_reports_the_size_of_what_it_summarized(box, monkeypatch):
+    tree = application(1100)
+    monkeypatch.setattr(box, "_trees", lambda session, all_windows: [tree])
+
+    result = box.describe("s")
+
+    assert result["windows_total"] == count(tree)
+    assert result["tree_chars"] == len(result["windows"][0]["tree"]) <= BUDGET_CHARS
+    assert result["nodes_shown"] < result["windows_total"]
+
+
+def test_within_counts_only_the_subtree(box, monkeypatch):
+    tree = application(1100)
+    monkeypatch.setattr(box, "_trees", lambda session, all_windows: [tree])
+
+    inside = box.describe("s", within='class=Form text="View 3"')
+
+    assert 1 < inside["windows_total"] < count(tree)
+
+
+def test_the_trace_keeps_describe_s_numbers(box, monkeypatch):
+    """99 real describe calls were traced with nothing but `blocked`."""
+    from ghostdriver.tools import _result_summary
+
+    tree = application(1100)
+    monkeypatch.setattr(box, "_trees", lambda session, all_windows: [tree])
+
+    kept = _result_summary(box.describe("s"))
+
+    for field in ("windows_total", "nodes_shown", "tree_chars", "truncated",
+                  "elided_by_collapsing", "below_depth", "windows_omitted_for_budget"):
+        assert field in kept, field
+    assert "windows" not in kept, "the tree text itself stays out of the trace"
