@@ -215,3 +215,21 @@ def describe(timing):
                 detail += f", last error {record['error']}"
             lines.append(detail)
     return "\n".join(lines)
+
+
+#: The characters GTK masks a hidden entry with over AT-SPI: the invisible
+#: character, which differs by backend -- U+2022 under X11 and U+25CF under
+#: Wayland, measured on GTK 4.22.4 and 3.24.52 (#219).
+MASK_CHARACTERS = frozenset("\u2022\u25cf*")
+
+
+def leaked_or_masked(text: str, secret: str) -> str | None:
+    """What a hidden field's Text interface handed out: "leaked" (the secret
+    in cleartext -- GTK 4.14.5, D#34a), "masked" (one mask character per
+    secret character -- GTK 4.22.4 and 3.24.52, #219), or None for anything
+    else, which is a change nobody has measured yet."""
+    if text == secret:
+        return "leaked"
+    if len(text) == len(secret) and len(set(text)) == 1 and text[0] in MASK_CHARACTERS:
+        return "masked"
+    return None

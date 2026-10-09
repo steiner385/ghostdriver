@@ -2666,6 +2666,11 @@ password widget  role=password text  get_text() -> 'hunter3'
 The screen shows bullets; the bus returns the value. `Atspi.Text.get_text`
 does not redact, for either widget.
 
+**Version-dependent (D#219):** this was GTK 4.14.5. GTK 4.22.4 masks both
+widgets, and GTK 3.24.52 masks a hidden entry *and* gives it the role
+`password text`. The policy below stands, because a target may run the
+older GTK.
+
 **Why this matters more than it would on Windows.** D37 says a password
 field is protected rather than unresponsive, and D38 that nothing types into
 a field that hides its contents. Both were built on `EM_GETPASSWORDCHAR`,
@@ -8627,3 +8632,48 @@ as gone, `blocking_ancestor` inside and outside the modal, and the aim.
 `tests/test_linux_wayland_live.py` on linux-host-a: 10/10 in three runs, then
 11/11 once the actuator-observation check was added. Issue #221;
 D#215; D#217; D72; D#40d; D#12.
+### D#219. GTK now masks password text over AT-SPI; withholding by class stays
+
+**Context.** D#34a measured, on GTK 4.14.5, that AT-SPI hands out both kinds
+of hidden field in cleartext, and that a `Gtk.Entry` with visibility off is
+indistinguishable from a plain one. D#34b built the Linux read policy on
+that: an editable entry's value is withheld by class. On linux-host-a (Ubuntu
+26.04) the four tests pinning the leak failed: the fields came back masked.
+
+**What was measured** (linux-host-a; the fixture under each GDK backend on a nested
+headless shell, plus a GTK 3 entry):
+
+| Toolkit | Hidden `Gtk.Entry` | `Gtk.PasswordEntry` | Plain entry |
+|---|---|---|---|
+| GTK 4.14.5 (D#34a) | role `text`, **cleartext** | role `password text`, **cleartext** | text |
+| GTK 4.22.4, X11 backend | role `text`, `•••••••` | role `password text`, `•••••••` | text |
+| GTK 4.22.4, Wayland backend | role `text`, `●●●●●●●` | role `password text`, `●●●●●●●` | text |
+| GTK 3.24.52 | role **`password text`**, masked | -- | text |
+
+These are the backend's invisible character, one per secret character, so
+the length still leaks. States, interfaces and attributes (`toolkit=GTK`)
+are identical across the GTK 4 entries, as before.
+
+**Decision: the policy stands.** Withholding an editable entry's value by
+class (D#34b) is still needed on GTK 4. A hidden `Gtk.Entry` is still
+told apart from a plain one only by what it hands out, and a target may run
+a GTK 4 that hands out cleartext. Narrowing the policy is possible and
+recorded here, not taken: it is the operator's trade between safety and
+form-filling verification, not a measurement's.
+- **Read, then classify the answer.** Treat a value made of one repeated
+  mask character as protected. This is safe only where the toolkit masks,
+  so it would need the target's GTK version. On GTK 4 that is readable
+  from the loaded library's file name (`libgtk-4.so.1.2200.4` is 4.22.4);
+  the release that started masking is not yet pinned.
+- **Trust the GTK 3 role.** GTK 3 marks a hidden entry `password text`, so
+  for GTK 3 targets the role alone would be enough.
+
+The tests now pin either measured answer (`tests/linux_probe_support.
+leaked_or_masked`), and fail on anything else, which would be an
+unmeasured change. The driver's own promise -- it never fetches an editable
+entry's value -- is unchanged and still asserted.
+
+**Evidence.** `tests/test_password_mask.py` (`env: any`);
+`tests/test_linux_reading.py`, `test_linux_protection.py` and
+`test_linux_atspi.py` on linux-host-a, passing with the masked answer. Issue #219;
+D#34a; D#34b; D37; D38; D62.

@@ -19,6 +19,7 @@ import sys
 import pytest
 
 from tests.conftest import on_linux
+from tests.linux_probe_support import leaked_or_masked
 
 pytestmark = [on_linux, pytest.mark.slow]
 
@@ -139,7 +140,8 @@ def test_the_tree_reports_names_not_contents(report):
     caller enumerating a window has not asked to read anything."""
     hidden = report["by_name"]["password entry"]
     assert hidden["name"] == "password entry"
-    assert hidden["text"] == "hunter2", "the fixture still holds its secret"
+    # The contents: the secret on GTK 4.14.5, a mask of it on 4.22.4 (#219).
+    assert leaked_or_masked(hidden["text"], "hunter2"), "the fixture still holds its secret"
     assert hidden["name"] != hidden["text"], (
         "the name and the contents must not be the same field; the tree "
         "carries the name"

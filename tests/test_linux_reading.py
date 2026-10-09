@@ -17,6 +17,7 @@ Against GTK 4.14.5. See D#34a.
 import pytest
 
 from tests.conftest import on_linux
+from tests.linux_probe_support import leaked_or_masked
 from tests.test_linux_atspi import report  # noqa: F401  (module-scoped fixture)
 
 pytestmark = [on_linux, pytest.mark.slow]
@@ -81,19 +82,19 @@ def test_the_dedicated_password_widget_is_at_least_distinguishable(report):  # n
 
 @pytest.mark.parametrize("field,secret",
                          [("password entry", "hunter2"), ("password widget", "hunter3")])
-def test_both_password_fields_hand_out_their_secret_in_cleartext(report, field, secret):  # noqa: F811
-    """Neither hiding a field's characters nor using the dedicated widget stops
-    `Atspi.Text.get_text` returning the real value. The screen shows bullets;
-    the bus gives the password.
+def test_what_a_password_field_hands_out_depends_on_the_toolkit_version(report, field, secret):  # noqa: F811
+    """GTK 4.14.5 handed out the real value of both hidden fields over
+    `Atspi.Text.get_text` -- the screen showed bullets and the bus gave the
+    password (D#34a). GTK 4.22.4 masks both, one mask character per secret
+    character, so the length still leaks (#219).
 
-    Asserted deliberately, and it is *not* an approval. It is the reason a
-    Linux `read` cannot be a thin pass-through of the Text interface: the
-    value would land in a tool result, in the trace the operator directory
-    keeps (D62), and in a model's context. D37 and D38 exist for exactly
-    this, and on Linux they have to be enforced by the driver because the
-    toolkit does not enforce them.
+    Either answer is pinned, and neither is an approval: the driver withholds
+    an editable entry's value by class either way (D#34b), because a target
+    may run the older GTK, and on GTK 4 a hidden `Gtk.Entry` still has the
+    same role, states and interfaces as a plain one. Anything *else* coming
+    back is an unmeasured change, and fails here.
     """
-    assert _named(report, field)["text"] == secret, (
-        "the password no longer comes back in cleartext -- if GTK fixed this, "
-        "delete the assertion and say so in the decision log"
-    )
+    got = leaked_or_masked(_named(report, field)["text"], secret)
+    assert got in ("leaked", "masked"), (
+        f"{field} handed out {_named(report, field)['text']!r}: neither the "
+        "secret nor a mask of it -- an unmeasured change; measure it (#219)")

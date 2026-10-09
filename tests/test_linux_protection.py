@@ -16,6 +16,7 @@ detection. These tests are that policy.
 import pytest
 
 from tests.conftest import on_linux
+from tests.linux_probe_support import leaked_or_masked
 from tests.test_linux_atspi import report  # noqa: F401  (module-scoped fixture)
 
 
@@ -152,7 +153,9 @@ def test_the_real_password_entry_is_never_fetched(report):  # noqa: F811
     *will* hand over `hunter2`; this asserts that the driver does not ask."""
     p = _protection()
     node = report["by_name"]["password entry"]
-    assert node["text"] == "hunter2", "the fixture's secret changed; update this test"
+    # Leaked on GTK 4.14.5, masked on 4.22.4 (#219): either way the driver
+    # must not ask, because it cannot know which GTK a target runs.
+    assert leaked_or_masked(node["text"], "hunter2"), "the fixture's secret changed; update this test"
 
     fetched = []
     verdict, value = p.read(
