@@ -311,8 +311,8 @@ The Linux backend differs from Windows in three ways:
   real input is tier 4, sent with XTest, and only under the live-actuation
   consent (D#111).
 - **No assessment.** `region_evidence`, `resolve_hosted_app`, `assess_uia`
-  and `assess_msaa` are not wired yet, so `surfaces` and `probe` fail with
-  an `UnsupportedPlatform` error that names what is missing. The embedded-document case has been measured
+  and `assess_msaa` are not wired yet, so `surfaces` and `probe` return a
+  `denied_by_environment` error that names what is missing. The embedded-document case has been measured
   (D#15); the wiring has not been done.
 - **Wayland is unmeasured.** AT-SPI reads still work under Wayland, but
   the window list, the watches and XTest are X11 mechanisms.

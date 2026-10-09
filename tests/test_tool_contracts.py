@@ -178,3 +178,32 @@ def test_the_tool_surface_and_the_tier_table_name_the_same_tools():
     # session manager, with no Toolbox method behind it.
     assert named - surface == {"grant_launch"}
     assert surface - named == set(), "tools no tier permits"
+
+
+# --- an unbuilt backend name is a result ---------------------------------
+
+def test_a_name_the_backend_has_not_built_is_a_result_not_an_exception(
+        box, monkeypatch):
+    """`surfaces` on Linux reaches `region_evidence`, which the backend has
+    not built, and the backend raises `UnsupportedPlatform` (D10).
+
+    The CLI already turns that into a plain error (`test_cli.py`). The tool
+    layer re-raised it, so the protocol layer got an exception, not a
+    result that explains itself. The backend is replaced by one that refuses
+    every name, so this runs on any platform, including Windows, where no
+    contract name is unbuilt."""
+    from ghostdriver import backends
+    from ghostdriver.backends import UnsupportedPlatform
+
+    class Unbuilt:
+        def __getattr__(self, name):
+            raise UnsupportedPlatform(f"{name} is not implemented on Linux yet.")
+
+    session = _attached(box, Tier.READ_ONLY)
+    monkeypatch.setattr(backends, "current", lambda: Unbuilt())
+
+    result = box.surfaces(session)
+
+    assert result["ok"] is False
+    assert result["error"]["kind"] == ErrorKind.DENIED_BY_ENVIRONMENT.value
+    assert "not implemented on Linux" in result["error"]["message"]

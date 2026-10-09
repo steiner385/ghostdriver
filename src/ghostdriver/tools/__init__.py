@@ -23,7 +23,7 @@ import functools
 import inspect
 import time
 
-from ..backends import AccessibilityUnavailable
+from ..backends import AccessibilityUnavailable, UnsupportedPlatform
 from ..model.result import ErrorKind
 from .actuation import ActuationTools
 from .batch import BatchTools
@@ -125,6 +125,14 @@ def _traced_and_reporting(fn, *, session_tool: bool):
             # reaches the tree can raise it, and the alternative to catching
             # it at all used to be the process aborting outright (#58).
             result = _error(ErrorKind.NOT_ACTIONABLE, str(exc))
+            return result
+        except UnsupportedPlatform as exc:
+            # This backend has not built a contract name the tool reached --
+            # on Linux, the assessment names behind `surfaces` and `probe`.
+            # The message already says which and points at docs/LINUX.md,
+            # so it leaves as a result, as the CLI's does (D10). The
+            # environment cannot do it; retrying will not help.
+            result = _error(ErrorKind.DENIED_BY_ENVIRONMENT, str(exc))
             return result
         except Exception as exc:
             self._tracer().record({

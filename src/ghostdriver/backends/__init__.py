@@ -103,6 +103,6 @@ def load(platform: str) -> Any:
         from .linux import BACKEND as linux_backend
         return linux_backend
     raise UnsupportedPlatform(
-        f"no backend for platform {platform!r}; Windows is implemented and "
-        "Linux is specified in docs/LINUX.md"
+        f"no backend for platform {platform!r}; Windows and Linux (X11) "
+        "are implemented -- see docs/LINUX.md for the Linux one"
     )
