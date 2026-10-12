@@ -8764,3 +8764,72 @@ the numbers and not the tree. `tests/test_trace.py`: the report lists
 measured calls largest first, states the largest, and counts the
 unmeasured. Run against the real logs today it says, correctly, that none
 of 97 recorded its numbers. Issue #227; #28; D#210; D76; D11.
+
+### D#28. Gate 3 on the real client: the tree is deep, not wide, and depth is what cut it
+
+**Context.** Gate 3 (D76) passed on one loaded view of 108 windows and
+left open how `describe` holds on a full-size instance. D#210 answered the
+bounds on a synthetic tree of up to 20,000 windows; D#227 made every
+`describe` record its numbers, so a real call would answer the rest.
+
+**What was measured** (2026-10-12, read-only: attach, `describe`,
+release). The Delphi/VCL client with one plan document open: 114 top-level
+windows, 112 hidden, **282 windows** in all -- 2.6 times the first run,
+about a quarter of the ~1,100 the gate imagined.
+
+| call | windows | shown | chars | collapsed | below depth | ms |
+|---|---|---|---|---|---|---|
+| `all_windows`, defaults | 282 | 26 | 614 | 0 | 54 | 141 |
+| `all_windows`, `max_nodes=80` | 282 | 26 | 614 | 0 | 54 | 125 |
+| `within` the document form | 53 | 24 | 540 | 9 | 12 | 171 |
+
+**The three questions.**
+
+- *Inside the budget, and says so when it truncates?* Yes: 282 windows
+  came back as about 150 tokens with `truncated: true`. The node budget
+  was never reached (26 of 80 or 200), so `max_nodes` changed nothing.
+- *Suggested locators usable?* Mostly: eight offered, none omitted, and a
+  class-plus-index locator resolved to exactly one window. One captioned
+  suggestion matched three windows sharing a caption, so it was ambiguous
+  as offered (#229).
+- *Where does it stop being useful?* At the default depth, on the first
+  call: the whole document view sits below depth 5, so the default
+  `describe` is an outline of the shell's chrome. The result said *that*
+  54 windows lay below depth, not *where*, and `expand_hint` -- raised for
+  collapsing only -- did not appear. Rooted at the document form, the view
+  came back usable in 540 characters, but only to a caller who already
+  knew to root there.
+
+**The real tree is the other shape.** D#210's synthetic tree was wide and
+shallow, so collapsing did the cutting (1,093 of 1,102). The real one is
+deep and narrow: collapsing hid 0 of 282, depth hid 54. So the limit that
+binds is not a window count at all. It is depth, it bit at 282, and it
+would bite the same way at 1,100.
+
+**Decision.**
+
+- **A line cut by depth says so**: `TPanel [+53 below depth]`, beside the
+  count that was already kept. The place is what the caller was missing.
+- **`expand_hint` covers depth as well as collapsing**, naming only the
+  ways this result actually hid something, and offering `within` or a
+  larger `depth`.
+- **The depth default stays at 5.** Raising it buys one target's document
+  at the price of every other target's budget; the marker makes the way in
+  one call away instead.
+
+**Why this closes the gate below ~1,100.** The gate asked for the limits
+to hold or for the number where they stop. The two limits that scale with
+window count are measured: the budget holds to 20,002 synthetic windows
+(D#210), and the real tree never reached it. The one that stopped holding
+on the real client is structural, and now says where it cut. A loaded
+client with many views may add D#210's collapse on top of the depth cut;
+both are now hinted, and D#227 records that case on the first ordinary
+`describe` of it -- `ghostdriver trace --scale --all-files` reads it back.
+That is a reading, not an open gate.
+
+**Evidence.** The real-client run, issue #28 (comment of 2026-10-12).
+`tests/test_summarize.py`: the depth cut is marked on the line where it
+happened, and a leaf at the floor is not. `tests/test_describe_scale.py`:
+a client-shaped tree -- deep, narrow, nothing to collapse -- reports the
+cut, marks it, hints depth and not collapsing, and `within` the marked
+node shows the view. Issue #28; #229; D76; D#210; D#227; D11.

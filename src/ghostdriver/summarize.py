@@ -109,17 +109,21 @@ def summarize(
 
     def render(node: WindowNode, depth: int) -> None:
         indent = "  " * depth
-        if not emit(f"{indent}{_label(node, max_text)}"):
+        at_floor = depth + 1 >= max_depth
+        # Everything below this point is being dropped. Counting it is what
+        # stops a depth-limited summary from reporting itself as the whole
+        # tree; marking the line says *where* it was dropped. On the real
+        # client (#28) depth hid the whole document view, 54 of 282 windows,
+        # and a total with no place attached left the caller guessing which
+        # node to describe within.
+        cut = sum(1 + _descendant_count(c) for c in visible_children(node)) if at_floor else 0
+        mark = f" [+{cut} below depth]" if cut else ""
+        if not emit(f"{indent}{_label(node, max_text)}{mark}"):
             return
         if node.text and node.class_name:
             suggest(node.class_name, node.text)
-        if depth + 1 >= max_depth:
-            # Everything below this point is being dropped. Counting it is
-            # what stops a depth-limited summary from reporting itself as
-            # the whole tree.
-            state["depth_elided"] += sum(
-                1 + _descendant_count(c) for c in visible_children(node)
-            )
+        if at_floor:
+            state["depth_elided"] += cut
             return
 
         kids = visible_children(node)

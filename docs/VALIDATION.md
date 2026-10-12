@@ -132,6 +132,12 @@ If the controls you need for Gate 4 only appear in that second run, say so
 in your report: it means the default threshold is wrong for this shape of
 target.
 
+**Read the depth marks too.** A line ending `[+N below depth]` had its
+children cut by `--depth`, and the summary line's `below-depth=` totals
+them. On the real client this, not collapsing, was what hid the document
+view (D#28): describe the marked window on its own (`within=` in the MCP
+tool) or raise `--depth`.
+
 **This is the scalability gate.** If a real target's tree cannot be
 described within a sensible budget, the summarization thresholds in
 `summarize.py` need tuning before Iteration 2 builds an MCP tool on it.

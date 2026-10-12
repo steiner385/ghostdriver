@@ -27,6 +27,26 @@ MAX_WAIT_S = 300.0
 MAX_SUGGESTED = 30
 
 
+def _expand_hint(collapsed: int, below_depth: int) -> str:
+    """How to see what this describe left out, for each way it left it out.
+
+    The hint was raised for collapsing only, because the synthetic run
+    (D#210) hid its windows that way. The real client hid them by depth
+    instead -- 0 collapsed, 54 below depth, the whole document view (D#28)
+    -- and got no hint at all.
+    """
+    ways = []
+    if collapsed:
+        ways.append("a collapsed group ([N x Class ...]) hides everything under "
+                    "its members")
+    if below_depth:
+        ways.append("a line marked [+N below depth] had its children cut by depth")
+    return ("; ".join(ways) + ". To see inside one, describe again with "
+            "within=<its locator> -- the captioned ones are in suggested_locators; "
+            "an uncaptioned one is class=<Class> index=<n>"
+            + (", or raise depth." if below_depth else "."))
+
+
 class DiscoveryTools(_VisibilityCore):
     """Seeing the target: its tree, single elements, text, pixels, and waiting on it."""
 
@@ -127,12 +147,8 @@ class DiscoveryTools(_VisibilityCore):
             "tree_chars": totals["chars"],
             "truncated": truncated,
             "elided_by_collapsing": totals["elided"],
-            **({"expand_hint": (
-                "a collapsed group ([N x Class ...]) hides everything under its "
-                "members. To see inside one, describe again with within=<its "
-                "locator> -- the captioned ones are in suggested_locators; an "
-                "uncaptioned one is class=<Class> index=<n>.")}
-               if totals["elided"] else {}),
+            **({"expand_hint": _expand_hint(totals["elided"], totals["below_depth"])}
+               if totals["elided"] or totals["below_depth"] else {}),
             "below_depth": totals["below_depth"],
             "windows_omitted_for_budget": omitted,
             "windows_hidden": skipped,

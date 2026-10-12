@@ -133,6 +133,45 @@ def test_the_locator_cap_says_how_many_it_left_out(box, monkeypatch):
     assert result["suggested_locators_omitted"] == 13   # the shell's own is the 43rd
 
 
+def client_shaped(view_windows: int = 52) -> WindowNode:
+    """Deep and narrow, as the real client measured (D#28): the document view
+    sits below the default depth, under the shell's chrome, with no
+    same-class run anywhere to collapse."""
+    view = node(50, "TNavDocForm", children=[
+        node(60 + i, f"Ctl{i}", f"Field {i}") for i in range(view_windows)])
+    chain = view
+    for level, cls in enumerate(["TPanel", "TPageHost", "TSplitter", "TClient"]):
+        chain = node(40 - level, cls, children=[chain])
+    return node(1, "TMainForm", "VendorApp client", children=[
+        chain, node(2, "TStatusBar"), node(3, "TToolBar", "Main")])
+
+
+def test_a_depth_cut_says_where_and_how_to_get_back_in(box, monkeypatch):
+    """On the real client nothing collapsed and depth hid the document: the
+    total was reported, the place was not, and there was no hint (#28)."""
+    monkeypatch.setattr(box, "_trees", lambda session, all_windows: [client_shaped()])
+
+    first = box.describe("s")
+
+    assert first["elided_by_collapsing"] == 0 and first["below_depth"] == 53
+    assert "TPanel [+53 below depth]" in first["windows"][0]["tree"]
+    assert "below depth" in first["expand_hint"] and "raise depth" in first["expand_hint"]
+    assert "collapsed group" not in first["expand_hint"], "only the way that happened"
+
+    inside = box.describe("s", within="class=TPanel index=0")
+
+    assert inside["ok"] and inside["below_depth"] == 0
+    assert '"Field 7"' in inside["windows"][0]["tree"]
+
+
+def test_the_hint_names_both_ways_when_both_happened():
+    from ghostdriver.tools.discovery import _expand_hint
+
+    hint = _expand_hint(collapsed=9, below_depth=12)
+
+    assert "collapsed group" in hint and "below depth" in hint
+
+
 def test_a_small_tree_carries_neither_note(box, monkeypatch):
     small = node(1, "Shell", "Main", children=[node(2, "Edit", "Name"), node(3, "Button", "Ok")])
     monkeypatch.setattr(box, "_trees", lambda session, all_windows: [small])

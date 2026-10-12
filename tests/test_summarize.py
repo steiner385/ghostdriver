@@ -158,6 +158,19 @@ def test_no_depth_elision_when_the_tree_fits():
     assert summary.depth_elided_nodes == 0
 
 
+def test_the_depth_cut_is_marked_on_the_line_where_it_happened():
+    """A count with no place attached left the caller guessing which node
+    to root at (#28). A leaf at the floor lost nothing and is not marked."""
+    parent = node(1, "Root", children=[
+        node(2, "Mid", children=[node(3, "Leaf"), node(4, "Leaf")]),
+        node(5, "Bare"),
+    ])
+    summary = summarize(parent, max_depth=2, max_nodes=200)
+
+    assert "Mid [+2 below depth]" in summary.text
+    assert "Bare [" not in summary.text
+
+
 def test_depth_elision_counts_whole_subtrees_not_just_children():
     parent = node(1, "Root", children=[
         node(2, "Mid", children=[node(3, "Leaf"), node(4, "Leaf")]),
