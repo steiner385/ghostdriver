@@ -215,3 +215,48 @@ def test_short_captions_are_untouched_and_still_suggested():
     assert summary.suggested_locators == [
         'class=TsfCommandButton text="Claim Task"'
     ]
+
+
+# --- a suggestion names one window (#229) -----------------------------------
+
+def _resolves_to_one(trees, expression):
+    from ghostdriver.resolve import resolve
+    loc = Locator.parse(expression)
+    unindexed = Locator.parse(expression.split(" index=")[0])
+    found = [n for t in trees for n in resolve(t, unindexed)]
+    return found[loc.index] if loc.index is not None else (found[0] if len(found) == 1 else None)
+
+
+def test_a_unique_caption_is_suggested_unchanged():
+    tree = node(1, "Root", children=[node(2, "Bar", "Tools"), node(3, "Bar", "Other")])
+    assert 'class=Bar text="Tools"' in summarize(tree).suggested_locators
+
+
+def test_a_caption_shared_with_unrendered_windows_carries_the_index_that_picks_it():
+    # Three same-caption bars; the summary renders one (depth cuts the others
+    # off), so counting rendered lines would call the caption unique.
+    shared = lambda h: node(h, "TAdvToolBar", "Tools")  # noqa: E731
+    deep = node(20, "Holder", children=[node(21, "Holder", children=[shared(22)])])
+    hidden = node(30, "TAdvToolBar", "Tools", visible=False)
+    tree = node(1, "Root", children=[shared(2), deep, hidden])
+    s = summarize(tree, max_depth=2)
+    assert "Tools" in s.text and s.depth_elided_nodes
+    offered = [loc for loc in s.suggested_locators if "TAdvToolBar" in loc]
+    assert offered == ['class=TAdvToolBar text="Tools" index=0']
+    assert _resolves_to_one([tree], offered[0]).handle == 2
+
+
+def test_each_rendered_window_sharing_a_caption_gets_its_own_index():
+    tree = node(1, "Root", children=[
+        node(2, "Bar", "Tools"), node(3, "Gap"), node(4, "Bar", "Tools")])
+    offered = summarize(tree).suggested_locators
+    bars = [loc for loc in offered if "Bar" in loc]
+    assert bars == ['class=Bar text="Tools" index=0', 'class=Bar text="Tools" index=1']
+    assert [_resolves_to_one([tree], loc).handle for loc in bars] == [2, 4]
+
+
+def test_index_counts_across_every_searched_tree():
+    main = node(1, "Root", children=[node(2, "Bar", "Tools")])
+    other = node(5, "Dialog", children=[node(6, "Bar", "Tools")])
+    s = summarize(other, searched=[main, other])
+    assert 'class=Bar text="Tools" index=1' in s.suggested_locators

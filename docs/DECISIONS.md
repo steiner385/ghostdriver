@@ -8906,3 +8906,30 @@ it, unmounted the portal and removed the directory, leaving no unit,
 directory or mount. `test_linux_watch.py` and `test_linux_restore.py` ran
 their sessions in `nested0`/`nested1` slices and left nothing. Issue #231;
 D#217.
+
+### D#229. A suggested locator names one window, or carries the `index=` that makes it do so
+
+Gate 3 on the real client (D#28) offered a captioned `TAdvToolBar` whose
+caption three windows share. Used as offered it is refused as ambiguous
+(D33), so the caller found `index=` by trial. `summarize` deduped the
+*string* it offered and never asked how many windows the string names.
+
+**Decision.** Each suggestion is resolved with the real `Locator.parse` and
+`resolve` against the trees a later `find` searches (`searched=`), not
+against what the summary rendered: the other holders of a caption are
+often hidden, below depth, or inside a collapsed group, so counting
+rendered lines misses exactly the cases that bit. A caption that matches
+one window is offered as before. One that matches several is offered once
+per *rendered* window, each with the `index=` that picks it, counted the
+way `find` counts: across the searched trees, pre-order. `describe within=`
+searches the trees from before it narrowed, since the suggestion is used
+after `within` is dropped.
+
+**Rejected: withholding and counting.** It would hide a real handle on the
+window the caller was just shown. The index can drift if the tree changes;
+`find` already reports that (#198).
+
+**Evidence.** `tests/test_summarize.py`, `env: any`: a caption shared by a
+hidden window and one below depth gets `index=0` and resolves to the
+rendered one; two rendered sharers get `index=0` and `index=1`; the index
+counts across trees. Issue #229.

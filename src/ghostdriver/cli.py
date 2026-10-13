@@ -295,6 +295,7 @@ def cmd_describe(
             visible_only=not show_all,
             max_nodes=remaining,
             collapse_threshold=collapse_threshold,
+            searched=trees,
         )
         if not summary.node_count:
             # Nothing survived the visibility filter. Not worth a heading.

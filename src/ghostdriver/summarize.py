@@ -13,9 +13,12 @@ is worse than output that admits it is partial: the caller builds locators
 from what it can see.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+from .model.locator import Locator
 from .model.window import WindowNode
+from .resolve import resolve
 
 
 @dataclass
@@ -71,6 +74,30 @@ def _descendant_count(node: WindowNode) -> int:
     return sum(1 for _ in node.walk()) - 1
 
 
+def _disambiguate(
+    wanted: list[tuple[str, WindowNode]], searched: Sequence[WindowNode]
+) -> list[str]:
+    """Make every suggestion resolve to exactly one window (D33, #229).
+
+    A locator naming several windows is refused as ambiguous, so the caller
+    would have to find `index=` by trial. Where the caption is shared, each
+    rendered window is offered with the `index=` that picks it, in the same
+    order `find` counts: across the searched trees, pre-order.
+    """
+    out: list[str] = []
+    for candidate, node in wanted:
+        try:
+            found = [n for t in searched for n in resolve(t, Locator.parse(candidate))]
+        except ValueError:
+            found = []
+        position = next((i for i, n in enumerate(found) if n is node), None)
+        if position is not None and len(found) > 1:
+            candidate = f"{candidate} index={position}"
+        if candidate not in out:
+            out.append(candidate)
+    return out
+
+
 def summarize(
     tree: WindowNode,
     *,
@@ -79,9 +106,18 @@ def summarize(
     max_nodes: int = 200,
     collapse_threshold: int = 3,
     max_text: int = MAX_TEXT,
+    searched: Sequence[WindowNode] | None = None,
 ) -> Summary:
+    """`searched` is every tree a later `find` would resolve against.
+
+    A suggestion is only worth making if it names one window there, and a
+    caption can be shared with windows this summary never rendered (hidden,
+    below depth, inside a collapsed group) -- so ambiguity is decided by
+    resolving against the full trees, not by counting rendered lines (#229).
+    It defaults to `tree` alone.
+    """
     lines: list[str] = []
-    suggested: list[str] = []
+    wanted: list[tuple[str, WindowNode]] = []
     state = {"emitted": 0, "capped": False, "elided": 0, "depth_elided": 0}
 
     def visible_children(node: WindowNode) -> list[WindowNode]:
@@ -96,16 +132,16 @@ def summarize(
         state["emitted"] += 1
         return True
 
-    def suggest(class_name: str, text: str) -> None:
+    def suggest(node: WindowNode) -> None:
         # A caption longer than the clip width is not offered at all. The
         # clipped form would silently match nothing, and the full form is
         # unusable on a command line and blows the budget this module
         # exists to keep. Neither is a suggestion worth making.
-        if max_text > 0 and len(text) > max_text:
+        if max_text > 0 and len(node.text) > max_text:
             return
-        candidate = f'class={class_name} text="{_quote(text)}"'
-        if candidate not in suggested:
-            suggested.append(candidate)
+        candidate = f'class={node.class_name} text="{_quote(node.text)}"'
+        if not any(c == candidate and n is node for c, n in wanted):
+            wanted.append((candidate, node))
 
     def render(node: WindowNode, depth: int) -> None:
         indent = "  " * depth
@@ -121,7 +157,7 @@ def summarize(
         if not emit(f"{indent}{_label(node, max_text)}{mark}"):
             return
         if node.text and node.class_name:
-            suggest(node.class_name, node.text)
+            suggest(node)
         if at_floor:
             state["depth_elided"] += cut
             return
@@ -158,12 +194,13 @@ def summarize(
                 for member in captioned:
                     if not emit(f'{child_indent}  "{_clip(member.text, max_text)}"'):
                         return
-                    suggest(class_name, member.text)
+                    suggest(member)
             else:
                 for member in members:
                     render(member, depth + 1)
 
     render(tree, 0)
+    suggested = _disambiguate(wanted, searched if searched is not None else [tree])
     if state["capped"]:
         lines.append(f"... truncated at {max_nodes} nodes")
 

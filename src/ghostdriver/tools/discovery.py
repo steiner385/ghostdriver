@@ -70,6 +70,7 @@ class DiscoveryTools(_VisibilityCore):
         if not trees:
             return _error(ErrorKind.NOT_FOUND,
                           f"pid {session.pid} has no windows on this desktop")
+        searched = trees  # what a later find resolves against (#229)
         if within:
             # Root the summary at one window (#210). At scale the first
             # describe collapses same-class siblings and hides everything
@@ -107,6 +108,7 @@ class DiscoveryTools(_VisibilityCore):
             summary = summarize(
                 tree, max_depth=depth, visible_only=not include_hidden,
                 max_nodes=remaining, collapse_threshold=collapse_threshold,
+                searched=searched,
             )
             if not summary.node_count:
                 continue
