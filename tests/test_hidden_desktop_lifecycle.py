@@ -32,6 +32,9 @@ def test_a_prepare_that_fails_part_way_tears_down_what_it_started(monkeypatch, t
     monkeypatch.setattr(desktop_claim, "_owner", None)
     monkeypatch.setattr(desktop_claim, "_environments", {})
     monkeypatch.setattr(hidden_desktop, "_unavailable", lambda: [])
+    # Neither reaper may reach the host's own systemd or /tmp from here.
+    monkeypatch.setattr(hidden_desktop, "_user_systemd", lambda: False)
+    monkeypatch.setattr(hidden_desktop, "_reap_abandoned_runtimes", lambda prefix, root=None: [])
     instance = hidden_desktop.HiddenDesktop(name="hd-lifecycle")
     torn = []
     monkeypatch.setattr(instance, "teardown", lambda: torn.append(True))
@@ -133,3 +136,175 @@ def test_a_missing_xwayland_is_named_not_met_at_connect(monkeypatch):
     monkeypatch.setattr(hidden_desktop.subprocess, "run",
                         lambda *a, **k: types.SimpleNamespace(stdout="--headless", stderr=""))
     assert hidden_desktop._unavailable() == ["Xwayland"]
+
+
+def test_a_desktop_slice_is_named_for_its_owner_and_read_back():
+    """An owner killed before teardown left whole desktops running on linux-host-a,
+    and one fed RustDesk a dead DISPLAY (#231). Each desktop's processes go
+    in a slice named for the owning pid, which is how a later run tells an
+    abandoned slice from a live one. No dash in the part after the prefix:
+    systemd reads a dash in a slice name as a parent slice."""
+    from ghostdriver.backends.linux import hidden_desktop
+    unit = hidden_desktop._slice_name(4242, 987654, "ghostdriver-test")
+    assert unit == "ghostdriver_desktop_4242_987654_ghostdrivertest.slice"
+    assert "-" not in unit
+    assert hidden_desktop._slice_owner(unit) == (4242, 987654)
+    assert hidden_desktop._slice_owner("user.slice") is None
+    assert hidden_desktop._slice_owner("ghostdriver_desktop_4242_x.slice") is None
+
+
+def test_the_scope_runs_under_the_operators_manager_and_hands_on_only_paths(monkeypatch):
+    """`systemd-run` finds the user manager through the operator's runtime
+    directory and bus, so it must run with those; the desktop's private pair
+    reaches the command through `env`. Nothing else goes on the command
+    line, which any user can read from /proc."""
+    from ghostdriver.backends.linux import hidden_desktop
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+    private = {"XDG_RUNTIME_DIR": "/tmp/gd-x", "DBUS_SESSION_BUS_ADDRESS": "unix:path=/tmp/gd-x/b",
+               "SECRET_TOKEN": "hunter2"}
+
+    argv = hidden_desktop._scoped(["gnome-shell", "--headless"], "s.slice", private)
+    assert argv[:2] == ["systemd-run", "--user"] and "--slice=s.slice" in argv
+    assert argv[argv.index("--") + 1:] == [
+        "env", "XDG_RUNTIME_DIR=/tmp/gd-x", "DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/gd-x/b",
+        "gnome-shell", "--headless"]
+    assert not any("hunter2" in a for a in argv)
+
+    outer = hidden_desktop._operator_env(private)
+    assert outer["XDG_RUNTIME_DIR"] == "/run/user/1000"
+    assert outer["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/run/user/1000/bus"
+    assert hidden_desktop._scoped(["x"], None, private) == ["x"]
+
+
+def test_a_shell_before_gnome_50_is_not_scoped(monkeypatch):
+    """GNOME Shell 46 in a user unit asks systemd on the desktop's private
+    bus to start its X11 services, fails, and never brings Xwayland up --
+    every nested probe on CI's Ubuntu 24.04 timed out (#231). 50 has no
+    such call. No version at all is treated as too old."""
+    import types
+
+    from ghostdriver.backends.linux import hidden_desktop
+    for printed, scoped in (("GNOME Shell 46.0\n", False), ("GNOME Shell 49.4\n", False),
+                            ("GNOME Shell 50.1\n", True), ("GNOME Shell 51.alpha\n", True),
+                            ("", False)):
+        monkeypatch.setattr(hidden_desktop.subprocess, "run",
+                            lambda *a, out=printed, **k: types.SimpleNamespace(stdout=out))
+        assert hidden_desktop._shell_takes_a_scope() is scoped, printed
+
+    def missing(*a, **k):
+        raise FileNotFoundError("gnome-shell")
+    monkeypatch.setattr(hidden_desktop.subprocess, "run", missing)
+    assert hidden_desktop._shell_takes_a_scope() is False
+
+
+def test_without_a_user_manager_the_desktop_is_built_unscoped(monkeypatch):
+    """An ssh shell may have no user manager; that must not stop a desktop."""
+    import types
+
+    from ghostdriver.backends.linux import hidden_desktop
+    monkeypatch.setattr(hidden_desktop.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+    monkeypatch.setattr(hidden_desktop.subprocess, "run",
+                        lambda *a, **k: types.SimpleNamespace(returncode=1))
+    assert hidden_desktop._user_systemd() is False
+
+
+def test_only_abandoned_desktop_slices_are_reaped(monkeypatch):
+    """The next `prepare` stops what a killed owner left; it never touches a
+    slice whose owner is alive, its own, or a unit that is not a desktop's."""
+    import types
+
+    from ghostdriver.backends.linux import hidden_desktop
+    listing = ("ghostdriver_desktop_111_5_a.slice loaded active active Slice\n"
+               "ghostdriver_desktop_222_5_b.slice loaded active active Slice\n"
+               f"ghostdriver_desktop_{os.getpid()}_5_c.slice loaded active active Slice\n"
+               "app.slice loaded active active Slice\n")
+    calls = []
+
+    def run(argv, **kw):
+        calls.append(argv)
+        return types.SimpleNamespace(stdout=listing if "list-units" in argv else "")
+
+    monkeypatch.setattr(hidden_desktop.subprocess, "run", run)
+    monkeypatch.setattr(hidden_desktop, "_is_abandoned",
+                        lambda owner, started, proc="/proc": owner != 222)
+    assert hidden_desktop._reap_abandoned_slices() == ["ghostdriver_desktop_111_5_a.slice"]
+    assert [c for c in calls if "stop" in c] == [
+        ["systemctl", "--user", "stop", "ghostdriver_desktop_111_5_a.slice"]]
+
+
+def test_a_slice_is_abandoned_when_its_owner_exited_or_its_pid_was_reused(tmp_path):
+    """Gone means no process has the pid, or the one that does started at
+    another time -- the pid was reused while the slice sat there. The start
+    time is the kernel's own (stat field 22), compared only with itself."""
+    from ghostdriver.backends.linux import hidden_desktop
+    proc = tmp_path / "proc"
+    (proc / "500").mkdir(parents=True)
+    # A command name with a space and a ')' in it, which a naive split misreads.
+    rest = " ".join(["S"] + ["0"] * 18 + ["777000"] + ["0"] * 10)
+    (proc / "500" / "stat").write_text(f"500 (py thon) x) {rest}\n")
+
+    assert hidden_desktop._process_start(500, proc=str(proc)) == 777000
+    assert hidden_desktop._is_abandoned(500, 777000, proc=str(proc)) is False
+    assert hidden_desktop._is_abandoned(500, 123, proc=str(proc)) is True
+    assert hidden_desktop._is_abandoned(499, 777000, proc=str(proc)) is True
+
+
+def test_this_process_reads_its_own_start_time():
+    """The real /proc, so the field arithmetic is checked against the kernel."""
+    import sys
+
+    from ghostdriver.backends.linux import hidden_desktop
+    if sys.platform != "linux":
+        pytest.skip("no /proc")
+    started = hidden_desktop._process_start(os.getpid())
+    assert isinstance(started, int) and started > 0
+    assert hidden_desktop._is_abandoned(os.getpid(), started) is False
+
+
+def test_only_unused_and_settled_runtime_directories_are_swept(monkeypatch, tmp_path):
+    """Stopping a dead owner's slice ends its processes, not its directory,
+    and the portal's FUSE mount in it outlives the portal (#231). Swept: a
+    directory no process carries, older than the grace period. Kept: one in
+    use, one too young to have its first process yet, and anything else."""
+    import time
+
+    from ghostdriver.backends.linux import hidden_desktop
+    old = time.time() - 2 * hidden_desktop.RUNTIME_GRACE_S
+    for leaf, mtime in (("gd-x-dead", old), ("gd-x-live", old), ("gd-x-new", None), ("other", old)):
+        (tmp_path / leaf).mkdir()
+        if mtime:
+            os.utime(tmp_path / leaf, (mtime, mtime))
+    live = str(tmp_path / "gd-x-live")
+    monkeypatch.setattr(hidden_desktop, "_processes_in", lambda path: [9] if path == live else [])
+    unmounted = []
+    monkeypatch.setattr(hidden_desktop.subprocess, "run",
+                        lambda argv, **kw: unmounted.append(argv[-1]))
+    monkeypatch.setattr(hidden_desktop, "_mounts_under",
+                        lambda path, mounts: [path + "/doc"] if path.endswith("dead") else [])
+
+    assert hidden_desktop._reap_abandoned_runtimes("gd-x-", root=str(tmp_path)) == [
+        str(tmp_path / "gd-x-dead")]
+    assert unmounted == [str(tmp_path / "gd-x-dead") + "/doc"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["gd-x-live", "gd-x-new", "other"]
+
+
+def test_a_runtime_directory_named_for_a_dead_owner_is_swept_however_new(monkeypatch, tmp_path):
+    """A dying desktop writes into its directory as it goes, so the one a
+    killed owner leaves looks as new as one being built; measured on linux-host-a,
+    the age check kept it. Named for its owner, it is judged by the owner."""
+    from ghostdriver.backends.linux import hidden_desktop
+    me = hidden_desktop._process_start(os.getpid())
+    if me is None:
+        pytest.skip("no /proc")
+    dead = hidden_desktop._runtime_prefix("gd-y-", 4242, 1) + "abc"
+    mine = hidden_desktop._runtime_prefix("gd-y-", os.getpid(), me) + "def"
+    for leaf in (dead, mine):
+        (tmp_path / leaf).mkdir()
+    monkeypatch.setattr(hidden_desktop, "_processes_in", lambda path: [])
+    monkeypatch.setattr(hidden_desktop, "_is_abandoned",
+                        lambda owner, started, proc="/proc": owner == 4242)
+
+    assert hidden_desktop._reap_abandoned_runtimes("gd-y-", root=str(tmp_path)) == [
+        str(tmp_path / dead)]
+    assert [p.name for p in tmp_path.iterdir()] == [mine]

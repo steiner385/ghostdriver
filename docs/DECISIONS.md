@@ -8833,3 +8833,76 @@ happened, and a leaf at the floor is not. `tests/test_describe_scale.py`:
 a client-shaped tree -- deep, narrow, nothing to collapse -- reports the
 cut, marks it, hints depth and not collapsing, and `within` the marked
 node shows the view. Issue #28; #229; D76; D#210; D#227; D11.
+
+### D#231. A nested desktop lives in a slice named for its owner, and the next one reaps what a dead owner left
+
+**Context.** `HiddenDesktop.teardown()` and `nested_env`'s sweep are
+thorough, but only an owner that lives to run them runs them. One killed
+outright -- an agent's timeout, a SIGKILL, a probe that raises before its
+teardown -- left the whole desktop running: about 25 processes, the
+runtime directory, and the document portal's FUSE mount in it. On linux-host-a
+three sat for eight hours, and leaked helpers of the same kind fed RustDesk
+a dead `DISPLAY` (it builds its server's environment from the user's
+desktop helpers), so it stopped accepting connections.
+
+**Decision.** Every process a desktop starts runs as a `systemd-run --user
+--scope` in one transient slice, `ghostdriver_desktop_<pid>_<start>_<name>.slice`,
+and its runtime directory carries the same `<pid>_<start>_`. The cgroup
+holds whatever the desktop started, whatever session or group it moved
+itself into, so teardown stops the slice as well as signalling groups.
+Before building its own, `prepare` (and `nested_env`) stops every desktop
+slice whose owner is gone and removes the directories such owners left,
+unmounting first.
+
+**"Gone" is the start time, read from `/proc` and compared only with
+itself.** A slice outlives its owner by design, so its pid may since belong
+to something unrelated; the pid alone would leak that slice forever. The
+owner's start time (`/proc/<pid>/stat` field 22) goes into the name, and the
+owner is gone when no process has the pid or the one that does started at
+another time. Not systemd's `ActiveEnterTimestampMonotonic`: the kernel
+counts the start time on a clock that includes suspend and that one does
+not, so after a resume a live owner would look newer than its own slice.
+
+**A directory is judged by its owner, not its age.** The first cut swept
+directories nobody used that were older than a minute; measured, the one a
+killed owner left was kept, because its dying processes had just written
+into it and it looked as new as one being built. Age remains only for a
+directory named for no owner.
+
+**Only paths cross the command line.** `systemd-run` finds the user manager
+through the operator's `XDG_RUNTIME_DIR` and session bus, which the
+desktop replaces with private ones, so it runs with the operator's pair and
+hands the private pair on through `env`. Nothing else goes there: the rest
+of the environment can hold tokens, and `/proc/<pid>/cmdline` is
+world-readable.
+
+**Where there is no user manager** -- an ssh shell -- the desktop is built
+unscoped, as before, and only unowned-directory sweeping applies.
+
+**Nor below GNOME Shell 50, measured on CI.** The first cut assumed CI's
+runner had no user manager. It has one, so every nested desktop there was
+scoped, and every one failed: all 32 nested-probe tests reported "no
+report" and the hidden-desktop probe hit its 60 s timeout, while the suite
+went from 5 to 31 minutes. The shell's log said why. GNOME Shell 46
+(`windowManager.js`, `_startX11Services`) asks systemd to start
+`gnome-session-x11-services-ready.target` whenever `sd_pid_get_user_unit`
+finds it in a user unit, which a scope is. It asks on its session bus,
+which is the desktop's private one, where no systemd answers. Only
+`NOT_SUPPORTED` ("not systemd managed") is ignored, so the failure fails
+X11 initialization and Xwayland never comes up. 50.1 on linux-host-a has no such
+call. So a slice is used only when `gnome-shell --version` is 50 or newer
+(`SCOPED_SHELL_MAJOR`). 47 to 49 are unmeasured and treated as too old,
+which costs them only the dead-owner reaping, as before this record.
+Giving the private bus a systemd to answer, or pointing the call at the
+operator's, were rejected: the second would start the operator's own X11
+services from inside a nested desktop.
+
+**Evidence.** `tests/test_hidden_desktop_lifecycle.py` (`env: any`): slice
+naming and parsing, the command line, the fallback, which slices are
+reaped, the start-time rule against a fake `/proc` and the real one, and
+both directory rules. On linux-host-a: a desktop prepared, its owner `kill -9`ed,
+30 processes and 213 tasks still in the slice; the next `prepare` stopped
+it, unmounted the portal and removed the directory, leaving no unit,
+directory or mount. `test_linux_watch.py` and `test_linux_restore.py` ran
+their sessions in `nested0`/`nested1` slices and left nothing. Issue #231;
+D#217.

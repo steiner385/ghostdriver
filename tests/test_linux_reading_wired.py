@@ -18,7 +18,7 @@ import pytest
 
 from tests.conftest import on_linux
 from tests.linux_nested_shell import NEEDED as NESTED_NEEDED
-from tests.linux_nested_shell import inner, nested_env
+from tests.linux_nested_shell import inner, nested_env, session
 from tests.linux_probe_support import collect
 
 pytestmark = [on_linux, pytest.mark.slow]
@@ -41,8 +41,8 @@ def wired():
     # the hang that usually stopped it first.
     with nested_env() as env:
         probe = subprocess.Popen(
-            ["dbus-run-session", "--", "bash", "-c",
-             inner(f"{sys.executable} -m tests.linux_reading_probe")],
+            session(env, "bash", "-c",
+             inner(f"{sys.executable} -m tests.linux_reading_probe")),
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
             start_new_session=True, env=env,
         )

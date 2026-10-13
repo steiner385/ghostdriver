@@ -183,6 +183,202 @@ def _mounts_under(directory: str, mounts: str) -> list[str]:
     return sorted(found, key=len, reverse=True)
 
 
+#: Each desktop's processes go in a transient user slice named for the
+#: process that owns it (#231). Teardown can only clean up after an owner
+#: that lives to run it; an owner killed outright -- an agent's timeout, a
+#: SIGKILL -- left whole desktops running, and on linux-host-a one of them fed
+#: RustDesk a dead `DISPLAY`. The slice is what a later run finds and stops.
+#: The owner's start time goes in the name too: a slice outlives its owner
+#: by design, so the pid alone may since belong to an unrelated process.
+#: Underscores, not dashes: a dash in a slice name means a parent slice.
+SLICE_PREFIX = "ghostdriver_desktop_"
+_SLICE = re.compile(re.escape(SLICE_PREFIX) + r"(\d+)_(\d+)_[A-Za-z0-9]+\.slice")
+
+
+def _process_start(pid: int, proc: str = "/proc") -> int | None:
+    """When `pid` started, in clock ticks since boot (`/proc/<pid>/stat`
+    field 22), or None when there is no such process.
+
+    Compared only with itself, never with systemd's timestamps: the kernel
+    counts this on a clock that includes suspend and systemd's monotonic
+    one does not, so after a resume a live owner would look newer than its
+    own slice and have its desktop stopped.
+    """
+    try:
+        with open(os.path.join(proc, str(pid), "stat")) as f:
+            stat = f.read()
+    except OSError:
+        return None
+    # The command name is field 2 and may hold spaces or parentheses, so
+    # count from the last ')': field 3 onward, starttime is the 20th.
+    fields = stat[stat.rfind(")") + 2:].split()
+    return int(fields[19]) if len(fields) > 19 else None
+
+
+def _slice_name(owner: int, started: int, name: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9]", "", name) or "desktop"
+    return f"{SLICE_PREFIX}{owner}_{started}_{safe}.slice"
+
+
+def _slice_owner(unit: str) -> tuple[int, int] | None:
+    """The (pid, start time) a slice was named for, or None for a unit that
+    is not a desktop's."""
+    found = _SLICE.fullmatch(unit)
+    return (int(found.group(1)), int(found.group(2))) if found else None
+
+
+def _user_systemd() -> bool:
+    """Whether a user service manager answers. A shell reached over ssh may
+    have none; the desktop is then built unscoped, as it was before, with
+    teardown's process sweep as the only cleanup. CI's runner does have one
+    (measured), so this alone does not decide scoping: see
+    `_shell_takes_a_scope`."""
+    if shutil.which("systemd-run") is None or shutil.which("systemctl") is None:
+        return False
+    try:
+        got = subprocess.run(["systemctl", "--user", "show", "--property=Version"],
+                             capture_output=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return got.returncode == 0
+
+
+#: The first GNOME Shell measured to run in a scope. Before it, a shell that
+#: finds itself in a user unit asks systemd -- on its session bus, which is
+#: the desktop's private one, where none answers -- to start its X11
+#: services; the call fails and takes Xwayland with it. Measured on CI's
+#: Ubuntu 24.04 (46.0); 50.1 on linux-host-a has no such call. 47 to 49 unmeasured.
+SCOPED_SHELL_MAJOR = 50
+
+
+def _shell_major() -> int | None:
+    """`gnome-shell --version`'s major number, or None when it gives none."""
+    try:
+        got = subprocess.run(["gnome-shell", "--version"],
+                             capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    found = re.search(r"(\d+)\.", got.stdout)
+    return int(found.group(1)) if found else None
+
+
+def _shell_takes_a_scope() -> bool:
+    """Whether this host's shell can run in a slice (see `SCOPED_SHELL_MAJOR`);
+    where it cannot, the desktop is built unscoped, as without a user manager."""
+    major = _shell_major()
+    return major is not None and major >= SCOPED_SHELL_MAJOR
+
+
+def _scoped(argv: list[str], slice_unit: str | None, env: dict[str, str]) -> list[str]:
+    """`argv` as a scope in `slice_unit`, or unchanged when there is none.
+
+    `systemd-run` runs under the operator's `XDG_RUNTIME_DIR` and session
+    bus -- it finds the user manager through them -- and `env` hands the
+    desktop's private pair to the command it execs. Only those two go on the
+    command line: they are paths, where the rest of the environment can hold
+    tokens and `/proc/<pid>/cmdline` is world-readable.
+    """
+    if slice_unit is None:
+        return argv
+    private = [f"{k}={env[k]}" for k in ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
+               if k in env]
+    return ["systemd-run", "--user", "--scope", "--quiet", "--collect",
+            f"--slice={slice_unit}", "--property=TimeoutStopSec=5", "--",
+            "env", *private, *argv]
+
+
+def _operator_env(env: dict[str, str]) -> dict[str, str]:
+    """`env` with the operator's runtime directory and session bus put back,
+    for `systemd-run` itself (see `_scoped`)."""
+    out = dict(env)
+    for key in ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"):
+        if key in os.environ:
+            out[key] = os.environ[key]
+        else:
+            out.pop(key, None)
+    return out
+
+
+def _is_abandoned(owner: int, started: int, proc: str = "/proc") -> bool:
+    """Whether the process a slice was named for is gone: no process has
+    that pid, or the one that does started at another time (the pid was
+    reused). `proc` is the /proc to read, so a test can hand it a fake one."""
+    return _process_start(owner, proc) != started
+
+
+def _reap_abandoned_slices() -> list[str]:
+    """Stop every desktop slice whose owner is gone; return what was stopped.
+
+    Called by `prepare`, so the next run cleans up after one that was killed
+    before its teardown could.
+    """
+    listed = subprocess.run(
+        ["systemctl", "--user", "list-units", "--all", "--plain", "--no-legend",
+         f"{SLICE_PREFIX}*.slice"],
+        capture_output=True, text=True, timeout=10,
+    )
+    stopped = []
+    for line in listed.stdout.splitlines():
+        unit = line.split()[0] if line.split() else ""
+        owner = _slice_owner(unit)
+        if owner is None or owner[0] == os.getpid() or not _is_abandoned(*owner):
+            continue
+        subprocess.run(["systemctl", "--user", "stop", unit],
+                       capture_output=True, timeout=15)
+        stopped.append(unit)
+    return stopped
+
+
+#: A runtime directory named for no owner, and younger than this, may
+#: belong to a desktop still starting that has no process in it yet.
+RUNTIME_GRACE_S = 60.0
+_RUNTIME_OWNER = re.compile(r"(\d+)_(\d+)_")
+
+
+def _runtime_prefix(prefix: str, owner: int, started: int | None) -> str:
+    """`mkdtemp`'s prefix: named for its owner the way a slice is, so the
+    sweep can tell a dead owner's directory from a live one still starting
+    -- which an age cannot: a directory the dying desktop just wrote into
+    looks as new as one being built."""
+    return prefix if started is None else f"{prefix}{owner}_{started}_"
+
+
+def _reap_abandoned_runtimes(prefix: str, root: str | None = None) -> list[str]:
+    """Remove the runtime directories a killed owner left; return them.
+
+    Stopping its slice ends the processes but not the directory, and the
+    document portal's FUSE mount in it outlives the portal -- measured on
+    linux-host-a, the directory could not be removed until it was unmounted. Only
+    directories no process carries, whose owner is gone -- or, named for no
+    owner, older than `RUNTIME_GRACE_S`.
+    """
+    root = root or tempfile.gettempdir()
+    mounts = ""
+    with contextlib.suppress(OSError), open("/proc/mounts") as f:
+        mounts = f.read()
+    removed = []
+    for path in sorted(glob.glob(os.path.join(root, prefix + "*"))):
+        owner = _RUNTIME_OWNER.match(os.path.basename(path)[len(prefix):])
+        if owner is not None:
+            if int(owner.group(1)) == os.getpid() or not _is_abandoned(
+                    int(owner.group(1)), int(owner.group(2))):
+                continue
+        else:
+            try:
+                if time.time() - os.stat(path).st_mtime < RUNTIME_GRACE_S:
+                    continue
+            except OSError:
+                continue
+        if _processes_in(path):
+            continue
+        for mount in _mounts_under(path, mounts):
+            subprocess.run(["fusermount3", "-u", "-z", mount],
+                           capture_output=True, timeout=5)
+        shutil.rmtree(path, ignore_errors=True)
+        removed.append(path)
+    return removed
+
+
 def _await_group_gone(pgid: int, timeout: float = 5.0) -> None:
     """Wait for a process group to empty, then make sure it has.
 
@@ -217,6 +413,7 @@ class HiddenDesktop:
         self._target: subprocess.Popen | None = None
         self._bus_pid: int | None = None
         self._runtime: str | None = None
+        self._slice: str | None = None
 
     # -- lifecycle --------------------------------------------------------
 
@@ -248,11 +445,22 @@ class HiddenDesktop:
             raise
 
     def _prepare(self) -> None:
+        # What a killed owner left, before this desktop makes its own: the
+        # slices first, so their directories are no longer in use. Unscoped
+        # directories too -- from before slices, a host with no user
+        # manager, or a shell too old for one -- which leave the same thing.
+        started = _process_start(os.getpid())
+        if started is not None and _user_systemd():
+            _reap_abandoned_slices()
+            if _shell_takes_a_scope():
+                self._slice = _slice_name(os.getpid(), started, self.name)
+        _reap_abandoned_runtimes("ghostdriver-desktop-")
         # Private, so the accessibility bus and the shell's sockets land
         # here. Without one, the bus fell back to a fixed path under
         # ~/.cache that another program on linux-host-a also used, and the
         # "nested" bus listed RustDesk (#217).
-        self._runtime = tempfile.mkdtemp(prefix="ghostdriver-desktop-")
+        self._runtime = tempfile.mkdtemp(
+            prefix=_runtime_prefix("ghostdriver-desktop-", os.getpid(), started))
         bus_address = self._start_private_bus()
         display_name, xauthority = self._start_shell(bus_address)
         atspi_address = self._a11y_address(bus_address)
@@ -290,11 +498,12 @@ class HiddenDesktop:
         starts next. Started inside the private runtime directory, so the
         services it activates -- the accessibility bus among them -- put
         their sockets there too."""
+        env = self._base_env()
         out = subprocess.run(
-            ["dbus-daemon", "--session", "--fork",
-             "--print-address=1", "--print-pid=1"],
+            _scoped(["dbus-daemon", "--session", "--fork",
+                     "--print-address=1", "--print-pid=1"], self._slice, env),
             capture_output=True, text=True, timeout=STARTUP_TIMEOUT_S,
-            env=self._base_env(),
+            env=_operator_env(env) if self._slice else env,
         )
         lines = out.stdout.splitlines()
         if out.returncode != 0 or len(lines) < 2:
@@ -315,13 +524,15 @@ class HiddenDesktop:
         """
         assert self._runtime is not None
         log_path = os.path.join(self._runtime, "gnome-shell.log")
+        env = self._base_env(bus_address)
         with open(log_path, "w") as log:
             proc = subprocess.Popen(
-                ["gnome-shell", "--headless", "--wayland",
-                 "--virtual-monitor", VIRTUAL_MONITOR,
-                 "--wayland-display", f"ghostdriver-{os.getpid()}-{self.name}"],
-                env=self._base_env(bus_address), stdout=subprocess.DEVNULL,
-                stderr=log, start_new_session=True,
+                _scoped(["gnome-shell", "--headless", "--wayland",
+                         "--virtual-monitor", VIRTUAL_MONITOR,
+                         "--wayland-display", f"ghostdriver-{os.getpid()}-{self.name}"],
+                        self._slice, env),
+                env=_operator_env(env) if self._slice else env,
+                stdout=subprocess.DEVNULL, stderr=log, start_new_session=True,
             )
         self._procs.append(proc)
         deadline = time.monotonic() + STARTUP_TIMEOUT_S
@@ -454,6 +665,13 @@ class HiddenDesktop:
                 os.kill(self._bus_pid, signal.SIGTERM)
             _await_group_gone(self._bus_pid)
             self._bus_pid = None
+        if self._slice is not None:
+            # Everything the desktop started is in this slice's cgroup,
+            # whatever session or group it moved itself into.
+            with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+                subprocess.run(["systemctl", "--user", "stop", self._slice],
+                               capture_output=True, timeout=15)
+            self._slice = None
         if self._runtime is not None:
             # Whatever still carries this desktop's runtime directory is
             # ours, in any process group: put down last, and hard.
