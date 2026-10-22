@@ -9023,3 +9023,50 @@ applies to its class only; a cadence on the call beats it; it beats a
 blanket surface note; no key changes nothing; the key is read and a bad
 value refused (`env: any`). `check-profile` lists the key. Issue #238;
 D26; D35; D45; D60.
+
+### D#242. A profile is offered at attach; find looks before it suggests; a restart can be seen
+
+**The field report.** A target with a profile on disk was driven
+unprofiled for two days: `attach` without `profile_path` loads nothing and
+said nothing, and the profile's control notes appeared only inside error
+results. A missing profile name failed as "No such file". `hit_targets`
+listed a child window that `find` then called not found. A server restart
+was discovered only when the next call failed.
+
+**Decision.**
+
+- **Offered, never applied.** `attach` without `profile_path` lists, as
+  `profile_candidates` with a `profile_hint`, every profile whose
+  `executables` (a new key: executable file names) or probed
+  `executable.path` names the target's executable. It loads none of them:
+  a profile carries policy -- a denylist, a cadence, menu routes -- and
+  silently applying the wrong one is worse than offering the right one.
+  More than one can match; the operator chooses.
+- **A missing name lists what is there**, instead of a file-not-found.
+- **`describe` carries the notes** for the classes in what it described,
+  up to twelve, so a session that describes first sees them before an
+  action fails.
+- **`find` looks before it suggests.** An empty main-window search counts
+  matches in the other top-level windows and says which case it is: some
+  there (retry with `all_windows`), or none anywhere, which for a control
+  shown only under the pointer or while a menu is open means it is gone
+  between calls. The two tools walk the same tree; they disagreed because
+  one searched more of it.
+- **A restart can be seen before it costs a call.** `list_targets` and
+  `attach` carry `server_generation`, which changes when the server
+  process restarts. In development mode a pending reconnect is repeated on
+  those two results, where a client decides to start a long batch; other
+  calls that worked stay quiet, as D#70 decided.
+- The `capture` description says that an HTTP error from the client is a
+  transport failure, not a result from this server, and to retry once at
+  a smaller `scale`. This server cannot see or type that error.
+
+**Evidence.** `tests/test_profile_discovery.py`: profiles listed by bare
+name with backups excluded; candidates matched by file name through either
+key; a missing name lists the profiles; attach offers a matching profile
+and loads nothing; `describe` carries the notes; `find` counts other
+windows both ways; the generation names this process (`env: any`).
+`tests/test_devreload.py`: the pending reconnect is said on attach and
+list_targets and not on other calls. `tests/test_tools.py`: the empty-find
+hint now says when no other window has a match. Issue #242; D#137; D#70;
+D35.

@@ -10,6 +10,18 @@ Everything here is optional. A profile with only a `denylist` is a
 complete profile. `ghostdriver check-profile <name>` reads one back and
 says what the tool will make of it.
 
+## `executables` (D#242)
+
+```json
+"executables": ["VendorApp.Exe"]
+```
+
+The executable file names this profile is for. `attach` without
+`profile_path` offers every profile whose `executables` (or whose probed
+`executable.path`) names the target's executable, as `profile_candidates`
+with a `profile_hint`. It never loads one by itself: a profile carries
+policy, and the operator chooses which.
+
 ## `matched_profile`
 
 A label for the target's technology profile, for reports and results

@@ -224,3 +224,22 @@ def test_a_call_that_raises_while_held_says_the_implementation_is_held():
     assert "held" in failed["dev_reload"]
     assert "Reconnect" in failed["dev_reload"]["held"]
     assert "dev_reload" not in worked, "a call that worked has nothing to add"
+
+
+def test_a_pending_reconnect_is_said_where_a_session_starts():
+    """attach and list_targets carry it while a reconnect is pending (#242);
+    other calls that worked stay quiet (D#70)."""
+    from ghostdriver.consent import ConsentStore
+    from ghostdriver.session import SessionManager
+
+    live = LiveToolbox(SessionManager(store=ConsentStore(None)), dev=True)
+    reloader = live._reloader
+    assert reloader is not None
+    reloader.held_for.append("ghostdriver.session")
+    reloader.current = SimpleNamespace(attach=lambda: {"ok": True},
+                                       list_targets=lambda: {"ok": True},
+                                       find=lambda: {"ok": True})
+
+    assert live.attach()["dev_reload"]["needs_reconnect"] == ["ghostdriver.session"]
+    assert "needs_reconnect" in live.list_targets()["dev_reload"]
+    assert "dev_reload" not in live.find()

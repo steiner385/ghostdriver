@@ -470,7 +470,9 @@ def build_server(sessions: SessionManager | None = None) -> Any:
             "Return the picture at this fraction of its size (above 0, at most "
             "1; default 1). 0.5 is a quarter of the pixels -- enough to read a "
             "layout, and far cheaper to hold. The result's width and height are "
-            "the image's own; every rect stays full size."
+            "the image's own; every rect stays full size. If the call fails at the "
+            "transport -- an HTTP error from the client, not a result from this "
+            "server -- retry once with a smaller scale."
         ))] = 1.0,
     ) -> CallToolResult:
         result = box.capture(session_ref, locator=locator, region=region, save_as=save_as,
