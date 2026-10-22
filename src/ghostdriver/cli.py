@@ -646,7 +646,7 @@ CURATED_PROFILE_KEYS = {
     "matched_profile", "denylist", "input_sensitivity", "busy_indicator",
     "safe_controls", "grid_strategy", "grid_evidence", "actuation_map", "focus_behavior",
     "posted_click_only", "hover_before_click", "notes", "text_is_label",
-    "menus_by_keyboard", "insert_first", "cadence_for_class",
+    "menus_by_keyboard", "insert_first", "cadence_for_class", "executables",
 }
 RETIRED_PROFILE_KEYS = {
     "environment_allowlist": "no longer read: which targets may be driven is "

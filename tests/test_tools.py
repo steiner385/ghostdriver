@@ -160,7 +160,10 @@ def test_find_hints_at_the_windows_it_did_not_search(box, win32_target):
     result = box.find(session, "class=NoSuchClass")
 
     assert result["match_count"] == 0
-    assert "all_windows=true" in result["hint"]
+    # It now looks before suggesting (#242): nothing anywhere is said as such,
+    # rather than an all_windows=true retry that would find nothing either.
+    assert result["matches_in_other_windows"] == 0
+    assert "no other top-level window has a match" in result["hint"]
 
 
 def test_a_malformed_locator_explains_itself(box, win32_target):
