@@ -126,7 +126,8 @@ class ActuationTools(_ActingCore):
             expect_after=after,
             verify_timeout_s=verify_window(expect),
         )
-        self._remember(session_id, "click", locator, prepared, result)
+        self._remember(session_id, "click", locator, prepared, result,
+                       action=f"{button} x{count} at={point}")
         focus = self._focus_report(prepared)
         inactive = focus.get("target_window_active") is False
         verified = ("effect" if after is not None and result.ok
