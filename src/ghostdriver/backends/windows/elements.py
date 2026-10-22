@@ -235,25 +235,42 @@ def _live(element: AccessibleElement):
                 child = walker.GetNextSiblingElement(child)
         except Exception:
             continue
-    raise ElementError("the element is no longer on the accessibility surface")
+    raise ElementError(
+        "the element is no longer on the accessibility surface"
+        + (f" (searched the first {MAX_ELEMENTS} elements under its host; a larger "
+           "surface, such as a web view, may hold it further down)" if seen >= MAX_ELEMENTS else ""))
 
 
 def act_via_pattern(element: AccessibleElement) -> bool:
     """Tier 1: the first fitting pattern the element publishes.
 
     SelectionItem before Invoke: a tab item that has both is selected by a
-    click, not invoked. Returns False when the element publishes none of
-    them, so the ladder falls through rather than pretending.
+    click, not invoked.
+
+    **Every decline names its reason (#236).** This used to return False
+    for three different things -- no fitting pattern, the live element not
+    found again, a COM error from the pattern call -- and the result could
+    only say "returned without delivering". It raises ElementError instead,
+    and the actuator records the message as this rung's `declined` reason
+    (D#145); the ladder still falls through to the next rung.
     """
     fitting = [p for p in _ACTION_PATTERNS if p in element.patterns]
     if not fitting:
-        return False
+        published = ", ".join(element.patterns) or "none"
+        raise ElementError(
+            f"the element publishes none of {', '.join(_ACTION_PATTERNS)} "
+            f"(it publishes: {published})")
+    UIA, live = _live(element)  # raises ElementError, naming why it is not found
+    pattern_name = fitting[0]
     try:
-        UIA, live = _live(element)
-        pattern_name = fitting[0]
         pattern = live.GetCurrentPattern(PATTERN_IDS[pattern_name])
-        if not pattern:
-            return False
+    except Exception as exc:
+        raise ElementError(f"asking for the {pattern_name} pattern failed: {exc}") from exc
+    if not pattern:
+        raise ElementError(
+            f"the element listed {pattern_name} when it was found, and the live "
+            "element no longer offers it")
+    try:
         if pattern_name == "SelectionItem":
             pattern.QueryInterface(UIA.IUIAutomationSelectionItemPattern).Select()
         elif pattern_name == "Invoke":
@@ -266,9 +283,9 @@ def act_via_pattern(element: AccessibleElement) -> bool:
                 expand.Expand()
             else:
                 expand.Collapse()
-        return True
-    except Exception:
-        return False
+    except Exception as exc:
+        raise ElementError(f"the {pattern_name} call raised: {exc}") from exc
+    return True
 
 
 def click_posted(element: AccessibleElement, *, button: str = "left",

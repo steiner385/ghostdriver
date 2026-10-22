@@ -8933,3 +8933,31 @@ window the caller was just shown. The index can drift if the tree changes;
 hidden window and one below depth gets `index=0` and resolves to the
 rendered one; two rendered sharers get `index=0` and `index=1`; the index
 counts across trees. Issue #229.
+
+### D#236. The UIA pattern rung names why it declined
+
+**The field report.** Driving new Outlook, whose content is a WebView2
+document, the pattern rung reported only "declined: returned without
+delivering".
+
+**What was wrong.** `act_via_pattern` caught every exception and returned
+False, and returned False as well when the element published none of the
+patterns it uses. So three different facts read alike: the element offers
+no actionable pattern; the live element could not be found again by its
+runtime id (the search stops at `MAX_ELEMENTS` under the host, which a web
+view can exceed); or the pattern call itself raised. D#145 made the ladder
+record a rung's reason, and this rung never gave one.
+
+**Decision.** The rung raises `ElementError` naming which of these
+happened -- including which patterns the element does publish, and when
+the search for the live element stopped at its cap -- and the actuator
+records the message as the rung's `declined` reason. The ladder still
+falls through to the next rung exactly as before. Nothing about whether
+WebView2 is drivable is decided here; this makes the next attempt say why
+a rung declined.
+
+**Evidence.** `tests/test_windows_elements.py`: an element with no
+actionable pattern is declined naming what it does publish; one whose
+runtime id is gone is declined as no longer on the surface; a rung's
+message reaches the result's `declined` (`env: windows`, the fixture's tab
+control). Issue #236; D#145; D45.
