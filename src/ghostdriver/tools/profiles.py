@@ -25,9 +25,17 @@ def profile_names() -> list[str]:
 
 
 def profile_candidates(executable: str | None) -> list[str]:
-    """Profiles that declare this executable: by an `executables` list of
-    file names, or by the `executable.path` a probe wrote. Case-insensitive,
-    by file name, so the same client installed elsewhere still matches."""
+    """Profiles for this executable, declared ones first (#246): those whose
+    `executables` list names it, then those that only matched through the
+    `executable.path` a probe wrote. Case-insensitive, by file name, so the
+    same client installed elsewhere still matches."""
+    return [name for name, _how in matching_profiles(executable)]
+
+
+def matching_profiles(executable: str | None) -> list[tuple[str, str]]:
+    """(name, "declared" | "probed") for each profile that fits, declared
+    first -- a person listing the executable beats a probe having recorded
+    it (D35)."""
     if not executable:
         return []
     from ..operator import OperatorDir, OperatorDirError
@@ -37,20 +45,20 @@ def profile_candidates(executable: str | None) -> list[str]:
     except OperatorDirError:
         return []
     wanted = _file_name(executable)
-    found = []
+    declared_matches, probed_matches = [], []
     for name in profile_names():
         try:
             document = json.loads((folder / f"{name}.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        declared = [str(e).lower() for e in document.get("executables") or []]
+        if wanted in [_file_name(str(e)) for e in document.get("executables") or []]:
+            declared_matches.append((name, "declared"))
+            continue
         probed = (document.get("executable") or {}).get("path") if isinstance(
             document.get("executable"), dict) else None
-        if probed:
-            declared.append(_file_name(str(probed)))
-        if wanted in declared:
-            found.append(name)
-    return found
+        if probed and _file_name(str(probed)) == wanted:
+            probed_matches.append((name, "probed"))
+    return declared_matches + probed_matches
 
 
 def _file_name(path: str) -> str:
@@ -64,11 +72,13 @@ def _file_name(path: str) -> str:
 def profile_offer(executable: str | None) -> dict:
     """The fields `attach` adds when no profile was loaded: the candidates
     and how to take one. Empty when nothing matches."""
-    candidates = profile_candidates(executable)
-    if not candidates:
+    matches = matching_profiles(executable)
+    if not matches:
         return {}
+    candidates = [name for name, _how in matches]
     return {
         "profile_candidates": candidates,
+        "profile_matched_by": dict(matches),
         "profile_hint": (
             "no profile was loaded, and the operator directory has one for this "
             f"executable: attach again with profile_path=\"{candidates[0]}\""

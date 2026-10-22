@@ -9114,3 +9114,21 @@ the tool-module limit, into `tools/outcome.py` (D60).
 hand-off with the class, the aimed point, the routes tried and an ask that
 names no tool; without `at` it aims at the control's centre; a raised
 window carries none (`env: any`). Issue #244; D#133; D#195; D#240.
+
+### D#246. A declared profile is offered before one a probe recorded
+
+**What was seen.** Attaching to a VendorApp client without `profile_path` right
+after D#242 landed offered four profiles and suggested an old probe file
+first. Candidates were sorted by name, and a profile matched either by an
+`executables` list a person wrote or by the `executable.path` a probe
+recorded -- so a probe's output outranked the curated profile.
+
+**Decision.** Profiles that declare the executable come first, then those
+that matched only through probe evidence (D35: declared beats learned), and
+the offer says which is which (`profile_matched_by`). The hint suggests the
+first. Nothing is loaded either way (D#242).
+
+**Evidence.** `tests/test_profile_discovery.py`: the declared profile is
+ordered before the probed one, the offer carries how each matched, and the
+hint names the declared one (`env: any`). Against the operator's real
+directory the curated profile is now offered first. Issue #246; D#242; D35.
