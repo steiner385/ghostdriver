@@ -23,6 +23,7 @@ from .deny import _DenyCore
 from .drift import whitespace_note
 from .expect import _ExpectCore
 from .guidance import FOCUS_NOTE
+from .outcome import actuation_outcome
 
 
 class _ActingCore(_DenyCore, _ExpectCore):
@@ -286,58 +287,6 @@ class _ActingCore(_DenyCore, _ExpectCore):
         scale = current().winapi.display_scale()
         return (round(point[0] / scale), round(point[1] / scale))
 
-    def _outcome(self, result, session, locator: str) -> dict | None:
-        """What a failed actuation *did*, when the result can tell.
-
-        Two cases the flat sentence hid. A window appeared or the target
-        became held: the action was delivered and the application answered
-        it -- an Error dialog is the outcome, not a miss (#194). A route
-        delivered and nothing at all changed: the control may act only on a
-        route this did not take, and the second such delivery on the same
-        control in one session is said to be the second, because that is
-        what stops the third (#195). `ok` stays false either way: a named
-        expectation that did not hold did not hold (D28).
-        """
-        from .guidance import NO_EFFECT_HINT
-
-        if (result.error or {}).get("kind") != ErrorKind.POSTCONDITION_FAILED.value:
-            return None
-        appeared = [d.get("detail") for d in result.disturbances
-                    if d.get("change") == "window_appeared"]
-        held = [d.get("detail") for d in result.disturbances
-                if d.get("change") == "blocked"]
-        if appeared or held:
-            raised = appeared or held
-            return {
-                "outcome": "delivered_raised_window",
-                "fields": {"raised": raised},
-                "lead": (f"delivered, and a window appeared ({', '.join(raised)}); the "
-                         "named expectation did not hold. Read it with modals and "
-                         "deal with it before retrying: it may be the application's "
-                         "answer to this action."),
-            }
-        delivered = (len(result.declined) < len(result.routes_attempted)
-                     if result.routes_attempted else result.tier_used is not None)
-        if delivered and not result.disturbances:
-            # Failed deliveries of *this same action* -- tool, locator and
-            # what was sent -- this session, this one included: it was
-            # recorded just before this report. A different button, point or
-            # count is a different action, not a retry (#240).
-            history = self.sessions.ledger.outcomes(session.session_id)
-            this = history[-1] if history else None
-            count = sum(1 for o in history
-                        if this is not None and not o.ok and o.locator == locator
-                        and o.tool == this.tool and o.action == this.action)
-            again = (f"This is delivery #{count} of this same action to this control "
-                     "with no effect in this session; repeating it will not act. "
-                     if count >= 2 else "")
-            return {
-                "outcome": "delivered_no_effect",
-                "fields": {"no_effect_count": max(count, 1)},
-                "lead": again + NO_EFFECT_HINT,
-            }
-        return None
-
     def _reported(self, result, prepared, locator: str, **extra) -> dict:
         """One shape for every actuation outcome, successful or not.
 
@@ -362,7 +311,9 @@ class _ActingCore(_DenyCore, _ExpectCore):
         }
         if result.error is not None:
             error = dict(result.error)
-            outcome = self._outcome(result, prepared.session, locator)
+            outcome = actuation_outcome(
+                result, self.sessions.ledger.outcomes(prepared.session.session_id),
+                locator, prepared.node, extra.get("at"))
             if outcome is not None:
                 # The diagnosis used to sit one layer down, in disturbances
                 # and focus, under a top line that read "try again" (#194,

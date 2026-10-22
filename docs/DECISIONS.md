@@ -9092,3 +9092,26 @@ point or count on the same control starts its own count.
 **Evidence.** `tests/test_outcomes.py`: two failures of the same action
 are counted and said; three different actions on one control are not
 called a repeat (`env: any`). Issue #240; D#195.
+
+### D#244. A delivered action with no effect carries a hand-off for a person
+
+**The field report.** In-place rich-text editors (windowed child controls)
+ignored every posted click and keystroke, in and out of block edit. The ask
+was either a real-pointer primitive or an explicit hand-off result carrying
+the exact screen point and class, rather than the generic no-effect text.
+
+**Decision.** No pointer primitive: ghostdriver never moves the operator's
+mouse (D#133). The hand-off is in scope. A `delivered_no_effect` result
+now carries `handoff`: the control's class, the screen point the action
+aimed at (logical, and physical when the display is scaled), the routes
+already tried, and an `ask` sentence ready to give `await_human`. It names
+no tool. What takes the step -- the operator, or whatever the operator
+chooses -- is the caller's and the operator's decision, not this server's.
+
+The outcome logic moved from `acting.py`, which this would have taken past
+the tool-module limit, into `tools/outcome.py` (D60).
+
+**Evidence.** `tests/test_outcomes.py`: a no-effect result carries the
+hand-off with the class, the aimed point, the routes tried and an ask that
+names no tool; without `at` it aims at the control's centre; a raised
+window carries none (`env: any`). Issue #244; D#133; D#195; D#240.

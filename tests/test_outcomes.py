@@ -169,3 +169,27 @@ def test_the_function_keys_are_named_keys():
     if sys.platform == "win32":
         from ghostdriver.backends.windows.input import NAMED_KEYS
         assert NAMED_KEYS["f2"] == 0x71 and NAMED_KEYS["f4"] == 0x73
+
+
+# --- the hand-off (#244) --------------------------------------------------------------
+
+def test_a_no_effect_result_carries_a_handoff_for_a_person(box):
+    reported = box._reported(missed(), prepared(), "class=TsfDBInputEdit", at=(3, 4))
+
+    handoff = reported["handoff"]
+    assert handoff["class"] == "TsfDBInputEdit"
+    assert handoff["point"] == {"x": 3, "y": 4, "frame": "screen, logical"}
+    assert handoff["tried"] == ["posted"]
+    assert handoff["ask"].startswith("Please click the TsfDBInputEdit at screen point (3, 4)")
+    assert "computer-use" not in handoff["ask"] and "real input" not in handoff["ask"]
+    assert "handoff" in reported["error"]["message"]
+
+
+def test_without_a_point_the_handoff_aims_at_the_centre(box):
+    reported = box._reported(missed(), prepared(), "class=TsfDBInputEdit")
+    assert reported["handoff"]["point"]["x"] == 5 and reported["handoff"]["point"]["y"] == 5
+
+
+def test_a_raised_window_carries_no_handoff(box):
+    result = missed(disturbances=[{"change": "window_appeared", "detail": "Error"}])
+    assert "handoff" not in box._reported(result, prepared(), "class=X")
