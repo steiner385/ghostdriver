@@ -9023,3 +9023,25 @@ applies to its class only; a cadence on the call beats it; it beats a
 blanket surface note; no key changes nothing; the key is read and a bad
 value refused (`env: any`). `check-profile` lists the key. Issue #238;
 D26; D35; D45; D60.
+
+### D#240. "The same action again" means the same action
+
+**The field report.** After two no-effect clicks at different points on
+one control, a right-click at a third point was reported as "delivery #3
+to this control with no effect ... the same route will not act on a
+retry". Two of the three were different actions.
+
+**What was wrong.** D#195 counted every failed actuation on the same
+locator in the session. The count never refuses anything -- it is the
+lead sentence of the message -- but the sentence claimed a retry where
+there was none, and told the caller to stop exploring a control it had
+only probed.
+
+**Decision.** The ledger records what exactly was sent (`action`: for a
+click, its button, count and point). The count matches tool, locator and
+action, and the sentence says "this same action". A different button,
+point or count on the same control starts its own count.
+
+**Evidence.** `tests/test_outcomes.py`: two failures of the same action
+are counted and said; three different actions on one control are not
+called a repeat (`env: any`). Issue #240; D#195.

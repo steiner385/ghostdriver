@@ -80,16 +80,31 @@ def test_the_grid_cell_editor_is_a_check_not_a_promise(box):
     assert "do not keep trying keys" in message
 
 
-def test_the_second_inert_delivery_on_the_same_control_says_so(box):
+def test_the_second_inert_delivery_of_the_same_action_says_so(box):
     locator = "class=TsfDBInputEdit index=3"
     for _ in range(2):
         box.sessions.ledger.record("s", Outcome(locator=locator, tool="click",
-                                                cadence="robot", ok=False))
+                                                cadence="robot", ok=False,
+                                                action="left x1 at=(10, 10)"))
 
     reported = box._reported(missed(), prepared(), locator)
 
     assert reported["no_effect_count"] == 2
-    assert reported["error"]["message"].startswith("This is delivery #2 to this control")
+    assert reported["error"]["message"].startswith("This is delivery #2 of this same action")
+
+
+def test_a_different_action_on_the_same_control_is_not_counted_as_a_repeat(box):
+    """Two left clicks at different points and then a right-click were
+    reported as 'delivery #3 ... will not act on a retry' (#240)."""
+    locator = "class=TSfHypertextEditBox.UnicodeClass"
+    for action in ("left x1 at=(40, 60)", "left x1 at=(40, 90)", "right x1 at=(40, 120)"):
+        box.sessions.ledger.record("s", Outcome(locator=locator, tool="click",
+                                                cadence="robot", ok=False, action=action))
+
+    reported = box._reported(missed(), prepared(), locator)
+
+    assert reported["no_effect_count"] == 1
+    assert not reported["error"]["message"].startswith("This is delivery")
 
 
 def test_a_route_that_never_delivered_is_not_called_inert(box):
