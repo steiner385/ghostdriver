@@ -35,7 +35,7 @@ def test_profiles_are_listed_by_bare_name_and_backups_are_not_profiles(opdir):
 
 
 def test_candidates_match_by_executable_file_name_either_way(opdir):
-    assert profile_candidates(r"C:\Elsewhere\vendorapp.exe") == ["sandbox", "vendorapp"]
+    assert profile_candidates(r"C:\Elsewhere\vendorapp.exe") == ["vendorapp", "sandbox"],         "the declared profile comes before the one a probe recorded"
     assert profile_candidates("notepad.exe") == ["other"]
     assert profile_candidates("calc.exe") == [] and profile_candidates(None) == []
 
@@ -58,9 +58,10 @@ def test_the_offer_names_the_candidates_and_how_to_take_one(opdir):
 
     offer = profile_offer(r"C:\Program Files (x86)\VendorApp\VendorApp.Exe")
 
-    assert offer["profile_candidates"] == ["sandbox", "vendorapp"]
-    assert 'profile_path="sandbox"' in offer["profile_hint"]
-    assert "vendorapp" in offer["profile_hint"]
+    assert offer["profile_candidates"] == ["vendorapp", "sandbox"]
+    assert offer["profile_matched_by"] == {"vendorapp": "declared", "sandbox": "probed"}
+    assert 'profile_path="vendorapp"' in offer["profile_hint"]
+    assert "sandbox" in offer["profile_hint"]
     assert profile_offer("calc.exe") == {} and profile_offer(None) == {}
 
 
