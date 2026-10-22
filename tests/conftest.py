@@ -390,6 +390,7 @@ while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
 _WIN32_MINIMIZED_APP = r"""
 import ctypes
 import os
+import sys
 from ctypes import wintypes
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -457,6 +458,14 @@ FORM_CLASS = "GhostdriverFormClass"
 
 state = {"form": None, "decoy": None}
 
+# "--restore-on-syscommand": the form comes back only on the system command
+# a taskbar click sends, as a classic VCL application's does (#234). The
+# command is answered here, without DefWindowProc, so nothing is activated.
+SYSCOMMAND_ONLY = "--restore-on-syscommand" in sys.argv
+WM_SYSCOMMAND = 0x0112
+SC_RESTORE = 0xF120
+SW_SHOWNOACTIVATE = 4
+
 
 # Hide the form on minimize, put it back on restore. This is the
 # behaviour `restore` relies on and must not duplicate: the application,
@@ -466,8 +475,12 @@ def _owner_proc(hwnd, message, wparam, lparam):
     if message == WM_SIZE and state["form"]:
         if wparam == SIZE_MINIMIZED:
             user32.ShowWindow(wintypes.HWND(state["form"]), SW_HIDE)
-        elif wparam == SIZE_RESTORED:
+        elif wparam == SIZE_RESTORED and not SYSCOMMAND_ONLY:
             user32.ShowWindow(wintypes.HWND(state["form"]), SW_SHOWNA)
+    if SYSCOMMAND_ONLY and message == WM_SYSCOMMAND and (wparam & 0xFFF0) == SC_RESTORE:
+        user32.ShowWindow(wintypes.HWND(hwnd), SW_SHOWNOACTIVATE)
+        user32.ShowWindow(wintypes.HWND(state["form"]), SW_SHOWNA)
+        return 0
     return user32.DefWindowProcW(hwnd, message, wparam, lparam)
 
 
@@ -847,15 +860,18 @@ def win32_target():
         proc.wait(timeout=5)
 
 
-@pytest.fixture
-def minimized_target():
+@pytest.fixture(params=[False])
+def minimized_target(request):
     """A target minimized to a taskbar proxy; yields (pid, owner, form, decoy).
 
     Started already minimized, so the test never has to minimize it and
     never has to show anything on the developer's screen to get there.
+    Parametrized indirectly with True for the VCL-style mode, whose form
+    comes back only on the restore system command (#234).
     """
+    extra = ["--restore-on-syscommand"] if getattr(request, "param", False) else []
     proc = subprocess.Popen(
-        [sys.executable, "-c", _WIN32_MINIMIZED_APP],
+        [sys.executable, "-c", _WIN32_MINIMIZED_APP, *extra],
         stdout=subprocess.PIPE,
         text=True,
     )

@@ -32,6 +32,11 @@ class RestoreResult:
     visible_after: tuple[int, ...]
     foreground_before: int
     foreground_after: int
+    #: Which request brought the forms back, when the backend has more than
+    #: one: "" for the first and only one, "restore_command" when the
+    #: Windows fallback -- the system command a taskbar click sends -- was
+    #: needed (#234).
+    route: str = ""
 
     @property
     def took_foreground(self) -> bool:
@@ -50,6 +55,14 @@ class RestoreResult:
         if not self.restored:
             return "nothing was minimized"
         if not self.newly_visible:
+            tried = (" -- neither the no-activate show nor the restore command a "
+                     "taskbar click sends brought anything back"
+                     if self.route == "restore_command" else
+                     " -- the window manager declined")
             return (f"asked to restore {len(self.restored)} window(s); none came "
-                    "back on screen -- the window manager declined")
+                    f"back on screen{tried}. Ask the operator to click the "
+                    "application in the taskbar.")
+        if self.route == "restore_command":
+            return ("the application re-showed its own forms after the restore "
+                    "command a taskbar click sends; a plain un-minimize was not enough")
         return "the application re-showed its own forms"

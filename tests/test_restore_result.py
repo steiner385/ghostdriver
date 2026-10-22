@@ -26,3 +26,18 @@ def test_a_restore_nothing_answered_does_not_claim_it_worked():
 
 def test_a_restore_that_worked_says_what_came_back():
     assert _result((7,), (), (7,)).note == "the application re-showed its own forms"
+
+
+# --- the fallback route is said (#234) --------------------------------------------
+
+def test_the_note_names_the_fallback():
+    from ghostdriver.model.restore import RestoreResult
+
+    came_back = RestoreResult(restored=(1,), visible_before=(1,), visible_after=(1, 2),
+                              foreground_before=0, foreground_after=0, route="restore_command")
+    nothing = RestoreResult(restored=(1,), visible_before=(1,), visible_after=(1,),
+                            foreground_before=0, foreground_after=0, route="restore_command")
+
+    assert "restore command a taskbar click sends" in came_back.note
+    assert "neither the no-activate show nor the restore command" in nothing.note
+    assert "taskbar" in nothing.note

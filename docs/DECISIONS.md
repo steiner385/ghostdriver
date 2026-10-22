@@ -8933,3 +8933,38 @@ window the caller was just shown. The index can drift if the tree changes;
 hidden window and one below depth gets `index=0` and resolves to the
 rendered one; two rendered sharers get `index=0` and `index=1`; the index
 counts across trees. Issue #229.
+
+### D#234. `restore` falls back to the command a taskbar click sends
+
+**The field report.** On the VendorApp client, after the operator minimized it
+or a session timed out, `restore` said again and again "asked to restore 1
+window(s); none came back on screen -- the window manager declined", until
+the operator clicked the taskbar.
+
+**What was wrong.** `restore` un-minimizes each minimized top-level window
+with a no-activate show and relies on the application re-showing its own
+forms (the design this module rests on). A classic Delphi application
+minimizes through its hidden application window, and its forms come back
+through the toolkit's own restore, which runs on `WM_SYSCOMMAND` /
+`SC_RESTORE` -- the system command a taskbar click sends -- and not on
+the window being shown. The fixture re-showed its form on the size change
+a show produces, so the tests never met the case.
+
+**Decision.** When the no-activate show brings nothing back, `restore`
+posts `SC_RESTORE` to the windows that were minimized and waits again.
+The result names the route (`route: restore_command`), and the note says
+the plain un-minimize was not enough. The fallback may take the
+foreground, as a taskbar click does; `took_foreground` already says
+whether it did, and `restore` is already marked as changing the screen.
+It is still the application that decides which forms come back: the
+command asks it to restore, and a dialog it keeps hidden stays hidden.
+When neither request brings anything back, the note says both were tried
+and to ask the operator to click the taskbar.
+
+**Evidence.** `tests/test_windows_restore.py`: the minimized fixture gains
+a mode in which its form comes back only on the restore command, answered
+without `DefWindowProc` so nothing is activated; in that mode the form
+comes back through the fallback with `route: restore_command` and the
+decoy stays hidden, and an ordinary target needs no fallback. The focus
+guard stayed green. `tests/test_restore_result.py`: both notes. `env:
+windows`; not yet confirmed on the real client. Issue #234; D73.
