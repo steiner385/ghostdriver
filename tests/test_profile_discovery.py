@@ -3,6 +3,7 @@ look elsewhere; the server generation (#242). Backend-free."""
 
 import json
 import os
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -51,6 +52,20 @@ def test_attach_names_a_missing_profile_and_lists_the_ones_there(opdir):
     assert "it has: other, sandbox, vendorapp" in result["error"]["message"]
 
 
+def test_the_offer_names_the_candidates_and_how_to_take_one(opdir):
+    """Through its own seam, so it runs on any platform (#242)."""
+    from ghostdriver.tools.profiles import profile_offer
+
+    offer = profile_offer(r"C:\Program Files (x86)\VendorApp\VendorApp.Exe")
+
+    assert offer["profile_candidates"] == ["sandbox", "vendorapp"]
+    assert 'profile_path="sandbox"' in offer["profile_hint"]
+    assert "vendorapp" in offer["profile_hint"]
+    assert profile_offer("calc.exe") == {} and profile_offer(None) == {}
+
+
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="a full attach of this process needs a backend that can see it")
 def test_attach_offers_a_profile_for_this_executable_but_does_not_load_it(opdir):
     import psutil
 
@@ -59,7 +74,7 @@ def test_attach_offers_a_profile_for_this_executable_but_does_not_load_it(opdir)
 
     result = attach(Toolbox(SessionManager()))
 
-    assert result["ok"] and result["matched_profile"] == "unknown"
+    assert result["ok"] and result["matched_profile"] == "unknown", result
     assert result["profile_candidates"] == ["mine"]
     assert 'profile_path="mine"' in result["profile_hint"]
     assert result["server_generation"] == server_generation()

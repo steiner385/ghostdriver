@@ -8,7 +8,6 @@ silently applying the wrong one is worse than asking for the right one.
 
 import json
 import os
-from pathlib import Path
 
 
 def profile_names() -> list[str]:
@@ -37,7 +36,7 @@ def profile_candidates(executable: str | None) -> list[str]:
         folder = OperatorDir.resolve().profiles
     except OperatorDirError:
         return []
-    wanted = Path(executable).name.lower()
+    wanted = _file_name(executable)
     found = []
     for name in profile_names():
         try:
@@ -48,10 +47,34 @@ def profile_candidates(executable: str | None) -> list[str]:
         probed = (document.get("executable") or {}).get("path") if isinstance(
             document.get("executable"), dict) else None
         if probed:
-            declared.append(Path(str(probed).replace("\\", "/")).name.lower())
+            declared.append(_file_name(str(probed)))
         if wanted in declared:
             found.append(name)
     return found
+
+
+def _file_name(path: str) -> str:
+    """The file name of a path written for either platform, lower-cased. A
+    Windows path read on Linux is one name with backslashes in it to
+    `pathlib` there; split on both separators so a profile written on one
+    machine matches on the other."""
+    return path.replace("\\", "/").rsplit("/", 1)[-1].lower()
+
+
+def profile_offer(executable: str | None) -> dict:
+    """The fields `attach` adds when no profile was loaded: the candidates
+    and how to take one. Empty when nothing matches."""
+    candidates = profile_candidates(executable)
+    if not candidates:
+        return {}
+    return {
+        "profile_candidates": candidates,
+        "profile_hint": (
+            "no profile was loaded, and the operator directory has one for this "
+            f"executable: attach again with profile_path=\"{candidates[0]}\""
+            + (f" (or one of {candidates[1:]})" if len(candidates) > 1 else "")
+            + " to get its control notes, cadences and menu routes."),
+    }
 
 
 def server_generation() -> str:

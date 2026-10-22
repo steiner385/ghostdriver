@@ -138,7 +138,8 @@ NO_EFFECT_HINT = (
     "while another window is active -- see focus. On a VCL grid the first "
     "click may only give it the focus: a second, explicit click on the same "
     "cell is the expected next step, not a retry. Otherwise this is a step "
-    "for a person: await_human."
+    "for a person: `handoff` carries the control, its screen point and what "
+    "was tried, ready for await_human."
 )
 
 #: Said when require_active refused a click (#208). A popup menu window is

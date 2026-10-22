@@ -17,7 +17,7 @@ from .core import (
     _error,
 )
 from .live import _LiveCore
-from .profiles import profile_candidates, profile_names, server_generation
+from .profiles import profile_names, profile_offer, server_generation
 
 
 class LifecycleTools(_LiveCore):
@@ -260,15 +260,7 @@ class LifecycleTools(_LiveCore):
         summary["server_generation"] = server_generation()
         if not profile_path:
             # Offered, never applied (#242): a profile carries policy.
-            candidates = profile_candidates(
-                (command_line or [None])[0] if command_line else None)
-            if candidates:
-                summary["profile_candidates"] = candidates
-                summary["profile_hint"] = (
-                    "no profile was loaded, and the operator directory has one for "
-                    f"this executable: attach again with profile_path=\"{candidates[0]}\""
-                    + (f" (or one of {candidates[1:]})" if len(candidates) > 1 else "")
-                    + " to get its control notes, cadences and menu routes.")
+            summary.update(profile_offer(command_line[0] if command_line else None))
         summary["isolation"] = strategy.value
         summary["clipboard"] = session.clipboard  # may this session write it? (D70)
         if strategy is Isolation.MINIMIZED:
