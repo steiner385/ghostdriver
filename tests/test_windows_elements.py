@@ -284,3 +284,46 @@ def test_elements_resolve_on_a_hidden_desktop_session(box):
         assert clicked["ok"], clicked
     finally:
         box.release(session)
+
+
+# --- the pattern rung names why it declined (#236) ---------------------------------
+
+def test_the_pattern_rung_names_why_it_declined(box, app):
+    """It used to return False for three different reasons; the result could
+    only say 'returned without delivering'."""
+    import dataclasses
+
+    import pytest
+
+    from ghostdriver.backends.windows.elements import (
+        ElementError,
+        act_via_pattern,
+        walk_elements,
+    )
+    from ghostdriver.backends.windows.enumerate import enumerate_process
+    from ghostdriver.model.window import select_main_tree
+
+    tree = select_main_tree(enumerate_process(app["pid"]))
+    tabs = next(n for n in tree.walk() if n.class_name == "SysTabControl32")
+    tab = next(e for e, _ in walk_elements(tabs) if e.name == "Components")
+
+    no_pattern = dataclasses.replace(tab, patterns=("Value",))
+    with pytest.raises(ElementError, match=r"publishes none of .* \(it publishes: Value\)"):
+        act_via_pattern(no_pattern)
+
+    gone = dataclasses.replace(tab, runtime_id=(42, 4242, 424242))
+    with pytest.raises(ElementError, match="no longer on the accessibility surface"):
+        act_via_pattern(gone)
+
+
+def test_a_declined_pattern_rung_s_reason_reaches_the_result(box, app):
+    """Through the ladder: the rung's message is the click's `declined`."""
+    from ghostdriver.actuate import Actuator, Attempt, Tier
+    from ghostdriver.backends.windows.elements import ElementError
+
+    def rung():
+        raise ElementError("the element publishes none of SelectionItem, Invoke (it publishes: none)")
+
+    result = Actuator(tiers=(Tier.UIA_PATTERN,)).perform([Attempt(Tier.UIA_PATTERN, rung)])
+
+    assert "publishes none of" in result.declined["tier 1"]
