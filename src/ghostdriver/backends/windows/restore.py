@@ -50,12 +50,26 @@ def _visible_top_level(pid: int) -> tuple[int, ...]:
 #: nothing.
 SETTLE_TIMEOUT = 2.0
 
+#: The system command a taskbar click sends to a minimized window.
+WM_SYSCOMMAND = 0x0112
+SC_RESTORE = 0xF120
+
 
 def restore_process(pid: int, settle_timeout: float = SETTLE_TIMEOUT) -> RestoreResult:
     """Un-minimize every minimized top-level window of `pid`.
 
     Returns without acting when nothing is minimized, so calling this
     before a read is safe and idempotent.
+
+    **Two requests, the second only when the first brought nothing back
+    (#234).** The first is the no-activate show this module was built on.
+    A classic Delphi application does not answer it: its forms come back
+    through the toolkit's own restore, which runs on the system command a
+    taskbar click sends, not on the window being shown -- so a restore
+    reported "none came back" until the operator clicked the taskbar. The
+    second request is that command, posted to the windows that were
+    minimized. It may take the foreground, as a taskbar click does; the
+    result says whether it did.
     """
     foreground_before = winapi.foreground_window()
     visible_before = _visible_top_level(pid)
@@ -64,16 +78,13 @@ def restore_process(pid: int, settle_timeout: float = SETTLE_TIMEOUT) -> Restore
     for hwnd in minimized:
         winapi.show_no_activate(hwnd)
 
-    visible_after = visible_before
-    if minimized:
-        deadline = time.monotonic() + settle_timeout
-        while True:
-            visible_after = _visible_top_level(pid)
-            if set(visible_after) - set(visible_before):
-                break
-            if time.monotonic() >= deadline:
-                break
-            time.sleep(0.05)
+    visible_after = _settle(pid, visible_before, settle_timeout) if minimized else visible_before
+    route = ""
+    if minimized and not set(visible_after) - set(visible_before):
+        route = "restore_command"
+        for hwnd in minimized:
+            winapi.user32.PostMessageW(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0)
+        visible_after = _settle(pid, visible_before, settle_timeout)
 
     return RestoreResult(
         restored=minimized,
@@ -81,4 +92,17 @@ def restore_process(pid: int, settle_timeout: float = SETTLE_TIMEOUT) -> Restore
         visible_after=visible_after,
         foreground_before=foreground_before,
         foreground_after=winapi.foreground_window(),
+        route=route,
     )
+
+
+def _settle(pid: int, visible_before: tuple[int, ...], timeout: float) -> tuple[int, ...]:
+    """The visible set once something new appears, or at the deadline. The
+    application re-shows its forms on its own thread, after the request
+    returns, so an immediate read would report nothing."""
+    deadline = time.monotonic() + timeout
+    while True:
+        visible = _visible_top_level(pid)
+        if set(visible) - set(visible_before) or time.monotonic() >= deadline:
+            return visible
+        time.sleep(0.05)
