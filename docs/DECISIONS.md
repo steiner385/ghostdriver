@@ -8995,3 +8995,31 @@ comes back through the fallback with `route: restore_command` and the
 decoy stays hidden, and an ordinary target needs no fallback. The focus
 guard stayed green. `tests/test_restore_result.py`: both notes. `env:
 windows`; not yet confirmed on the real client. Issue #234; D73.
+
+### D#238. A profile can declare a cadence per control class
+
+**The field report.** A rich-text editor class ignored `type_text` and
+`send_keys` posted at robot cadence and accepted `send_keys` at
+`fast_human`. The profile could say "type at a human pace" per surface
+(web or native, D26) and nowhere narrower, so the fact could not be
+written down and every session would rediscover it.
+
+**Decision.** Profile key `cadence_for_class`: fnmatch class patterns,
+each naming a cadence. It is declared, not learned (D35). Precedence, most
+specific first: a cadence named on the call; the class key; the
+per-surface notes; robot. The choice moved out of `acting.py`, which sat
+at the tool-module limit, into `tools/cadence_choice.py` (D60).
+
+**Not done.** An automatic retry at a slower cadence after a fast one did
+not land, as was asked for: it would hide which cadence worked, which is
+the fact worth recording (D45), and a retry is what the conventions rule
+out. Which classes need it, and the warning that another rich-edit class
+accepted nothing at either cadence and left the client ignoring real
+keystrokes afterward, are target knowledge and go in the operator's
+profile, not the repository.
+
+**Evidence.** `tests/test_cadence_for_class.py`: the declared cadence
+applies to its class only; a cadence on the call beats it; it beats a
+blanket surface note; no key changes nothing; the key is read and a bad
+value refused (`env: any`). `check-profile` lists the key. Issue #238;
+D26; D35; D45; D60.

@@ -159,6 +159,20 @@ here the insert route goes first and the typed attempt and its read-back
 are not paid. `type_text` and `send_keys` have no such fallback: on such a
 field, use `set_value`.
 
+## `cadence_for_class` (D#238)
+
+```json
+"cadence_for_class": {"TRichEditor*": "fast_human"}
+```
+
+`fnmatch` patterns against the control's window class, each naming a
+cadence (`robot` or `fast_human`). A control that drops keystrokes posted at
+machine speed and takes them at a human pace is a fact about its class; the
+per-surface notes in `input_sensitivity` cannot say it. Precedence: a cadence
+named on the call, then this key, then `input_sensitivity`, then robot. It is
+declared, not learned: list a class after seeing it ignore robot-speed input
+and take `fast_human`.
+
 ## `notes` (D#137)
 
 What the operator knows about a control class that a session cannot

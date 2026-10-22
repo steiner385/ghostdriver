@@ -646,7 +646,7 @@ CURATED_PROFILE_KEYS = {
     "matched_profile", "denylist", "input_sensitivity", "busy_indicator",
     "safe_controls", "grid_strategy", "grid_evidence", "actuation_map", "focus_behavior",
     "posted_click_only", "hover_before_click", "notes", "text_is_label",
-    "menus_by_keyboard", "insert_first",
+    "menus_by_keyboard", "insert_first", "cadence_for_class",
 }
 RETIRED_PROFILE_KEYS = {
     "environment_allowlist": "no longer read: which targets may be driven is "
@@ -700,6 +700,8 @@ def cmd_check_profile(profile: str, operator_dir: str | None = None) -> int:
                             ("text_is_label   ", loaded.text_is_label)):
         if patterns:
             print(f"{label}: {', '.join(patterns)}")
+    if loaded.cadence_for_class:
+        print("cadence         : " + ", ".join(f"{k}={v}" for k, v in loaded.cadence_for_class.items()))
     if loaded.menus_by_keyboard:
         print("menus           : chosen by the menu's keyboard route first")
     if loaded.notes:

@@ -126,27 +126,10 @@ class _ActingCore(_DenyCore, _ExpectCore):
         )
 
     def _cadence(self, session, handle: int, requested: str | None):
-        """What to type at: the caller\'s choice, else what is known.
+        """What to type at; the precedence is in `cadence_choice` (#238)."""
+        from .cadence_choice import choose_cadence
 
-        A caller who names one gets it. Otherwise the profile decides, and
-        the surface is only worked out when some note actually distinguishes
-        surfaces -- the cheap answer costs a walk up the ancestor chain, and
-        there is no reason to pay it on a target nobody has annotated.
-        """
-        from ..cadence import ROBOT, by_name
-
-        if requested is not None:
-            return by_name(requested)
-        notes = session.profile.sensitivity
-        if not notes.notes:
-            return ROBOT
-        if all(n.surface == "*" for n in notes.notes):
-            return notes.cadence_for()
-
-        from ..backends import current
-        surface_of = current().surface_of
-
-        return notes.cadence_for(surface_of(handle))
+        return choose_cadence(session, handle, requested)
 
     def _actuator(self, session, *, verify_timeout_s: float | None = None,
                   tiers=None):
