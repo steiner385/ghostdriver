@@ -133,9 +133,22 @@ class DiscoveryTools(_VisibilityCore):
                     locators.append(locator)
 
         blocked = self._blocking(session)
+        # The profile's notes for classes in what was described (#242): they
+        # used to surface only on find/click of the class, so a session that
+        # described first never saw them until an action had failed.
+        notes: dict[str, str] = {}
+        profile = getattr(session, "profile", None)
+        if profile is not None and getattr(profile, "notes", None):
+            for tree in trees:
+                for node in tree.walk():
+                    if node.class_name not in notes and len(notes) < 12:
+                        note = profile.note_for(node.class_name)
+                        if note:
+                            notes[node.class_name] = note
         return {
             "ok": True,
             "blocked": blocked,
+            **({"notes": notes} if notes else {}),
             **({"blocked_hint": BLOCKED_HINT} if blocked else {}),
             **({"within": within} if within else {}),
             "windows": windows,
@@ -202,11 +215,20 @@ class DiscoveryTools(_VisibilityCore):
                 "locator with class=, within= or index=."
             )
         if not matches and not all_windows:
+            # Look before suggesting (#242): `hit_targets` and `find` disagreed
+            # on one window because one searched every top-level and one only
+            # the main window. Say which is the case, not just that it might be.
+            try:
+                elsewhere = len(self._resolve(session, locator, True))
+            except ValueError:
+                elsewhere = 0
             result["hint"] = (
-                "only the main window was searched. Menus, dropdowns, lookup "
-                "lists and modal dialogs are separate top-level windows; "
-                "retry with all_windows=true."
-            )
+                f"only the main window was searched, and {elsewhere} match(es) are in "
+                "other top-level windows: retry with all_windows=true." if elsewhere else
+                "only the main window was searched, and no other top-level window has a "
+                "match either. A control that exists only while something is shown -- "
+                "under the pointer, or while a menu is open -- is gone between calls.")
+            result["matches_in_other_windows"] = elsewhere
         return result
 
     def read(

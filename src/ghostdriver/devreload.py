@@ -283,6 +283,15 @@ class LiveToolbox:
                     and (result.get("error") or {}).get("kind") == "exception"
                     and not any(e.get("held") for e in surfaced)):
                 surfaced.append({"held": reloader.held_note()})
+            # Where a client decides to start a long batch, say a reconnect is
+            # still pending even though the event was surfaced once already
+            # (#242). Elsewhere a call that worked has nothing to add (D#70).
+            if (reloader.held_for and name in ("attach", "list_targets")
+                    and isinstance(result, dict)
+                    and not any(e.get("needs_reconnect") for e in surfaced)):
+                surfaced.append({"needs_reconnect": list(reloader.held_for),
+                                 "note": "a stable module changed since this server "
+                                         "started; reconnect before a long batch"})
             if surfaced and isinstance(result, dict):
                 result["dev_reload"] = surfaced if len(surfaced) > 1 else surfaced[0]
             return result
