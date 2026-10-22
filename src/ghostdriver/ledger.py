@@ -37,6 +37,10 @@ class Outcome:
     #: Where the element sat, so a note can be recorded against the surface
     #: rather than the whole target.
     surface: str = "native"
+    #: What exactly was sent -- for a click, its button, count and point --
+    #: so "the same action again" is told from a different action on the
+    #: same control (#240).
+    action: str = ""
 
 
 @dataclass(frozen=True, slots=True)

@@ -164,7 +164,7 @@ class _ActingCore(_DenyCore, _ExpectCore):
                                    tiers=tiers).perform(attempts, **kw))
 
     def _remember(self, session_id: str, tool: str, locator: str,
-                  prepared, result) -> None:
+                  prepared, result, action: str = "") -> None:
         """Record the outcome, so a later claim about it can be checked.
 
         Every actuation, not only failures: a differential needs both
@@ -181,7 +181,7 @@ class _ActingCore(_DenyCore, _ExpectCore):
             surface = "native"
         self.sessions.ledger.record(session_id, Outcome(
             locator=locator, tool=tool, cadence=prepared.cadence.name,
-            ok=bool(result.ok), surface=surface,
+            ok=bool(result.ok), surface=surface, action=action,
         ))
 
     def _focus_report(self, prepared) -> dict:
@@ -319,12 +319,17 @@ class _ActingCore(_DenyCore, _ExpectCore):
         delivered = (len(result.declined) < len(result.routes_attempted)
                      if result.routes_attempted else result.tier_used is not None)
         if delivered and not result.disturbances:
-            # Every failed actuation on this control this session, this one
-            # included -- it was recorded before this report was built.
-            count = sum(1 for o in self.sessions.ledger.outcomes(session.session_id)
-                        if o.locator == locator and not o.ok)
-            again = (f"This is delivery #{count} to this control with no effect in "
-                     "this session; the same route will not act on a retry. "
+            # Failed deliveries of *this same action* -- tool, locator and
+            # what was sent -- this session, this one included: it was
+            # recorded just before this report. A different button, point or
+            # count is a different action, not a retry (#240).
+            history = self.sessions.ledger.outcomes(session.session_id)
+            this = history[-1] if history else None
+            count = sum(1 for o in history
+                        if this is not None and not o.ok and o.locator == locator
+                        and o.tool == this.tool and o.action == this.action)
+            again = (f"This is delivery #{count} of this same action to this control "
+                     "with no effect in this session; repeating it will not act. "
                      if count >= 2 else "")
             return {
                 "outcome": "delivered_no_effect",
