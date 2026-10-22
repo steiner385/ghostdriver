@@ -7,6 +7,8 @@ must *not* do is as much a part of its contract as what it does.
 import ctypes
 from ctypes import wintypes
 
+import pytest
+
 from tests.conftest import on_windows
 
 pytestmark = on_windows
@@ -105,3 +107,29 @@ def test_a_restored_target_becomes_readable(minimized_target):
 
     restore_process(pid)
     assert len(resolve(build_tree(form), visible_form)) == 1
+
+
+# --- a target that answers only the taskbar's restore command (#234) -------------
+
+@pytest.mark.parametrize("minimized_target", [True], indirect=True)
+def test_a_vcl_style_target_comes_back_on_the_restore_command(minimized_target):
+    """A Delphi client re-shows its forms only on the system command a
+    taskbar click sends; the no-activate show alone brought nothing back."""
+    from ghostdriver.backends.windows.restore import restore_process
+
+    pid, owner, form, decoy = minimized_target
+    result = restore_process(pid)
+
+    assert owner in result.restored
+    assert form in result.newly_visible, result
+    assert result.route == "restore_command"
+    assert "restore command a taskbar click sends" in result.note
+    assert not _style(decoy) & WS_VISIBLE, "what the application kept back stays back"
+
+
+def test_an_ordinary_target_needs_no_fallback(minimized_target):
+    from ghostdriver.backends.windows.restore import restore_process
+
+    result = restore_process(minimized_target[0])
+
+    assert result.route == "" and result.newly_visible

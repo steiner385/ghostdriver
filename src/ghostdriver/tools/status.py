@@ -382,5 +382,6 @@ class StatusTools(_ToolboxCore):
                 for h in result.newly_visible
             ],
             "took_foreground": result.took_foreground,
+            **({"route": result.route} if result.route else {}),
             "note": result.note,
         }
