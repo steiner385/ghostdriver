@@ -113,6 +113,20 @@ class Profile:
     #: set_value falls through to the insert on its own; this saves the
     #: typed attempt and its read-back on a class known to need it.
     insert_first: tuple[str, ...] = ()
+    #: {class pattern: cadence name}: how a control class wants to be typed
+    #: at, declared (#238, D35). Beats the per-surface notes; a cadence
+    #: named on the call beats it.
+    cadence_for_class: dict[str, str] = field(default_factory=dict)
+
+    def class_cadence(self, class_name: str | None) -> str | None:
+        """The cadence `cadence_for_class` declares for this class, or None."""
+        import fnmatch
+
+        name = class_name or ""
+        for pattern, cadence in self.cadence_for_class.items():
+            if fnmatch.fnmatchcase(name, pattern):
+                return cadence
+        return None
 
     def inserts_first(self, class_name: str | None) -> bool:
         """Whether `insert_first` names this class."""
@@ -228,6 +242,15 @@ class Profile:
                 f"profile {location} has an unreadable menus_by_keyboard: true or "
                 f"false; got {by_keyboard!r}",
             )
+        per_class = document.get("cadence_for_class") or {}
+        from .cadence import CADENCES
+        if (not isinstance(per_class, dict)
+                or not all(isinstance(k, str) and k and v in CADENCES for k, v in per_class.items())):
+            raise GhostdriverError(
+                ErrorKind.DENIED_BY_POLICY,
+                f"profile {location} has an unreadable cadence_for_class: an object of "
+                f"{{\"<class pattern>\": one of {sorted(CADENCES)}}}; got {per_class!r}",
+            )
         inserted = document.get("insert_first") or []
         if not isinstance(inserted, list) or not all(isinstance(c, str) and c for c in inserted):
             raise GhostdriverError(
@@ -264,6 +287,7 @@ class Profile:
             notes=dict(notes),
             menus_by_keyboard=by_keyboard,
             insert_first=tuple(inserted),
+            cadence_for_class=dict(per_class),
         )
 
     @classmethod
