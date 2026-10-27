@@ -9151,3 +9151,21 @@ each attach. How long an approval lasts depends on configuration and stays
 where it is true, in the `lifetime` sentence of a consent request.
 
 **Evidence.** `tests/test_consent_summary.py` (`env: any`). Issue #252.
+### D#250. `absent` searches every window unless told not to
+
+**What was seen.** Every `{locator, absent: true}` that named a dialog had
+to carry `all_windows: true` as well. Without it, the D#118 pre-check
+refused, because the dialog does not resolve in the main window. This cost
+two round trips each time: once in the Outlook Open dialog (2026-10-27) and
+again across the VendorApp client's prompts (2026-10-22).
+
+**Decision.** `absent` defaults to every top-level window, and
+`all_windows: false` narrows it. Other expects keep the main-window
+default. The asymmetry is deliberate. What goes away is usually a dialog,
+which is a window of its own. And "gone" is a claim about everywhere, so the
+wider scope can only make the condition harder to meet. It cannot turn into
+a false green (D#71), which a wider scope on a *presence* expect could.
+
+**Evidence.** `tests/test_expect_absent.py`: unasked, the resolver is
+called with every window; with `all_windows: false`, with the main window
+only (`env: any`). Issue #250; D#118.

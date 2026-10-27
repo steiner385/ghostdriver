@@ -81,6 +81,23 @@ def test_an_absent_expect_holds_once_the_locator_stops_resolving(box, monkeypatc
     assert resolver.scopes and all(resolver.scopes), "the expect's window scope is used"
 
 
+def test_an_absent_expect_searches_every_window_unless_told_not_to(box, monkeypatch):
+    """A dialog is a window of its own, and "gone" means gone everywhere
+    (#250): the wider scope is the default, the narrower one is asked for."""
+    resolver = Resolver(present=True)
+    monkeypatch.setattr(box, "_resolve", resolver)
+
+    condition, _ = box._expectation(None, {"locator": "class=#32770", "absent": True})
+    condition.holds()
+    assert resolver.scopes and all(resolver.scopes), "every window, unasked"
+
+    resolver.scopes.clear()
+    condition, _ = box._expectation(
+        None, {"locator": "class=#32770", "absent": True, "all_windows": False})
+    condition.holds()
+    assert resolver.scopes and not any(resolver.scopes), "the main window, when asked"
+
+
 def test_an_absent_expect_on_something_not_there_is_refused_not_satisfied(box, monkeypatch):
     """A postcondition that cannot fail is a false green (D#71): the locator
     must resolve *before* the action for its absence afterwards to mean it."""
