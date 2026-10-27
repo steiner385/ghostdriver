@@ -221,10 +221,18 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     @server.tool(annotations=READS, description=(
         "Every process that owns windows, with how many top-level windows "
         "each has and whether a session is already open against it. Start "
-        "here, then `attach` to the pid you want."
+        "here, then `attach` to the pid you want. `name` (a glob on the "
+        "process name, e.g. olk*) and `visible_only` narrow the list when you "
+        "know what you are looking for."
     ))
-    def list_targets() -> dict[str, Any]:
-        return box.list_targets()
+    def list_targets(
+        name: Annotated[str | None, Field(description=(
+            "Only processes whose name matches this case-insensitive glob, "
+            "e.g. 'olk*' or 'vendorapp.exe'."))] = None,
+        visible_only: Annotated[bool, Field(description=(
+            "Only processes with at least one visible top-level window."))] = False,
+    ) -> dict[str, Any]:
+        return box.list_targets(name=name, visible_only=visible_only)
 
     @server.tool(description=(
         "Record which targets the operator has approved for automation in "
