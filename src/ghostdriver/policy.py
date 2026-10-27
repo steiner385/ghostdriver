@@ -196,6 +196,31 @@ class Grant:
     def when(self) -> str:
         return time.strftime("%H:%M:%S", time.localtime(self.at))
 
+    def summary(self) -> dict:
+        """The decision as attach reports it (#252): when, and what it covers.
+
+        An approval kept from an earlier server run reads the same as one
+        given a minute ago unless it is dated, and the caller deciding
+        whether to ask again needs to know which. It also says that an
+        approval sets no tier -- the tier is chosen at each attach -- so
+        nobody infers one from it.
+        """
+        described: dict = {
+            "source": self.source.value,
+            "note": self.note,
+            "granted_at": time.strftime("%Y-%m-%d %H:%M", time.localtime(self.at)),
+        }
+        if self.restored:
+            described["restored"] = True
+        if self.inherited_from is not None:
+            described["inherited_from"] = self.inherited_from
+        if self.standing_for:
+            described["standing_for"] = self.standing_for
+        described["covers"] = (
+            "this process and the processes it starts; it sets no tier -- "
+            "the tier is chosen at each attach")
+        return described
+
 
 # --- endpoints, for informing a decision rather than making one ----------
 

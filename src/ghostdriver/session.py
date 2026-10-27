@@ -345,10 +345,7 @@ class Session:
             "tier": self.tier.value,
             **({"not_at_this_tier": excluded} if excluded else {}),
             "matched_profile": self.profile.matched_profile,
-            "consent": {
-                "source": self.grant.source.value,
-                "note": self.grant.note,
-            },
+            "consent": self.grant.summary(),
             "denylist_patterns": len(self.profile.denylist),
             "deny_regions": len(self.profile.deny_regions),
         }

@@ -9133,6 +9133,24 @@ ordered before the probed one, the offer carries how each matched, and the
 hint names the declared one (`env: any`). Against the operator's real
 directory the curated profile is now offered first. Issue #246; D#242; D35.
 
+### D#252. Attach dates the approval it acts on, and says it sets no tier
+
+**What was seen.** An attach to Outlook on 2026-10-27 reported an approval
+recorded on 10/21 and kept across server runs (R1a). The result showed its
+source and note but not when it was given, nor that it had been kept. So
+the caller could not tell a fresh approval from a week-old one when
+deciding whether to ask again. It also could not tell what tier had been
+approved, because an approval approves none.
+
+**Decision.** Attach's `consent` is `Grant.summary()`. It always carries
+`source`, `note`, `granted_at` (local date and time) and `covers`. It adds
+`restored`, `inherited_from` and `standing_for` only when they apply.
+`covers` says what an approval reaches: this process and the ones it starts.
+It also says that an approval sets no tier, because the tier is chosen at
+each attach. How long an approval lasts depends on configuration and stays
+where it is true, in the `lifetime` sentence of a consent request.
+
+**Evidence.** `tests/test_consent_summary.py` (`env: any`). Issue #252.
 ### D#250. `absent` searches every window unless told not to
 
 **What was seen.** Every `{locator, absent: true}` that named a dialog had
