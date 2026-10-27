@@ -9151,3 +9151,21 @@ a false green (D#71), which a wider scope on a *presence* expect could.
 **Evidence.** `tests/test_expect_absent.py`: unasked, the resolver is
 called with every window; with `all_windows: false`, with the main window
 only (`env: any`). Issue #250; D#118.
+
+### D#254. `list_targets` narrows by process name and by having something on screen
+
+**What was seen.** On a field laptop, 153 processes came back as about 15 KB
+of JSON, all to find one pid (olk.exe). Most entries were tray agents and
+helpers with no window on screen.
+
+**Decision.** `list_targets` takes `name`, a case-insensitive glob on the
+process name, applied before any window is enumerated. It also takes
+`visible_only`, which keeps only processes with at least one visible
+top-level window. Both are off by default, so the list a person is shown
+when deciding what to allow is still the whole one. A filtered result says
+what filter was applied (`filter`).
+
+**Evidence.** `tests/test_list_targets_filter.py` stands in the backend and
+the process list, so it runs on every platform (`env: any`). The test caught
+an existing local `name` in the loop shadowing the new parameter. That local
+is now `shown`. Issue #254.

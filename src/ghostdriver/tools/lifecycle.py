@@ -23,13 +23,21 @@ from .profiles import profile_names, profile_offer, server_generation
 class LifecycleTools(_LiveCore):
     """Finding targets, consenting to them, attaching, launching and releasing."""
 
-    def list_targets(self) -> dict:
+    def list_targets(self, name: str | None = None, visible_only: bool = False) -> dict:
         """Every process that owns windows, and what it is connected to.
 
         The endpoint is here because this is the list a person is shown when
         deciding which targets to allow. "the client" is not enough to
         answer with; "the client, connected to the dev gateway" is.
+
+        `name` (a case-insensitive glob on the process name) and
+        `visible_only` narrow it for a caller who knows what it is looking
+        for (#254): a laptop lists a hundred and more processes, most of
+        them tray agents with nothing on screen. Both are off by default,
+        so the list a person decides from is the whole one.
         """
+        import fnmatch
+
         import psutil
 
         from ..backends import current
@@ -47,11 +55,13 @@ class LifecycleTools(_LiveCore):
         targets = []
         for process in psutil.process_iter(["pid", "name"]):
             pid = process.info["pid"]
+            if name and not fnmatch.fnmatch((process.info["name"] or "").lower(), name.lower()):
+                continue
             try:
                 windows = top_level_windows(pid)
             except OSError:
                 continue
-            if not windows:
+            if not windows or (visible_only and not any(map(winapi.is_visible_style, windows))):
                 continue
             try:
                 endpoints = extract_endpoints(psutil.Process(pid).cmdline())
@@ -64,10 +74,10 @@ class LifecycleTools(_LiveCore):
             kind, note = classify_process(
                 [winapi.class_name(h) for h in windows]
             )
-            name, name_extra = self._named_target(pid, process.info["name"])
+            shown, name_extra = self._named_target(pid, process.info["name"])
             targets.append({
                 "pid": pid,
-                "name": name,
+                "name": shown,
                 **name_extra,
                 "top_level_windows": len(windows),
                 "endpoints": [e.normalized for e in endpoints],
@@ -88,6 +98,8 @@ class LifecycleTools(_LiveCore):
             "server_generation": server_generation(),
             "targets": targets[:MAX_ELEMENTS],
             "total": len(targets),
+            **({"filter": {"name": name, "visible_only": visible_only}}
+               if name or visible_only else {}),
             "note": (
                 "No target may be automated until the operator approves it "
                 "for this session. Show them the candidates and ask which "
