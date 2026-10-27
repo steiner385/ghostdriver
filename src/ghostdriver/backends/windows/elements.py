@@ -3,10 +3,12 @@
 The walk produces `AccessibleElement`s under a window; the actions drive
 one through the pattern it publishes, or -- when it publishes none that
 fits, which on a Profile L1 target is every element -- through a posted
-click on its host window at the element's own rectangle. Nothing here
-activates a window: patterns are in-process calls the provider handles on
-its own thread, and the posted click is the same pair `input.click` sends
-to a window, aimed inside it.
+click on its host window at the element's own rectangle. The posted click
+is the same pair `input.click` sends to a window, aimed inside it, and
+activates nothing. A pattern call is the provider's to carry out, and a
+Chromium provider brings its window to the front for every one of them
+(measured, #249), so on the person's desktop a Chromium host gets no
+pattern call at all.
 
 Every entry point creates its own UIA client: COM is apartment-bound, and
 a hidden-desktop session runs these on a worker thread. A client made on
@@ -32,6 +34,13 @@ MAX_ELEMENTS = 2000
 MAX_DEPTH = 24
 
 _ACTION_PATTERNS = ("SelectionItem", "Invoke", "Toggle", "ExpandCollapse")
+
+#: Hosts whose provider takes the foreground to carry out a pattern call:
+#: Chromium, and so Edge, Chrome, Electron and WebView2. Measured on the
+#: operator's desktop, 2026-10-27: Invoke, Select, Toggle, ExpandCollapse
+#: and SetValue each brought the window to the front (7 of 7), while the
+#: posted click and posted typing worked and took nothing (0 of 6) (#249).
+FOREGROUND_TAKING_HOSTS = ("Chrome_WidgetWin_*", "Chrome_RenderWidgetHostHWND")
 
 
 class ElementError(RuntimeError):
@@ -241,6 +250,26 @@ def _live(element: AccessibleElement):
            "surface, such as a web view, may hold it further down)" if seen >= MAX_ELEMENTS else ""))
 
 
+def _refuse_a_foreground_taker(element: AccessibleElement) -> None:
+    """Decline a pattern call that would take the person's foreground (#249).
+
+    Declined by name, so the result says why the rung was skipped; never
+    tried and reported afterwards, because a disturbance report does not
+    give the desktop back. A hidden-desktop session is exempt: a window
+    there has no foreground to take from anyone.
+    """
+    import fnmatch
+
+    from .hidden_desktop import on_input_desktop
+
+    if (any(fnmatch.fnmatchcase(element.host_class or "", p) for p in FOREGROUND_TAKING_HOSTS)
+            and on_input_desktop()):
+        raise ElementError(
+            f"not tried: a pattern call on a {element.host_class} host brings its "
+            "window to the front, taking the desktop from the person using it "
+            "(measured, #249); the posted route is the one that leaves it alone")
+
+
 def act_via_pattern(element: AccessibleElement) -> bool:
     """Tier 1: the first fitting pattern the element publishes.
 
@@ -254,6 +283,7 @@ def act_via_pattern(element: AccessibleElement) -> bool:
     and the actuator records the message as this rung's `declined` reason
     (D#145); the ladder still falls through to the next rung.
     """
+    _refuse_a_foreground_taker(element)
     fitting = [p for p in _ACTION_PATTERNS if p in element.patterns]
     if not fitting:
         published = ", ".join(element.patterns) or "none"
@@ -439,6 +469,7 @@ def set_value_via_pattern(element: AccessibleElement, text: str) -> bool:
     Which is why it is offered only under a commit expectation."""
     if "Value" not in element.patterns:
         return False
+    _refuse_a_foreground_taker(element)
     try:
         UIA, live = _live(element)
         live.GetCurrentPattern(PATTERN_IDS["Value"]) \

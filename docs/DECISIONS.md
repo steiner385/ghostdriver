@@ -9187,3 +9187,40 @@ what filter was applied (`filter`).
 the process list, so it runs on every platform (`env: any`). The test caught
 an existing local `name` in the loop shadowing the new parameter. That local
 is now `shown`. Issue #254.
+
+### D#249. On the person's desktop, a Chromium host gets no UIA pattern call
+
+**What was seen.** New Outlook (WebView2) on 2026-10-27: a click on the
+Drafts folder worked through the posted rung. Outlook never reported the
+item `selected`, so the expect failed and the ladder fell through to
+SelectionItem.Select, and Outlook came to the front. The cause was then
+measured on the operator's desktop with a real Edge `--app` window on a
+scratch page. Every UIA pattern call took the foreground and worked: Invoke,
+SelectionItem.Select, Toggle, ExpandCollapse, and Value.SetValue on a
+checkbox and on a field, 7 of 7. Every posted route worked and took
+nothing: clicks on a button, a tab, a checkbox and a tree item, and typing
+into a field, 0 of 6.
+
+**Decision.** On a host matching `Chrome_WidgetWin_*` or
+`Chrome_RenderWidgetHostHWND`, `act_via_pattern` and `set_value_via_pattern`
+decline before calling anything, with a reason that names #249. The ladder
+reports it as that rung's `declined`. They are declined, not tried and
+reported, because a disturbance report does not give the desktop back
+(D28 still reports any take). The gate holds only on the input desktop: a
+hidden-desktop session's window has no foreground to take, so the fixture's
+SetValue-commits measurement (D30) still runs there. A desktop this server
+made (`ghostdriver-…`) counts as nobody's. Otherwise, a desktop that cannot
+be identified counts as the person's.
+
+**Not covered.** The window-level `click_via_uia` and `set_value_via_uia` in
+`input.py` (an HWND's own pattern) are not gated. A Chromium top-level window
+was not seen publishing Invoke or Value, so this is unmeasured, not
+decided. Also loose: after posted typing, `send_keys ["end", "x"]` did not
+change the field. That is unexplained and tracked on #249.
+
+**Evidence.** The measurement is in the issue comment on #249.
+`tests/test_windows_chromium_pattern_gate.py` covers the gate on both hosts,
+the hidden-desktop exemption, a native host passing through, and a
+`ghostdriver-` desktop's own thread answering "not the input desktop"
+(`env: windows`). `tests/test_windows_web.py` (hidden desktop) still takes
+tier 1. Issue #249; D21, D30, D28.

@@ -87,6 +87,14 @@ user32.SetThreadDesktop.argtypes = [wintypes.HANDLE]
 user32.SetThreadDesktop.restype = wintypes.BOOL
 user32.CloseDesktop.argtypes = [wintypes.HANDLE]
 user32.CloseDesktop.restype = wintypes.BOOL
+user32.GetThreadDesktop.argtypes = [wintypes.DWORD]
+user32.GetThreadDesktop.restype = wintypes.HANDLE
+user32.OpenInputDesktop.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+user32.OpenInputDesktop.restype = wintypes.HANDLE
+user32.GetUserObjectInformationW.argtypes = [
+    wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+    ctypes.POINTER(wintypes.DWORD)]
+user32.GetUserObjectInformationW.restype = wintypes.BOOL
 kernel32.CreatePipe.argtypes = [
     ctypes.POINTER(wintypes.HANDLE), ctypes.POINTER(wintypes.HANDLE),
     ctypes.POINTER(SECURITY_ATTRIBUTES), wintypes.DWORD]
@@ -286,3 +294,37 @@ class HiddenDesktop:
         if self._desktop:
             user32.CloseDesktop(self._desktop)
             self._desktop = None
+
+
+def _desktop_name(handle) -> str | None:
+    buffer = ctypes.create_unicode_buffer(256)
+    needed = wintypes.DWORD()
+    if not user32.GetUserObjectInformationW(handle, 2, buffer, ctypes.sizeof(buffer),  # UOI_NAME
+                                            ctypes.byref(needed)):
+        return None
+    return buffer.value
+
+
+def on_input_desktop() -> bool:
+    """Whether the calling thread works on the desktop the person is using.
+
+    A hidden-desktop session runs its calls on a thread bound to its own
+    desktop, and a window there has no foreground to take from anyone; a
+    session attached to a running target works on the input desktop, where
+    it does. A desktop this server made (`ghostdriver-…`, see `launch`) is
+    nobody's, whatever else can be read. Otherwise unknown counts as yes --
+    the input desktop cannot be opened while a secure desktop is up, nor in
+    a service session -- because the answer guards the person's foreground,
+    and a wrong "no" is the one that costs them.
+    """
+    mine = _desktop_name(user32.GetThreadDesktop(kernel32.GetCurrentThreadId()))
+    if mine is not None and mine.startswith("ghostdriver"):
+        return False
+    handle = user32.OpenInputDesktop(0, False, 0x0001)  # DESKTOP_READOBJECTS
+    if not handle:
+        return True
+    try:
+        theirs = _desktop_name(handle)
+    finally:
+        user32.CloseDesktop(handle)
+    return mine is None or theirs is None or mine == theirs
