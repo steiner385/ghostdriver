@@ -229,18 +229,23 @@ class _ExpectCore(_ToolboxCore):
         dialog that never opened. So a locator that does not resolve before
         the action is refused by name, not quietly satisfied. Needs no
         backend of its own: the resolver is the whole of it.
+
+        Every top-level window is searched unless the expect says
+        `all_windows: false` (#250). What goes away is usually a dialog,
+        which is a window of its own, and "gone" is a claim about
+        everywhere: the wider scope only makes the condition harder to
+        meet, never easier, so it cannot turn into a false green.
         """
         from ..actuate import Condition
 
         where = expect["locator"]
         Locator.parse(where)  # raises ValueError, caught by the caller
-        all_windows = bool(expect.get("all_windows", False))
+        all_windows = bool(expect.get("all_windows", True))
         if not self._resolve(session, where, all_windows):
             raise ValueError(
                 f"absent: {where} does not resolve before the action, so its "
                 "absence afterwards would prove nothing. Name something that is "
-                "there now and should go away (add all_windows: true if it is "
-                "a separate top-level window)")
+                "there now and should go away")
 
         def gone() -> bool:
             return not self._resolve(session, where, all_windows)
