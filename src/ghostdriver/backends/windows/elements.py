@@ -318,6 +318,42 @@ def act_via_pattern(element: AccessibleElement) -> bool:
     return True
 
 
+def _refuse_a_rect_outside_its_window(element: AccessibleElement) -> None:
+    """Decline a posted click whose element says it lies outside its own
+    window (#257).
+
+    The click goes where the element's rectangle says it is drawn, so a
+    rectangle that is wrong sends the click to whatever is drawn there
+    instead. Measured on a Chromium host on a second monitor at a different
+    scale: at one window position the rows were reported where they were
+    not drawn, and the click aimed at Row 3 landed on Row 4; at another
+    position the same page reported true. No correction
+    fitted both. What a wrong rectangle can show is this: Row 3 ended at
+    x=2934 in a window ending at x=2820. An element cannot be drawn where
+    its window is not, so that rectangle is wrong, and nothing posted from
+    it can be trusted to land on it. A smaller shift that stays inside the
+    window passes this check; an expect naming the click's result is what
+    catches that.
+
+    The check is against the top-level window, not the host: a row
+    scrolled half out of its list still lies inside the window that holds
+    the list. A row cut off at the window's own edge is refused too, and
+    the message says to scroll it into view.
+    """
+    window = winapi.window_rect(winapi.root_window(element.host_handle))
+    if window == (0, 0, 0, 0):
+        return  # no window to compare with; ScreenToClient will say so
+    left, top, right, bottom = element.rect
+    w_left, w_top, w_right, w_bottom = window
+    if left < w_left or top < w_top or right > w_right or bottom > w_bottom:
+        raise ElementError(
+            f"not tried: the element reports {element.rect}, which is not inside its "
+            f"window {window}, so a click aimed by it could land on something else "
+            "(measured on a Chromium host on a monitor at another scale, #257). If "
+            "it is cut off at the window's edge, scroll it into view; otherwise "
+            "keep the window maximized, which measured true")
+
+
 def click_posted(element: AccessibleElement, *, button: str = "left",
                  modifiers=(), at=None, count: int = 1, hover: bool = False) -> bool:
     """Tier 3: the button pair, posted to the host window at the element.
@@ -327,10 +363,14 @@ def click_posted(element: AccessibleElement, *, button: str = "left",
     origin. That is what makes this work on a target whose elements
     publish no pattern at all: the host window handles the click exactly
     as it would one from a person, at the place the element is drawn.
+
+    A rectangle that lies outside its own window is refused rather than
+    clicked (#257).
     """
     left, top, right, bottom = element.rect
     if right <= left or bottom <= top:
         return False
+    _refuse_a_rect_outside_its_window(element)
     if at is None:
         point = wintypes.POINT((left + right) // 2, (top + bottom) // 2)
     else:

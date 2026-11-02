@@ -9242,3 +9242,40 @@ D35).
 
 **Evidence.** `tests/test_profile_discovery.py::test_find_still_answers_when_it_cannot_look_in_other_windows`
 (`env: any`). Issue #258.
+
+### D#257. A posted click is not aimed by a rectangle outside its own window
+
+**What was seen.** On 10/29 a posted click on Outlook's Drafts folder landed
+on Notes. Outlook (a WebView2 host) was on the second monitor, which runs
+at 100% while the primary runs at 125%. The server is DPI-unaware.
+Re-measured read-only with Outlook maximized there: the element rectangles
+and the click conversion were both correct, so the 10/29 window state is
+unknown. An Edge test window on the same monitor showed the fault: at one
+window position the rows were reported where they were not drawn, and the
+click aimed at Row 3 landed on Row 4. At another position the same page
+reported true. No correction fitted both positions. A hit test before the
+click (ElementFromPoint) was ruled out: it answers with whatever window is
+on top, and ghostdriver clicks windows that are behind others.
+
+**Decision.** One thing a wrong rectangle can show is that it lies outside
+its window. In the measured case, Row 3 ended at x=2934 in a window ending
+at x=2820. An element cannot be drawn where its window is not, so
+`click_posted` refuses a rectangle that is not inside its top-level
+window's rectangle. It raises `ElementError` naming #257 before anything is
+posted, and the ladder reports that as the rung's `declined`. The check is
+against the top-level window, not the host, so a row scrolled half out of
+its list still passes. A row cut off at the window's own edge is refused
+too, and the message says to scroll it into view. This guard covers every
+host, not only Chromium: a rectangle outside its window is wrong wherever
+it comes from. Typing into an element and sending keys to one focus it
+through the same click, so they inherit the guard.
+
+**Not covered.** A shift small enough to stay inside the window passes. An
+expect that names the click's result is what catches that, which is why
+the `outlook-new` profile asks for one on every click. The cause of the
+shift is not known.
+
+**Evidence.** The measurements are on #257.
+`tests/test_windows_rect_guard.py` covers the measured rectangle, each edge,
+a rectangle inside, and one on the window's own edges (`env: windows`).
+Issue #257; D10, D33, D#249.
