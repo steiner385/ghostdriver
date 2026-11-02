@@ -132,3 +132,19 @@ def test_find_says_when_no_other_window_has_it_either(box, monkeypatch):
     result = box.find("s", "class=THtObjectToolBar")
     assert result["matches_in_other_windows"] == 0
     assert "gone between calls" in result["hint"]
+
+
+def test_find_still_answers_when_it_cannot_look_in_other_windows(box, monkeypatch):
+    """The look elsewhere is advice (#258): its failure is said, and the
+    main-window answer stands. Unknown is null, not zero."""
+    def resolve(session, locator, all_windows):
+        if all_windows:
+            raise RuntimeError("the accessibility surface is unavailable")
+        return []
+
+    monkeypatch.setattr(box, "_resolve", resolve)
+    result = box.find("s", "type=Document")
+
+    assert result["ok"] and result["match_count"] == 0
+    assert result["matches_in_other_windows"] is None
+    assert "could not be looked at" in result["hint"] and "unavailable" in result["hint"]

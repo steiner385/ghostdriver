@@ -9224,3 +9224,21 @@ the hidden-desktop exemption, a native host passing through, and a
 `ghostdriver-` desktop's own thread answering "not the input desktop"
 (`env: windows`). `tests/test_windows_web.py` (hidden desktop) still takes
 tier 1. Issue #249; D21, D30, D28.
+
+### D#258. `find`'s look in the other windows reports its own failure
+
+**What was seen.** While measuring #257, `find("type=Document")` matched
+nothing in the main window. Its #242 follow-up, which counts matches in
+the other top-level windows, raised `ElementError` (the Chromium
+accessibility surface was momentarily unavailable). The whole `find` then
+failed with a traceback, because the follow-up caught only `ValueError`.
+
+**Decision.** The follow-up is advice, so a failure in it is reported and
+never raised. `find` returns its main-window answer, with
+`matches_in_other_windows: null` and a hint naming why the other windows
+could not be looked at. It is null, not 0: "could not look" is not "none
+there", and reporting 0 would be the reassuring-but-wrong answer (D10,
+D35).
+
+**Evidence.** `tests/test_profile_discovery.py::test_find_still_answers_when_it_cannot_look_in_other_windows`
+(`env: any`). Issue #258.
