@@ -218,16 +218,29 @@ class DiscoveryTools(_VisibilityCore):
             # Look before suggesting (#242): `hit_targets` and `find` disagreed
             # on one window because one searched every top-level and one only
             # the main window. Say which is the case, not just that it might be.
+            # The look is advice, so its failure is reported, not raised: the
+            # main-window answer stands, and "could not look" is not "none
+            # there" (#258).
+            elsewhere: int | None
             try:
                 elsewhere = len(self._resolve(session, locator, True))
             except ValueError:
                 elsewhere = 0
-            result["hint"] = (
-                f"only the main window was searched, and {elsewhere} match(es) are in "
-                "other top-level windows: retry with all_windows=true." if elsewhere else
-                "only the main window was searched, and no other top-level window has a "
-                "match either. A control that exists only while something is shown -- "
-                "under the pointer, or while a menu is open -- is gone between calls.")
+            except Exception as exc:
+                elsewhere = None
+                unlooked = str(exc)
+            if elsewhere is None:
+                result["hint"] = (
+                    "only the main window was searched, and the other top-level windows "
+                    f"could not be looked at ({unlooked}), so whether they hold a match "
+                    "is unknown: retry with all_windows=true.")
+            else:
+                result["hint"] = (
+                    f"only the main window was searched, and {elsewhere} match(es) are in "
+                    "other top-level windows: retry with all_windows=true." if elsewhere else
+                    "only the main window was searched, and no other top-level window has a "
+                    "match either. A control that exists only while something is shown -- "
+                    "under the pointer, or while a menu is open -- is gone between calls.")
             result["matches_in_other_windows"] = elsewhere
         return result
 
