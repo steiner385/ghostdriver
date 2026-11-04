@@ -93,7 +93,8 @@ class SetValueTools(_ActingCore):
                 lambda: confirms_value(handle, wanted)) is True
 
         try:
-            commit, described = self._expectation(prepared.session, expect)
+            commit, described = self._expectation(prepared.session, expect,
+                                                  carries_text=True)
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
         if commit is None:

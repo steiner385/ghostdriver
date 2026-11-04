@@ -9279,3 +9279,42 @@ shift is not known.
 `tests/test_windows_rect_guard.py` covers the measured rectangle, each edge,
 a rectangle inside, and one on the window's own edges (`env: windows`).
 Issue #257; D10, D33, D#249.
+
+### D#248. `changed` is refused on an action whose effect is text
+
+**What was seen.** On 2026-10-22 a `type_text` into `TWPRichText` (VendorApp
+client's Text Object Editing dialog) with `expect={changed: true}` at
+`fast_human` returned `ok: false`, `outcome: delivered_no_effect`, and a
+hand-off asking a person to click the control. A capture straight
+afterwards showed every character had landed.
+
+**Why.** `changed` compares the shape digest, the set of top-level windows
+and `blocked_by` (D77, #194). Text painted inside a control that keeps its
+size moves none of them. So `{changed: true}` could never be met by text
+entry into an owner-drawn editor, and a miss read as "nothing happened"
+when something had. A caller who believes that retries and types the text
+twice, or hands a finished step to a person.
+
+**Decision.** `type_text`, `set_value`, and `send_keys` with any
+single-character key refuse `changed: true` before anything is sent, with
+a message that says it cannot see text and names what to use instead: a
+`locator` with the `text` it will read, a control the text makes appear,
+or a capture. This is the same shape as the refusal of an expect that
+already holds (#128): a postcondition that cannot report the effect is
+refused, not run. `send_keys` with named keys alone (`enter`, `escape`)
+keeps `changed`, because those keys can open or close a window, which
+`changed` does see. The character test is the one `send_keys` already uses
+to refuse a protected field.
+
+**Not chosen.** Comparing the target control's pixels under `changed` on
+these tools. It would see painted text, but a pixel diff also moves on a
+caret blink or a hover tint, so it is weaker evidence and would
+need its own field rather than `verified: effect`. It can be added later
+as its own expect key if a field case needs it. The 2026-10-21 note that
+`TWPRichText` ignored `type_text` at robot cadence was measured with
+`changed`, so it is unproven either way until it is re-measured with a
+capture.
+
+**Evidence.** `tests/test_changed_blind_to_text.py` (`env: any`) checks
+each tool refuses before `_perform` is reached, and that named keys alone
+still build a `changed` condition. Issue #248; D77, D#128, D10.

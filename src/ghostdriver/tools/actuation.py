@@ -196,7 +196,8 @@ class ActuationTools(_ActingCore):
         verbs = current().verbs
 
         try:
-            after, described = self._expectation(prepared.session, expect)
+            after, described = self._expectation(prepared.session, expect,
+                                                 carries_text=True)
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
         attempts = (
@@ -274,7 +275,11 @@ class ActuationTools(_ActingCore):
             )
 
         try:
-            after, described = self._expectation(prepared.session, expect)
+            # A character is text, which `changed` cannot see (#248); a
+            # named key alone can open or close a window, which it can.
+            after, described = self._expectation(
+                prepared.session, expect,
+                carries_text=any(len(k) == 1 for k in keys))
         except ValueError as exc:
             return _error(ErrorKind.NOT_FOUND, f"expect is unusable: {exc}")
         result = self._perform(prepared.session,

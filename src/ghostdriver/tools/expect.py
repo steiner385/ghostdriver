@@ -12,6 +12,21 @@ EXPECT_KEYS = frozenset({"locator", "text", "selected", "changed", "timeout_s",
                          "all_windows", "absent"})
 
 
+#: Why `changed` is refused on an action that enters text (#248). The shape
+#: digest, the top-level windows and `blocked_by` are what `changed`
+#: compares, and text painted inside a control that keeps its size moves
+#: none of them. A `changed` there would report `delivered_no_effect` on
+#: text that landed -- the caller retries and types it twice.
+BLIND_TO_TEXT = (
+    "`changed: true` cannot see text: it compares the surface's shape, its "
+    "top-level windows and whether it is held, and typed text inside a "
+    "control changes none of them, so it would read as no effect when the "
+    "text landed. Name the result instead -- a `locator` with the `text` it "
+    "will read, a control the text will make appear -- or verify with a "
+    "capture. On send_keys, `changed` is accepted for named keys alone "
+    "(enter, escape), whose effect can be a window opening or closing")
+
+
 def parse_expect(expect: dict | str | None) -> dict | None:
     """The `expect` a caller sent, as the dict the tools read -- None for no
     expectation, or ValueError saying what is wrong with it.
@@ -87,17 +102,24 @@ def verify_window(expect: dict | str | None) -> float | None:
 class _ExpectCore(_ToolboxCore):
     """Turns a caller's `expect` into a re-checked condition."""
 
-    def _expectation(self, session, expect: dict | str | None):
+    def _expectation(self, session, expect: dict | str | None, *,
+                     carries_text: bool = False):
         """Turn a caller\'s `expect` into a condition, re-resolved each time.
 
         Re-resolved, not a held handle: the element that proves an action
         worked may not exist until it has. The locator is parsed here,
         before anything is sent, so a bad one is an error, not an unmet
         condition -- the two look identical outside and mean opposites.
+
+        `carries_text` is set by an action whose effect is text -- typing,
+        setting a value, sending characters. `changed` cannot see text, so
+        it is refused for those before anything is sent (#248).
         """
         expect = parse_expect(expect)  # raises ValueError, caught by the caller
         if expect is None:
             return None, None
+        if carries_text and expect.get("changed"):
+            raise ValueError(BLIND_TO_TEXT)
         if expect.get("absent"):
             return self._absence(session, expect)
 
