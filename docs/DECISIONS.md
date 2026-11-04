@@ -9280,6 +9280,23 @@ shift is not known.
 a rectangle inside, and one on the window's own edges (`env: windows`).
 Issue #257; D10, D33, D#249.
 
+**Follow-up: descending into a child window converts once.** The same
+investigation found the two conversions disagreeing on that monitor:
+`ClientToScreen` scaled x by the primary's 1.25 and `ScreenToClient` did
+not. `deepest_child_at` chained them at every descent into a windowed
+child (D66), so a point reaching a child could move by a quarter of its
+distance from the screen origin. It did not descend in the measured
+Outlook case, so this is not shown to be the 10/29 miss. Every hop is now
+converted from one screen point with `ScreenToClient` alone, the call that
+already places the element's rectangle in its host's client area, so a
+descent no longer mixes the two. The screen point is recovered from the
+host's origin as `ScreenToClient` reports it, which lets the `click_window`
+path, which starts from a client point, share it. Not measured on a
+mixed-DPI desktop: no machine with one was reachable from this session.
+`tests/test_windows_child_descent.py` builds the measured disagreement into
+a stood-in window tree and checks the point reaches the child unmoved; it
+fails on the chained version.
+
 ### D#248. `changed` is refused on an action whose effect is text
 
 **What was seen.** On 2026-10-22 a `type_text` into `TWPRichText` (VendorApp

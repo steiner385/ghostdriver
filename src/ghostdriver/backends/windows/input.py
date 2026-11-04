@@ -336,7 +336,20 @@ def deepest_child_at(hwnd: int, x: int, y: int) -> tuple[int, int, int]:
     nothing that way (D66). A person's click goes to the window under the
     pointer; so does this. (`hwnd`, x, y) comes back when nothing is under
     the point but `hwnd` itself.
+
+    Every hop is converted from one screen point with `ScreenToClient`
+    alone, never `ClientToScreen` and back (#257). On a monitor whose scale
+    differs from the primary's, this DPI-unaware server measured the two
+    disagreeing: `ClientToScreen` scaled x by the primary's 1.25 and
+    `ScreenToClient` did not, so chaining them moved the point by a quarter
+    of its distance from the screen origin at every descent. The screen
+    point is recovered from `hwnd`'s own origin as `ScreenToClient` reports
+    it, the same call that put the element's rectangle into `hwnd`'s client
+    coordinates in the first place.
     """
+    origin = wintypes.POINT(0, 0)
+    user32.ScreenToClient(wintypes.HWND(hwnd), ctypes.byref(origin))
+    sx, sy = x - origin.x, y - origin.y
     current, cx, cy = hwnd, x, y
     for _ in range(32):  # a window tree is not that deep; a loop here is a bug
         child = user32.ChildWindowFromPointEx(
@@ -344,8 +357,7 @@ def deepest_child_at(hwnd: int, x: int, y: int) -> tuple[int, int, int]:
             CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT)
         if not child or child == current:
             break
-        point = wintypes.POINT(cx, cy)
-        user32.ClientToScreen(wintypes.HWND(current), ctypes.byref(point))
+        point = wintypes.POINT(sx, sy)
         user32.ScreenToClient(wintypes.HWND(child), ctypes.byref(point))
         current, cx, cy = int(child), point.x, point.y
     return current, cx, cy
