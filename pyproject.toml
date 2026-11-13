@@ -1,8 +1,28 @@
 [project]
 name = "ghostdriver"
-version = "0.1.0"
-description = "Desktop automation MCP server"
+version = "0.2.0"
+description = "An MCP server that drives desktop applications without taking the desktop from the person using it"
+readme = "README.md"
 requires-python = ">=3.11"
+# SPDX expression (PEP 639), which is why the build needs setuptools 77+.
+# No "License ::" classifier: setuptools refuses one alongside an expression.
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Tony Stein" }]
+keywords = ["mcp", "desktop-automation", "ui-automation", "accessibility", "at-spi", "win32"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Desktop Environment",
+]
 dependencies = [
     "psutil>=5.9",
     "pywin32>=306; sys_platform == 'win32'",
@@ -26,12 +46,18 @@ dev = ["pytest>=8.0", "ruff>=0.16", "mypy>=2.1,<3"]
 # and 2.x are not interchangeable.
 server = ["mcp>=2.1,<3"]
 
+[project.urls]
+Homepage = "https://github.com/steiner385/ghostdriver"
+Source = "https://github.com/steiner385/ghostdriver"
+Issues = "https://github.com/steiner385/ghostdriver/issues"
+Changelog = "https://github.com/steiner385/ghostdriver/blob/main/CHANGELOG.md"
+
 [project.scripts]
 ghostdriver = "ghostdriver.cli:main"
 ghostdriver-mcp = "ghostdriver.mcp_server:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

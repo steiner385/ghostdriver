@@ -37,7 +37,25 @@ tool answers it per region.
 
 ## Install
 
+Python 3.11 or newer. Install a tagged release straight from GitHub; pip
+needs no GitHub account and no git:
+
 ```bash
+pip install "ghostdriver[server] @ https://github.com/steiner385/ghostdriver/archive/refs/tags/v0.2.0.zip"
+ghostdriver-mcp          # the MCP server, on stdio
+ghostdriver --help       # the reconnaissance CLI
+```
+
+Do this inside a virtual environment (`python -m venv .venv`) so the
+console scripts land somewhere you can name in a client config. On Windows,
+pip also pulls in `pywin32`, `comtypes` and `pywinauto`; on Linux, see the
+system packages below.
+
+### For contributors
+
+```bash
+git clone https://github.com/steiner385/ghostdriver
+cd ghostdriver
 pip install -e ".[dev,server]"
 pytest
 ```
