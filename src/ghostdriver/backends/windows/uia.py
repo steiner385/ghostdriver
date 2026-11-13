@@ -12,6 +12,7 @@ walker's.
 """
 
 from dataclasses import dataclass, field
+from typing import Any
 
 #: Pattern IDs occupy a contiguous block starting at 10000.
 PATTERN_IDS: dict[str, int] = {
@@ -104,7 +105,11 @@ def assess_uia(
         root = iuia.ElementFromHandle(hwnd)
         if not root:
             return UiaAssessment(available=False, error="no element for handle")
-        walker = iuia.RawViewWalker if view == "raw" else iuia.ControlViewWalker
+        # Any, on purpose: comtypes 1.5 annotates the modules it generates
+        # from the type library, and mypy then follows the walker property
+        # into a generic it cannot resolve. Only on Windows, and only once a
+        # test has generated the module -- so it passes on Linux regardless.
+        walker: Any = iuia.RawViewWalker if view == "raw" else iuia.ControlViewWalker
     except Exception as exc:
         return UiaAssessment(available=False, error=str(exc))
 
