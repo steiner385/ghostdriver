@@ -11,6 +11,8 @@ assesses a whole target to classify it; this one asks a narrow question
 about a single region and has to be cheap enough to ask repeatedly.
 """
 
+from typing import Any
+
 from ...model.window import WindowNode
 from ...surface import RegionEvidence
 
@@ -87,7 +89,8 @@ def region_evidence(node: WindowNode, *, view: str = "raw") -> RegionEvidence:
         root = iuia.ElementFromHandle(node.handle)
         if not root:
             return base
-        walker = iuia.RawViewWalker if view == "raw" else iuia.ControlViewWalker
+        # Any, on purpose: see the same line in `uia.assess_uia` (comtypes 1.5).
+        walker: Any = iuia.RawViewWalker if view == "raw" else iuia.ControlViewWalker
     except Exception:
         return base
 

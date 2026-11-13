@@ -166,6 +166,21 @@ class HumanDone(BaseModel):
     )
 
 
+def _own_version() -> str:
+    """The installed distribution's version, for the initialize handshake.
+
+    A client pinned to a release tag can then tell which release answered.
+    A bare source checkout run by `PYTHONPATH=src` has no distribution
+    metadata; it says so rather than claiming a release it may not be.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("ghostdriver")
+    except PackageNotFoundError:
+        return "unknown (not installed)"
+
+
 def build_server(sessions: SessionManager | None = None) -> Any:
     """Construct the server. Importable without starting anything."""
     import json
@@ -199,6 +214,7 @@ def build_server(sessions: SessionManager | None = None) -> Any:
     server = MCPServer(
         name="ghostdriver",
         instructions=SERVER_INSTRUCTIONS,
+        version=_own_version(),
     )
 
     # Every tool here reads. Declaring it lets a client decide for itself

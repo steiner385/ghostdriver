@@ -12,6 +12,7 @@ one handshake, one listing, one call.
 import asyncio
 import os
 import sys
+from importlib.metadata import version
 
 import pytest
 from mcp import ClientSession, StdioServerParameters
@@ -127,6 +128,9 @@ def test_a_client_can_initialize_list_and_call_over_stdio():
     initialized, tools, result = asyncio.run(_drive())
 
     assert initialized.server_info.name == "ghostdriver"
+    # A client pinned to a release can tell which one answered. The SDK's
+    # default is an empty string, which is what every client saw before 0.2.0.
+    assert initialized.server_info.version == version("ghostdriver")
     assert initialized.instructions, "the target-class briefing reaches clients"
 
     assert {t.name for t in tools.tools} == EXPECTED_TOOLS

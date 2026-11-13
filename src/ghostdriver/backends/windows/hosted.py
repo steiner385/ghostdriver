@@ -19,6 +19,7 @@ as "suspended or not resolvable", never as "there is nothing there".
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 #: Elements to walk before deciding. The answer is a majority, not a census,
 #: and the frame's own chrome sits at the top of the tree -- so a few hundred
@@ -81,7 +82,8 @@ def process_census(hwnd: int) -> dict[int, int]:
         root = iuia.ElementFromHandle(hwnd)
         if not root:
             return {}
-        walker = iuia.RawViewWalker
+        # Any, on purpose: see the same line in `uia.assess_uia` (comtypes 1.5).
+        walker: Any = iuia.RawViewWalker
     except Exception:
         return {}
 
