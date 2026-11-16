@@ -3,7 +3,7 @@
 Each entry says what changed for someone using the tool. The reasons are in
 `docs/DECISIONS.md`, by decision number.
 
-## 0.2.0 — 2026-11-13
+## 0.2.0 — 2026-11-16
 
 The first public release, under the MIT license. Install from the tag:
 
@@ -19,6 +19,9 @@ pip install "ghostdriver[server] @ https://github.com/steiner385/ghostdriver/arc
 - Console scripts are unchanged: `ghostdriver-mcp` (the MCP server, stdio)
   and `ghostdriver` (the CLI). The `server` extra brings the MCP SDK
   (`mcp>=2.1,<3`); the CLI and the library work without it.
+- The MCP `initialize` handshake reports the installed version
+  (`serverInfo.version`), so a client pinned to a tag can tell which release
+  answered. It was an empty string before.
 
 ### Windows backend
 
