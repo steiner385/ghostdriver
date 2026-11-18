@@ -13,14 +13,20 @@ written so a decision can be *disagreed with* later — which needs the reason,
 not just the outcome. New decisions go at the end of the current iteration,
 numbered, with the evidence.
 
-**Number a new decision from its issue.** The decision that came out of
-issue 34 is `### D#34.`; if the thing you decided has no issue, open one
-first. GitHub hands each issue number out once, so two people working at the
-same time cannot pick the same one.
+**Number a new decision from its issue in this repository.** The decision
+that came out of issue 12 is `### G#12.`; if the thing you decided has no
+issue, open one first. GitHub hands each issue number out once, so two people
+working at the same time cannot pick the same one.
 
-D1–D77 are the old scheme, numbered from a counter, and are frozen — several
-hundred references across the source tree point at them. `tests/test_structure.py`
-fails if anything extends that counter, so you do not have to remember this.
+Two older series are frozen, and `tests/test_structure.py` fails if either is
+extended, so you do not have to remember this:
+
+- **D1–D77**: numbered from a counter. Several hundred references across the
+  source tree point at them.
+- **D#N** (123 entries, up to D#258): numbered from the issues of the private
+  tracker this project was developed in until v0.2.0. A `#N` or `D#N` in the
+  log, the source or a commit message before v0.2.0 means *that* tracker's
+  issue N, not this repository's. Why there is a new prefix: G#1.
 
 Numbers now skip and arrive out of order, because issue numbers do. That is
 expected, and two tests deliberately assert that neither contiguity nor
