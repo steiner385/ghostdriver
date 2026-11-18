@@ -9335,3 +9335,44 @@ capture.
 **Evidence.** `tests/test_changed_blind_to_text.py` (`env: any`) checks
 each tool refuses before `_perform` is reached, and that named keys alone
 still build a `changed` condition. Issue #248; D77, D#128, D10.
+
+---
+
+## The public repository, from v0.2.0
+
+> Development moved to `steiner385/ghostdriver` after v0.2.0. Everything
+> above was decided in a private tracker, and its `#N` and `D#N` numbers are
+> that tracker's issues -- none of them can be opened from here. They stay
+> as they are: they are the identifiers the source tree cites.
+
+### G#1. Decisions are numbered from this repository's issues, as G#N
+
+**Decision.** A decision that comes out of issue N of this repository is
+headed `### G#N.`. The `D#N` series is frozen, like D1–D77 before it: its
+123 entries, up to D#258, and every reference to them stay as they are, and
+no entry is added to it. The rest of the D# rule carries over unchanged:
+open an issue first if the decision has none, one issue gives one decision,
+and a suffix (`G#12a`, `G#12b`) splits an issue that really did produce two.
+
+**Context.** D#N was numbered from the private tracker's issues, whose
+counter reached #264. This repository's issues start again at #1, so
+continuing D# from them would head the decision from issue 12 `D#12`, a
+number that already means something else, or reuse one that never
+happened to be taken. Either way a reader following `D#12` could not tell
+which tracker it meant. The reason for numbering by issue (the block above
+D#8: a shared counter collided three times in a day) is unchanged, so the
+scheme stays and only its namespace moves.
+
+**Not chosen.** Creating placeholder issues until this repository's counter
+passed #264, so that D# could carry on. That would mean about 265 empty
+issues on a public repository, opened in bulk against GitHub's rate limits.
+Also not chosen: a qualified `D#gd-N`, which says the same thing as `G#N`
+in more characters.
+
+**Evidence.** `tests/test_structure.py`:
+`test_no_new_decision_extends_the_private_tracker_series` pins the frozen
+series by count as well as by highest number, because a new `D#13` where
+none existed would pass any ceiling. It failed as intended on a test entry
+added for the purpose. `test_no_issue_numbered_decision_is_used_twice` now
+covers both prefixes, and spec §12's "Answered" rows may point at either.
+Issue #1.

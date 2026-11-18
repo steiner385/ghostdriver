@@ -414,15 +414,29 @@ DECISIONS = REPO / "docs" / "DECISIONS.md"
 #: because several hundred references across the source tree point at them.
 _SEQUENTIAL = re.compile(r"^### ([DR])(\d+)\.", re.M)
 
-#: The live series. `### D#34.` -- numbered from the issue the decision came
-#: out of, so GitHub allocates it and two branches cannot pick the same one.
-#: A trailing letter (`D#34a`) splits one issue that produced two decisions,
+#: The second series, now frozen too. `### D#34.` -- numbered from issue 34
+#: of the private tracker this project was developed in until v0.2.0. A
+#: trailing letter (`D#34a`) splits one issue that produced two decisions,
 #: and is part of the identifier: D#34a and D#34b are different, and a bare
 #: D#34 twice is still a duplicate.
 _BY_ISSUE = re.compile(r"^### D#(\d+[a-z]?)\.", re.M)
 
+#: The live series. `### G#1.` -- numbered from the issue *in this
+#: repository* the decision came out of, so GitHub allocates it and two
+#: branches cannot pick the same one. Same suffix rule as D#. A new prefix
+#: rather than D# continued, because this repository's issues restart at #1
+#: and D#12 already means the private tracker's issue 12 (G#1).
+_BY_PUBLIC_ISSUE = re.compile(r"^### G#(\d+[a-z]?)\.", re.M)
+
 #: Where the counter stopped. Nothing may extend it.
 LAST_SEQUENTIAL_DECISION = 77
+
+#: Where the private-tracker series stopped (G#1): how many D# entries it
+#: holds and the highest issue it reached. A count, not just a ceiling,
+#: because a new decision numbered from a low public issue -- D#13, say,
+#: where no D#13 exists -- slips under any ceiling.
+FROZEN_BY_ISSUE_COUNT = 123
+FROZEN_BY_ISSUE_HIGHEST = 258
 
 
 def _text():
@@ -449,25 +463,55 @@ def test_no_new_decision_extends_the_frozen_counter():
         "docs/DECISIONS.md has "
         + ", ".join(f"D{n}" for n in over)
         + f", but the sequential series is frozen at D{LAST_SEQUENTIAL_DECISION}. "
-        "Number a new decision from the issue it came out of -- `### D#34.` "
-        "for issue 34 -- and open an issue for it first if it has none."
+        "Number a new decision from the issue in this repository it came out "
+        "of -- `### G#12.` for issue 12 -- and open an issue for it first if "
+        "it has none."
     )
 
 
-def test_no_issue_numbered_decision_is_used_twice():
+def test_no_new_decision_extends_the_private_tracker_series():
+    """The D# series is frozen at the move to this repository (G#1).
+
+    Its numbers are the private tracker's issues. A new decision written as
+    D#N would name an issue nobody here can open -- or, for a low N, look
+    like the public issue N while meaning something else. The count catches
+    the low-N case that a ceiling alone would miss.
+    """
+    entries = _BY_ISSUE.findall(_text())
+    highest = max(int(n.rstrip("abcdefghijklmnopqrstuvwxyz")) for n in entries)
+    assert (len(entries), highest) == (FROZEN_BY_ISSUE_COUNT, FROZEN_BY_ISSUE_HIGHEST), (
+        f"docs/DECISIONS.md heads {len(entries)} D# entries up to D#{highest}; "
+        f"the series is frozen at {FROZEN_BY_ISSUE_COUNT} up to "
+        f"D#{FROZEN_BY_ISSUE_HIGHEST}. A new decision is numbered from this "
+        "repository's issue -- `### G#12.` for issue 12 (G#1). If an existing "
+        "D# entry was lost in a rebase, restore it rather than the constants."
+    )
+
+
+@pytest.mark.parametrize("prefix, pattern", [("D#", _BY_ISSUE), ("G#", _BY_PUBLIC_ISSUE)])
+def test_no_issue_numbered_decision_is_used_twice(prefix, pattern):
     """One issue, one decision. If an issue genuinely produced two, suffix
-    them (`D#34a`, `D#34b`) rather than heading two entries the same, or a
+    them (`G#12a`, `G#12b`) rather than heading two entries the same, or a
     reader following a reference lands on whichever comes first."""
-    numbers = _BY_ISSUE.findall(_text())
+    numbers = pattern.findall(_text())
     seen, repeated = set(), []
     for n in numbers:
         (repeated.append(n) if n in seen else None)
         seen.add(n)
     assert not repeated, (
-        "docs/DECISIONS.md heads two entries D#"
-        + ", D#".join(sorted(set(repeated)))
-        + ". One issue, one decision -- suffix them D#Na / D#Nb if an issue "
-        "really did produce two."
+        f"docs/DECISIONS.md heads two entries {prefix}"
+        + f", {prefix}".join(sorted(set(repeated)))
+        + f". One issue, one decision -- suffix them {prefix}Na / {prefix}Nb "
+        "if an issue really did produce two."
+    )
+
+
+def test_the_public_series_has_begun():
+    """G#1 is the decision that opened the series. With no G# entry, the
+    numbering rule this file enforces has nothing to enforce it on."""
+    assert _BY_PUBLIC_ISSUE.findall(_text()), (
+        "docs/DECISIONS.md heads no `### G#N.` entry; G#1 records why the "
+        "series exists."
     )
 
 
@@ -523,7 +567,7 @@ SPEC = (
 
 #: A spec section 12 row that no longer defers: `**Answered -- D#19**`, with the
 #: item struck through beside it. The em dash is the one the document uses.
-_ANSWERED_ROW = re.compile(r"\*\*Answered — (D#\d+[a-z]?)\*\*")
+_ANSWERED_ROW = re.compile(r"\*\*Answered — ([DG]#\d+[a-z]?)\*\*")
 
 
 def test_an_answered_deferred_row_points_at_a_decision_that_exists():
@@ -547,8 +591,10 @@ def test_an_answered_deferred_row_points_at_a_decision_that_exists():
         "is deferred again -- unlikely -- or the row format changed and this "
         "test now checks nothing. Fix the pattern, do not delete the test."
     )
-    written = set(_BY_ISSUE.findall(_text()))
-    dangling = sorted({p for p in pointers if p[len("D#") :] not in written})
+    text = _text()
+    written = {f"D#{n}" for n in _BY_ISSUE.findall(text)}
+    written |= {f"G#{n}" for n in _BY_PUBLIC_ISSUE.findall(text)}
+    dangling = sorted(set(pointers) - written)
     assert not dangling, (
         "spec section 12 marks a row answered by "
         + ", ".join(dangling)
