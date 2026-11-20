@@ -9376,3 +9376,67 @@ none existed would pass any ceiling. It failed as intended on a test entry
 added for the purpose. `test_no_issue_numbered_decision_is_used_twice` now
 covers both prefixes, and spec §12's "Answered" rows may point at either.
 Issue #1.
+
+### G#3. A posted click on a Chromium host on a monitor at another scale is refused
+
+**What was seen.** The desktop has a 125% primary (DISPLAY1) and a 100%
+DISPLAY2 to its right, and the server is DPI-unaware. On it, a posted click
+on New Outlook's Drafts folder opened Notes. It was re-measured on
+2026-11-06 with Outlook on DISPLAY2. Maximized, the Drafts rectangle was
+drawn where UIA said, and the centre converted correctly to the host's client
+point (172, 443). It was posted to the host itself, with no descent, and
+Outlook opened Notes, which contains y 443 x 1.25. The Inbox click before
+it missed by the same factor. Restored at (2400, 150) and at (1930, 430),
+the same path opened Drafts. An Edge `--app` window on that monitor showed
+the reverse: restored at (2400, 150) the rows were reported shifted and the
+click hit the next row, and at (1930, 430) it landed. The private
+tracker's issue #257 has the earlier half of these measurements (D#257).
+
+**Decision.** `click_posted` refuses before posting when the host is
+Chromium's (`FOREGROUND_TAKING_HOSTS`, the same match as D#249) and the
+host window's monitor is not at the system dpi. The refusal names the two
+dpi values and G#3, and the ladder reports it as the rung's `declined`.
+Four cases, two hosts, and both ways round: no rule (maximized or
+restored, an offset from the monitor's origin) fits them. And the miss is
+silent, because the click is delivered to the wrong item. So the click is
+refused rather than aimed by a guess (D33, D53).
+
+The dpi is read in a per-monitor-aware thread context, set for the call
+and restored. Asked from this process's own context, `GetDpiForMonitor`
+and `GetDpiForSystem` answer 96 whatever the hardware, so the
+virtualization would hide itself from the question.
+
+`physical_rect` is `null` for a rectangle on such a monitor. Logical x the
+primary's scale put Outlook's window at physical 2412 when it was at about
+1930. It is `null`, not absent, because absent already means "the display
+is unscaled, so it equals `rect`" (D73). A click result now carries
+`posted_point` (the window, its client point and the screen point), and
+the trace keeps it. The 10/29 trace could not show where its click was
+sent. The D#257 refusal no longer tells the caller to maximize the window,
+because maximized is the state that missed.
+
+**Not chosen.** A correction factor: none fitted both hosts. A hit test
+before the click: D#257 ruled it out, because it answers with whatever
+window is on top. In the maximized case it would also have said Drafts,
+because the rectangle was right. Running the conversion per-monitor-aware:
+the conversion was already right, and the error is in how the host reads
+the posted point. Nothing measured says posting from a per-monitor-aware
+context changes that.
+
+**Not covered.** A native (non-Chromium) host on such a monitor is
+unmeasured, not cleared. A desktop where every monitor runs at the same
+scale refuses nothing. The cause of the misread is still not known. Lifting
+the refusal needs a measurement on the mixed-dpi desktop, not a model. Also
+not checked on the mixed-dpi desktop: that the monitor and system dpi
+read there are 96 and 120. No machine with one was reachable from this
+session, which had a single-monitor Windows VM.
+
+**Evidence.** `tests/test_windows_dpi_guard.py` stands in the monitor's dpi
+and covers the measured case on both Chromium host classes, a monitor above
+the system scale, an equal or unknown dpi clicked, a native host passed,
+and the guard's new advice. It also asks Windows for real that the
+bindings answer, that monitor and system agree on the primary, and that the
+thread's awareness is restored (`env: windows`).
+`tests/test_posted_point_and_physical_rect.py` covers `physical_rect`'s
+null and `posted_point` with the backend stood in (`env: any`). Issue #3;
+D33, D53, D73, D#249, D#257.

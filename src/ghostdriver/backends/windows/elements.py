@@ -250,6 +250,13 @@ def _live(element: AccessibleElement):
            "surface, such as a web view, may hold it further down)" if seen >= MAX_ELEMENTS else ""))
 
 
+def _foreground_taking_host(host_class: str | None) -> bool:
+    """Whether the host is Chromium's: FOREGROUND_TAKING_HOSTS."""
+    import fnmatch
+
+    return any(fnmatch.fnmatchcase(host_class or "", p) for p in FOREGROUND_TAKING_HOSTS)
+
+
 def _refuse_a_foreground_taker(element: AccessibleElement) -> None:
     """Decline a pattern call that would take the person's foreground (#249).
 
@@ -258,12 +265,9 @@ def _refuse_a_foreground_taker(element: AccessibleElement) -> None:
     give the desktop back. A hidden-desktop session is exempt: a window
     there has no foreground to take from anyone.
     """
-    import fnmatch
-
     from .hidden_desktop import on_input_desktop
 
-    if (any(fnmatch.fnmatchcase(element.host_class or "", p) for p in FOREGROUND_TAKING_HOSTS)
-            and on_input_desktop()):
+    if _foreground_taking_host(element.host_class) and on_input_desktop():
         raise ElementError(
             f"not tried: a pattern call on a {element.host_class} host brings its "
             "window to the front, taking the desktop from the person using it "
@@ -351,7 +355,40 @@ def _refuse_a_rect_outside_its_window(element: AccessibleElement) -> None:
             f"window {window}, so a click aimed by it could land on something else "
             "(measured on a Chromium host on a monitor at another scale, #257). If "
             "it is cut off at the window's edge, scroll it into view; otherwise "
-            "keep the window maximized, which measured true")
+            "move the window to a monitor at the primary monitor's scale")
+
+
+def _refuse_a_chromium_host_on_another_scale(element: AccessibleElement) -> None:
+    """Decline a posted click on a Chromium host whose monitor is not at the
+    system scale (G#3).
+
+    Measured on Outlook (WebView2) on a 100% monitor beside a 125% primary,
+    with this server DPI-unaware: maximized, the Drafts rectangle was right
+    and so was the conversion into the host's client area, and the click
+    opened Notes. Outlook read the posted point 1.25x too far from the
+    origin. Restored at two positions on the same monitor, the same path
+    opened Drafts. An Edge window there did the opposite: one restored
+    position missed by a row, another landed. No rule fits all four, and
+    the miss is silent: the click is delivered, to the wrong item. So
+    this refuses rather than guesses (D33). On a monitor at the system scale
+    nothing is virtualized differently, and nothing is refused.
+
+    Chromium hosts only, because only they were measured missing. A native
+    host on such a monitor is unmeasured, not cleared.
+    """
+    if not _foreground_taking_host(element.host_class):
+        return
+    dpi = winapi.window_monitor_dpi(element.host_handle)
+    if dpi is None or dpi[0] == dpi[1]:
+        return
+    monitor, system = dpi
+    raise ElementError(
+        f"not tried: this Chromium host is on a monitor at {monitor} dpi and the "
+        f"system scale is {system} dpi. On such a monitor a posted click was "
+        "measured landing on the wrong item (Outlook's Drafts opened Notes) at some "
+        "window positions and on the right one at others, with nothing to tell them "
+        "apart beforehand (G#3). Move the window to a monitor "
+        "at the primary monitor's scale and find the element again")
 
 
 def click_posted(element: AccessibleElement, *, button: str = "left",
@@ -365,12 +402,14 @@ def click_posted(element: AccessibleElement, *, button: str = "left",
     as it would one from a person, at the place the element is drawn.
 
     A rectangle that lies outside its own window is refused rather than
-    clicked (#257).
+    clicked (#257), and so is a Chromium host on a monitor whose scale is
+    not the primary's (G#3).
     """
     left, top, right, bottom = element.rect
     if right <= left or bottom <= top:
         return False
     _refuse_a_rect_outside_its_window(element)
+    _refuse_a_chromium_host_on_another_scale(element)
     if at is None:
         point = wintypes.POINT((left + right) // 2, (top + bottom) // 2)
     else:

@@ -318,6 +318,64 @@ def display_scale() -> float:
     return round(mode.dmPelsWidth / logical, 3)
 
 
+user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+user32.MonitorFromWindow.restype = ctypes.c_void_p
+user32.MonitorFromRect.argtypes = [ctypes.POINTER(wintypes.RECT), wintypes.DWORD]
+user32.MonitorFromRect.restype = ctypes.c_void_p
+MONITOR_DEFAULTTONEAREST = 2
+MDT_EFFECTIVE_DPI = 0
+DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+
+
+def _monitor_dpi(monitor) -> tuple[int, int] | None:
+    """(the monitor's dpi, the system dpi), or None if Windows cannot say.
+
+    Both are read from a per-monitor-aware thread context, set for the call
+    and put back. In this DPI-unaware process's own context the answer is
+    96 for both, whatever the hardware: the virtualization this exists to
+    detect also hides itself from the question. The monitor is found by the
+    caller first, in the caller's own frame, because a rectangle's monitor
+    must be looked up in the frame the rectangle is in.
+    """
+    if not monitor:
+        return None
+    try:
+        shcore = ctypes.WinDLL("shcore")
+        set_context = user32.SetThreadDpiAwarenessContext
+        get_system = user32.GetDpiForSystem
+        get_monitor = shcore.GetDpiForMonitor
+    except (OSError, AttributeError):
+        return None  # before Windows 10 1607: no per-thread context to ask from
+    set_context.argtypes = [ctypes.c_void_p]
+    set_context.restype = ctypes.c_void_p
+    get_system.restype = ctypes.c_uint
+    get_monitor.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                            ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint)]
+    get_monitor.restype = ctypes.c_long
+    previous = set_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+    if not previous:
+        return None
+    try:
+        x, y = ctypes.c_uint(), ctypes.c_uint()
+        if get_monitor(monitor, MDT_EFFECTIVE_DPI, ctypes.byref(x), ctypes.byref(y)) != 0:
+            return None
+        return x.value, get_system()
+    finally:
+        set_context(previous)
+
+
+def window_monitor_dpi(hwnd: int) -> tuple[int, int] | None:
+    """(dpi of the monitor `hwnd` is mostly on, system dpi), or None (G#3)."""
+    return _monitor_dpi(user32.MonitorFromWindow(wintypes.HWND(hwnd),
+                                                 MONITOR_DEFAULTTONEAREST))
+
+
+def rect_monitor_dpi(rect: tuple[int, int, int, int]) -> tuple[int, int] | None:
+    """(dpi of the monitor `rect` is mostly on, system dpi), or None (G#3)."""
+    r = wintypes.RECT(*rect)
+    return _monitor_dpi(user32.MonitorFromRect(ctypes.byref(r), MONITOR_DEFAULTTONEAREST))
+
+
 #: Asked of a `#32768` window: the HMENU it is showing.
 MN_GETHMENU = 0x01E1
 #: Told to a `#32768` window: highlight item N, as the keyboard would. Not
@@ -464,12 +522,21 @@ def bring_foreground(hwnd: int) -> bool:
     return bool(now) and root_window(now) == root_window(hwnd)
 
 
-def to_physical_rect(rect: tuple[int, int, int, int]) -> dict:
+def to_physical_rect(rect: tuple[int, int, int, int]) -> dict | None:
     """A logical-frame rectangle in physical pixels: what a DPI-aware
     screenshot tool reports (D73). The scale is the display's, and a
     DPI-unaware process's logical origin already matches the physical one
     at the primary monitor's top-left, so the ratio is the whole
-    conversion."""
+    conversion.
+
+    None on a monitor whose scale is not the system's (G#3). There the
+    ratio is wrong: Outlook's window at logical left 1930 on a 100% monitor
+    beside a 125% primary was reported at physical 2412, and it was not
+    there. No conversion was measured to fit that monitor, so none is
+    offered."""
+    dpi = rect_monitor_dpi(rect)
+    if dpi is not None and dpi[0] != dpi[1]:
+        return None
     scale = display_scale()
     left, top, right, bottom = rect
     return {"left": round(left * scale), "top": round(top * scale),

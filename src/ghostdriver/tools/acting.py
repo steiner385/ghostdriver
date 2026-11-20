@@ -236,14 +236,14 @@ class _ActingCore(_DenyCore, _ExpectCore):
         if isinstance(node, AccessibleElement):
             host = node.host_handle
             left, top, right, bottom = node.rect
+            screen = ((left + right) // 2, (top + bottom) // 2) if point is None else (
+                left + point[0], top + point[1])
 
             def read():
-                p = ((left + right) // 2, (top + bottom) // 2) if point is None else (
-                    left + point[0], top + point[1])
-                cx, cy = winapi.screen_to_client(host, p)
+                cx, cy = winapi.screen_to_client(host, screen)
                 return deepest(host, cx, cy)
         else:
-            host = node.handle
+            host, screen = node.handle, None
 
             def read():
                 cx, cy = winapi.client_centre(host) if point is None else point
@@ -253,13 +253,19 @@ class _ActingCore(_DenyCore, _ExpectCore):
             target, tx, ty = prepared.session.run(read)
         except Exception:
             return {}
+        # Where a posted click is aimed, always: the trace keeps it, and a
+        # click that opened the wrong item can be read back to the point it
+        # was sent to. The 10/29 Outlook miss could not be, for want of it (G#3).
+        posted = {"posted_point": {
+            "handle_ephemeral": f"0x{target:08X}", "client": {"x": tx, "y": ty},
+            **({"screen": {"x": screen[0], "y": screen[1]}} if screen else {})}}
         if target == host:
             # No child window under the point. On an owner-drawn grid that is
             # the normal, correct case (the rows are painted), so this is not
             # flagged here -- hit_targets is where a caller checks whether a
             # container has addressable children (D67).
-            return {}
-        return {"delivered_to": {
+            return posted
+        return {**posted, "delivered_to": {
             "class": winapi.class_name(target), "handle_ephemeral": f"0x{target:08X}",
             "at": {"x": tx, "y": ty},
             "note": "the innermost window under the point; a click posted to "

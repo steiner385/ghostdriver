@@ -80,13 +80,18 @@ def _accessible(element: AccessibleElement) -> dict:
 
 def _physical(rect) -> dict:
     """`physical_rect` for a logical-frame rect, only when the display is
-    scaled -- at 100% it equals `rect` and would be noise (D73)."""
+    scaled -- at 100% it equals `rect` and would be noise (D73). Null on a
+    monitor whose scale is not the system's, where no conversion is known
+    (G#3): absent would read as "equals `rect`", which is not known either."""
     from ..backends import current
 
     try:
-        if current().winapi.display_scale() == 1.0:
+        physical = current().winapi.to_physical_rect(rect)
+        if physical is None:
+            return {"physical_rect": None}
+        if physical["scale"] == 1.0:
             return {}
-        return {"physical_rect": current().winapi.to_physical_rect(rect)}
+        return {"physical_rect": physical}
     except Exception:
         return {}
 
