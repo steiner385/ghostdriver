@@ -3,6 +3,21 @@
 Each entry says what changed for someone using the tool. The reasons are in
 `docs/DECISIONS.md`, by decision number.
 
+## Unreleased
+
+### Windows backend
+
+- A posted click on a Chromium host (Edge, Chrome, Electron, WebView2 such
+  as New Outlook) is refused when the window is on a monitor whose scale is
+  not the system's. It was measured landing on the wrong item there (G#3).
+- `physical_rect` is `null`, not a wrong number, for a rectangle on such a
+  monitor (G#3).
+
+### Tools
+
+- `click` results, and so the trace, carry `posted_point`: the window and
+  client point a posted click is aimed at, and its screen point (G#3).
+
 ## 0.2.0 — 2026-11-16
 
 The first public release, under the MIT license. Install from the tag:
